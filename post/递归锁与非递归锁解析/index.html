@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>为什么Go拒绝递归锁 - Forz</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="Mutex可以分为递归锁（recursive mutex）和非递归锁（non-recursive mutex）。 递归锁也叫可重入锁（reentr" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="http://localhost:1313/forz/post/%E9%80%92%E5%BD%92%E9%94%81%E4%B8%8E%E9%9D%9E%E9%80%92%E5%BD%92%E9%94%81%E8%A7%A3%E6%9E%90/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/forz/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/forz/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/forz/favicon-16x16.png">
+<link rel="manifest" href="/forz/manifest.json">
+<link rel="mask-icon" href="/forz/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link href="/forz/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="为什么Go拒绝递归锁" />
+<meta property="og:description" content="Mutex可以分为递归锁（recursive mutex）和非递归锁（non-recursive mutex）。 递归锁也叫可重入锁（reentr" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="http://localhost:1313/forz/post/%E9%80%92%E5%BD%92%E9%94%81%E4%B8%8E%E9%9D%9E%E9%80%92%E5%BD%92%E9%94%81%E8%A7%A3%E6%9E%90/" />
+<meta property="article:published_time" content="2019-01-25T13:18:41&#43;00:00"/>
+<meta property="article:modified_time" content="2019-01-25T13:18:41&#43;00:00"/>
+
+<meta itemprop="name" content="为什么Go拒绝递归锁">
+<meta itemprop="description" content="Mutex可以分为递归锁（recursive mutex）和非递归锁（non-recursive mutex）。 递归锁也叫可重入锁（reentr">
+
+
+<meta itemprop="datePublished" content="2019-01-25T13:18:41&#43;00:00" />
+<meta itemprop="dateModified" content="2019-01-25T13:18:41&#43;00:00" />
+<meta itemprop="wordCount" content="1381">
+
+
+
+<meta itemprop="keywords" content="Go," />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="为什么Go拒绝递归锁"/>
+<meta name="twitter:description" content="Mutex可以分为递归锁（recursive mutex）和非递归锁（non-recursive mutex）。 递归锁也叫可重入锁（reentr"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/forz/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/forz/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/forz/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/forz/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/forz/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/forz/" class="logo">Forz Blog</a>
+</div>
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/forz/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/categories/">Categories</a>
+      </li>
+  </ul>
+</nav>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">为什么Go拒绝递归锁</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2019-01-25 </span>
+        <div class="post-category">
+            <a href="/forz/categories/go/"> Go </a>
+            </div>
+          <span class="more-meta"> 约 1381 字 </span>
+          <span class="more-meta"> 预计阅读 3 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    
+  </div>
+</div>
+    <div class="post-content">
+      <p>Mutex可以分为递归锁（recursive mutex）和非递归锁（non-recursive mutex）。 递归锁也叫可重入锁（reentrant mutex），非递归锁也叫不可重入锁（non-reentrant mutex）。</p>
+
+<p>二者唯一的区别是：</p>
+
+<ol>
+<li>同一个线程可以多次获取同一个递归锁，不会产生死锁。</li>
+<li>如果一个线程多次获取同一个非递归锁，则会产生死锁。</li>
+</ol>
+
+<p>Windows下的Mutex和Critical Section是可递归的。 </p>
+
+<p>Linux下的pthread_mutex_t锁是默认是非递归的。可以通过设置PTHREAD_MUTEX_RECURSIVE属性，将pthread_mutex_t锁设置为递归锁。</p>
+
+<p>递归（也称为可重入）互斥体是一个坏主意。使用互斥锁的根本原因是互斥锁保护不变量，也许是内部不变量，如“p.Prev.Next == p对于环的所有元素”，或者可能是外部不变量比如&rdquo;我的局部变量x等于p.Prev。&rdquo;锁定互斥锁断言&rdquo;我需要不变量来保持&rdquo;或许&rsquo;`我会暂时打破那些不变量。&rdquo;释放互斥锁断言&rdquo;我不再依赖于那些不变量&rdquo;和&rdquo;如果我打破它们，我已经恢复了它们。&rdquo;</p>
+
+<p>了解互斥锁保护不变量对于确定需要互斥锁的位置以及不需要互斥锁的位置至关重要。例如，使用原子递增和递减指令更新的共享计数器是否需要互斥锁？这取决于不变量。如果唯一的不变量是计数器具有值i  -  d在i递增并且d递减之后，那么指令的速度就可以确保不变量;不需要互斥锁。但是，如果计数器必须与其他一些数据结构同步（也许它会计算列表中元素的数量），那么单个操作的原子性是不够的。其他东西，通常是互斥体，必须保护更高级别的不变量。这就是为什么Go中的map上的操作不能保证是原子的：它会在典型情况下增加费用而没有好处。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">     <span class="kd">func</span> <span class="nf">F</span><span class="p">()</span> <span class="p">{</span>
+             <span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+             <span class="o">...</span> <span class="nx">do</span> <span class="nx">some</span> <span class="nx">stuff</span> <span class="o">...</span>
+             <span class="nf">G</span><span class="p">()</span>
+             <span class="o">...</span> <span class="nx">do</span> <span class="nx">some</span> <span class="nx">more</span> <span class="nx">stuff</span> <span class="o">...</span>
+             <span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+     <span class="p">}</span>
+
+     <span class="kd">func</span> <span class="nf">G</span><span class="p">()</span> <span class="p">{</span>
+             <span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+             <span class="o">...</span> <span class="nx">do</span> <span class="nx">some</span> <span class="nx">stuff</span> <span class="o">...</span>
+             <span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+     <span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>通常，当对mu.Lock的调用返回时，可以假设受保护的不变量持有，直到它调用mu.Unlock。</p>
+
+<p>递归互斥实现会使G的mu.Lock和mu.Unlock调用从内部调用时为no-ops对于当前线程已经拥有mu的任何其他上下文。如果mu使用了这样的实现，则当mu.Lock在G内部返回时，不变量可能持有也可能不持有。它取决于F在调用G之前所做的事情。也许F甚至没有意识到G需要那些不变量并且已经破坏它们（完全可能，特别是在复杂的代码中）。</p>
+
+<p>递归互斥锁不保护不变量。互斥锁只有一个作业，而递归互斥体不会这样做。</p>
+
+<p>它们有更简单的问题，就像你写的那样</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">     <span class="kd">func</span> <span class="nf">F</span><span class="p">()</span> <span class="p">{</span>
+             <span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+             <span class="o">...</span> <span class="nx">do</span> <span class="nx">some</span> <span class="nx">stuff</span>
+     <span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>你永远不会在单线程测试中发现错误。但这只是一个更大问题的特殊情况，即它们根本不保证互斥锁要保护的不变量。</p>
+
+<p>如果您需要实现可以使用或不使用互斥锁调用的功能，最明确的做法是编写两个版本。例如，代替上面的G，你可以写：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">     <span class="c1">// To be called with mu already held.
+</span><span class="c1"></span>     <span class="c1">// Caller must be careful to ensure that ...
+</span><span class="c1"></span>     <span class="kd">func</span> <span class="nf">g</span><span class="p">()</span> <span class="p">{</span>
+             <span class="o">...</span> <span class="nx">do</span> <span class="nx">some</span> <span class="nx">stuff</span> <span class="o">...</span>
+     <span class="p">}</span>
+
+     <span class="kd">func</span> <span class="nf">G</span><span class="p">()</span> <span class="p">{</span>
+             <span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+             <span class="nf">g</span><span class="p">()</span>
+             <span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+     <span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>或者如果它们都未被导出，那么g和gLocked。</p>
+
+<p>我相信我们最终会需要TryLock;随时给我们发一个CL。锁定超时似乎不太重要，但如果有一个干净的实现（我不知道一个）那么也许它会没事。请不要发送实现递归互斥锁的CL。</p>
+
+<p>递归互斥体只是一个错误，仅此而已.</p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2019-01-25
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/forz/tags/go/">Go</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/forz/post/go%E4%B8%AD%E6%96%87%E4%BB%B6%E5%8F%8A%E6%96%87%E4%BB%B6%E5%A4%B9%E7%9B%B8%E5%85%B3%E6%93%8D%E4%BD%9C/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Go中文件及文件夹相关操作</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/forz/post/sync-atomic%E5%8C%85%E8%A7%A3%E6%9E%90/">
+            <span class="next-text nav-default">sync/atomic包解析</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+      <a href="forzfuyao@email.com" class="iconfont icon-email" title="email"></a>
+  <a href="http://localhost:1313/forz/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/forz/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

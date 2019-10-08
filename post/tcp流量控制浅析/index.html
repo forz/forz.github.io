@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>TCP流量控制浅析 - Forz</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="MTU与MSS与SMSS MTU：maximum transmission unit，最大传输单元，由硬件规定，如以太网的MTU为1500字节。 MSS：maximum segment" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="http://localhost:1313/forz/post/tcp%E6%B5%81%E9%87%8F%E6%8E%A7%E5%88%B6%E6%B5%85%E6%9E%90/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/forz/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/forz/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/forz/favicon-16x16.png">
+<link rel="manifest" href="/forz/manifest.json">
+<link rel="mask-icon" href="/forz/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link href="/forz/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="TCP流量控制浅析" />
+<meta property="og:description" content="MTU与MSS与SMSS MTU：maximum transmission unit，最大传输单元，由硬件规定，如以太网的MTU为1500字节。 MSS：maximum segment" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="http://localhost:1313/forz/post/tcp%E6%B5%81%E9%87%8F%E6%8E%A7%E5%88%B6%E6%B5%85%E6%9E%90/" />
+<meta property="article:published_time" content="2017-06-25T20:07:40&#43;00:00"/>
+<meta property="article:modified_time" content="2017-06-25T20:07:40&#43;00:00"/>
+
+<meta itemprop="name" content="TCP流量控制浅析">
+<meta itemprop="description" content="MTU与MSS与SMSS MTU：maximum transmission unit，最大传输单元，由硬件规定，如以太网的MTU为1500字节。 MSS：maximum segment">
+
+
+<meta itemprop="datePublished" content="2017-06-25T20:07:40&#43;00:00" />
+<meta itemprop="dateModified" content="2017-06-25T20:07:40&#43;00:00" />
+<meta itemprop="wordCount" content="6193">
+
+
+
+<meta itemprop="keywords" content="" />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="TCP流量控制浅析"/>
+<meta name="twitter:description" content="MTU与MSS与SMSS MTU：maximum transmission unit，最大传输单元，由硬件规定，如以太网的MTU为1500字节。 MSS：maximum segment"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/forz/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/forz/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/forz/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/forz/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/forz/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/forz/" class="logo">Forz Blog</a>
+</div>
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/forz/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/categories/">Categories</a>
+      </li>
+  </ul>
+</nav>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">TCP流量控制浅析</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2017-06-25 </span>
+        <div class="post-category">
+            <a href="/forz/categories/%E7%BD%91%E7%BB%9C/"> 网络 </a>
+            </div>
+          <span class="more-meta"> 约 6193 字 </span>
+          <span class="more-meta"> 预计阅读 13 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+<ul>
+<li><a href="#mtu与mss与smss">MTU与MSS与SMSS</a></li>
+<li><a href="#延时确认">延时确认</a></li>
+<li><a href="#nagle算法">Nagle算法</a></li>
+<li><a href="#禁用nagle">禁用Nagle</a>
+<ul>
+<li><a href="#tcp-nodelay-选项">TCP_NODELAY 选项</a></li>
+</ul></li>
+<li><a href="#延时ack与nagle结合导致死锁">延时ACK与Nagle结合导致死锁</a></li>
+<li><a href="#cork算法">CORK算法</a>
+<ul>
+<li><a href="#tcp-cork-选项">TCP_CORK 选项</a></li>
+</ul></li>
+<li><a href="#nagle算法与cork算法区别">Nagle算法与CORK算法区别</a></li>
+<li><a href="#糊涂窗口综合征">糊涂窗口综合征</a></li>
+<li><a href="#发送端求解-nagle">发送端求解（nagle）</a></li>
+<li><a href="#接收端求解-delay-ack">接收端求解（delay-ack）</a></li>
+<li><a href="#滑动窗口">滑动窗口</a></li>
+<li><a href="#ack再认识">ACK再认识</a></li>
+<li><a href="#滑动窗口实现面向流的可靠性">滑动窗口实现面向流的可靠性</a></li>
+<li><a href="#滑动窗口的流控特性">滑动窗口的流控特性</a></li>
+<li><a href="#滑动窗口原理">滑动窗口原理</a>
+<ul>
+<li><a href="#发送方">发送方</a></li>
+</ul></li>
+<li><a href="#接收方">接收方</a></li>
+<li><a href="#零窗口引起的死锁">零窗口引起的死锁</a></li>
+<li><a href="#与窗口管理相关的攻击">与窗口管理相关的攻击</a></li>
+</ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      
+
+<h1 id="mtu与mss与smss">MTU与MSS与SMSS</h1>
+
+<ol>
+<li><p>MTU：maximum transmission unit，最大传输单元，由硬件规定，如以太网的MTU为1500字节。</p></li>
+
+<li><p>MSS：maximum segment size，最大分节大小，为TCP数据包每次传输的最大数据分段大小，一般由发送端向对端TCP通知对端在每个分节中能发送的最大TCP数据。</p>
+
+<p>MSS值为MTU值减去IPv4 Header（20 Byte）和TCP header（20 Byte）得到。</p></li>
+
+<li><p>SMSS：一般情况下为接收方的MSS和路径MTU两者中较小值。</p></li>
+</ol>
+
+<h1 id="延时确认">延时确认</h1>
+
+<p>在许多情况下，TCP并不对每个到来的数据包都返回ACK，利用TCP的累积ACK字段就能实现该功能。累计确认可以允许TCP延迟一段时间发送ACK，以便将ACK和相同方向上需要传的数据结合发送。这种捎带传输的方法经常用于批量数据传输。显然，TCP不能任意时长地延迟ACK；否则对方会误认为数据丢失而出现不必要的重传。TCP实践中时延最大取200ms。</p>
+
+<p>采用延时ACK的方法会减少ACK传输数目，可以一定程度地减轻网络负载。对于批量数据传输通常为2：1的比例，即积累2个ACK统一发送。基于不同的主机操作系统，最大时延可以动态配置。</p>
+
+<h1 id="nagle算法">Nagle算法</h1>
+
+<p>TCP/IP协议中，无论发送多少数据，总是要在数据前面加上协议头，同时，对方接收到数据，也需要发送ACK表示确认。为了尽可能的利用网络带宽，TCP总是希望尽可能的发送足够大的数据。（一个连接会设置SMSS参数，因此，TCP/IP希望每次都能够以SMSS尺寸的数据块来发送数据）。Nagle算法就是为了尽可能发送大块数据，避免网络中充斥着许多小数据块。</p>
+
+<p>Nagle算法的基本定义是任意时刻，最多只能有一个未被确认的小段。 所谓“小段”，指的是小于MSS尺寸的数据块，所谓“未被确认”，是指一个数据块发送出去后，没有收到对方发送的ACK确认该数据已收到。</p>
+
+<ol>
+<li><p>如果包长度达到MSS，则允许发送；</p></li>
+
+<li><p>如果该包含有FIN，则允许发送；</p></li>
+
+<li><p>设置了TCP_NODELAY选项（意在禁止nagle），则允许发送；</p></li>
+
+<li><p>未设置TCP_CORK选项时，若所有发出去的小数据包（包长度小于SMSS）均被确认，则允许发送；</p></li>
+
+<li><p>上述条件都未满足，但发生了超时（一般设置延迟ACK，一般为200ms），则立即发送。</p></li>
+</ol>
+
+<p>通常我们比较关注的是情况(1)和(5)。</p>
+
+<p>Nagle算法只允许一个未被ACK的包存在于网络，它并不管包的大小，因此它事实上就是一个扩展的停-等协议，只不过它是基于包停-等的，而不是基于字节停-等的。Nagle算法完全由TCP协议的ACK机制决定，这会带来一些问题，比如如果对端ACK回复很快的话，Nagle事实上不会拼接太多的数据包，虽然避免了网络拥塞，网络总体的利用率依然很低。</p>
+
+<p>Nagle算法是silly window syndrome(SWS)预防算法的一个半集，预防SWS不止nagle算法一个途径。SWS算法预防发送少量的数据，Nagle算法是其在发送方的实现，而接收方要做的事是不要通告缓冲空间的很小增长，不通知小窗口，除非缓冲区空间有显著的增长。这里显著的增长定义为完全大小的段（MSS）或增长到大于最大窗口的一半。</p>
+
+<h1 id="禁用nagle">禁用Nagle</h1>
+
+<h2 id="tcp-nodelay-选项">TCP_NODELAY 选项</h2>
+
+<p>默认情况下，发送数据采用Nagle 算法。这样虽然提高了网络吞吐量，但是实时性却降低了，在一些交互性很强的应用程序来说是不允许的，使用TCP_NODELAY选项可以禁止Negale 算法。</p>
+
+<p>此时，应用程序向内核递交的每个数据包都会立即发送出去。需要注意的是，虽然禁止了Negale 算法，但网络的传输仍然受到TCP确认延迟机制的影响。</p>
+
+<h1 id="延时ack与nagle结合导致死锁">延时ACK与Nagle结合导致死锁</h1>
+
+<p>延时ACK与Nagle算法的结合导致了某种程度的死锁（两端互相等待对方做出行动）。。Nagle算法要求收到前一个分组的ACK之前，不能发送其它的小数据包。所以，尽管发送端已经将数据准备好，放在了缓存区里面，但是由于没有收到前一个分组的ACK，缓冲区里面的分组的发送将被延迟，直到等到上一个分组的ACK到达。</p>
+
+<p>这种死锁并不是永久的，在延时ACK计时器超时后死锁会解除。客户端即使仍然没有要发送的数据也无需再等待，而可以只发送ACK给服务器。然而在死锁期间整个传输连接处于空闲状态，使性能变差。</p>
+
+<h1 id="cork算法">CORK算法</h1>
+
+<h2 id="tcp-cork-选项">TCP_CORK 选项</h2>
+
+<p>所谓的CORK就是塞子的意思，形象地理解就是用CORK将连接塞住，使得数据先不发出去，等到拔去塞子后再发出去。设置该选项后，内核会尽力把小数据包拼接成一个大的数据包（一个MTU）再发送出去，当然若一定时间后（一般为200ms，该值尚待确认），内核仍然没有组合成一个MTU时也必须发送现有的数据（不可能让数据一直等待吧）。</p>
+
+<p>然而，TCP_CORK的实现可能并不像你想象的那么完美，CORK并不会将连接完全塞住。内核其实并不知道应用层到底什么时候会发送第二批数据用于和第一批数据拼接以达到MTU的大小，因此内核会给出一个时间限制，在该时间内没有拼接成一个大包（努力接近MTU）的话，内核就会无条件发送。也就是说若应用层程序发送小包数据的间隔不够短时，TCP_CORK就没有一点作用，反而失去了数据的实时性（每个小包数据都会延时一定时间再发送）。</p>
+
+<h1 id="nagle算法与cork算法区别">Nagle算法与CORK算法区别</h1>
+
+<p>Nagle算法的初衷：避免发送大量的小包，防止小包泛滥于网络，理想情况下，对于一个TCP连接而言，网络上每次只能一个小包存在。它更多的是端到端意义上的优化。</p>
+
+<p>CORK算法的初衷：提高网络利用率，理想情况下，完全避免发送小包，仅仅发送满包以及不得不发的小包。</p>
+
+<p>很多人都把Nagle算法的目的理解为“提高网络利用率”，事实上，Nagle算法所谓的“提高网络利用率”只是它的一个副作用(Side effect…)，Nagle算法的主旨在于“避免发送‘大量’的小包”。Nagle算法并没有阻止发送小包，它只是阻止了发送大量的小包！诚然，发送大量的小包是降低了网络利用率，但是，发送少量必须发送的小包也是对网络利用率的降低，想彻底提高网络利用率，为嘛不直接阻止小包发送呢？不管是大量小包还是少量小包，甚至一个小包也不让发送，这才是提高网络利用率的正解！是的，TCP_CORK就是做这个的。所以有人说，CORK选项是Nagle的增强，而实际上，它们是完全不同的两回事，初衷不同。</p>
+
+<p>Nagle算法和CORK算法着眼点不一样，Nagle算法主要避免网络因为太多的小包（协议头的比例非常之大）而拥塞，而CORK算法则是为了提高网络的利用率，使得总体上协议头占用的比例尽可能的小。如此看来这二者在避免发送小包上是一致的，在用户控制的层面上，Nagle算法完全不受用户socket的控制，你只能简单的设置TCP_NODELAY而禁用它，CORK算法同样也是通过设置或者清除TCP_CORK使能或者禁用之，然而Nagle算法关心的是网络拥塞问题，只要所有的ACK回来则发包，而对于CORK算法，即使包的收发间隔非常短，你也可以通过使用CORK算法将这些要发送的内容拼接在一个包内，如果此时用Nagle算法的话，则可能做不到这一点。</p>
+
+<h1 id="糊涂窗口综合征">糊涂窗口综合征</h1>
+
+<p>当发送端应用进程产生数据很慢、或接收端应用进程处理接收缓冲区数据很慢，或二者兼而有之；就会使应用进程间传送的报文段很小，特别是有效载荷很小。 极端情况下，有效载荷可能只有1个字节；而传输开销有40字节(20字节的IP头+20字节的TCP头) 这种现象就叫糊涂窗口综合征。</p>
+
+<h1 id="发送端求解-nagle">发送端求解（nagle）</h1>
+
+<p>如果发送端为产生数据很慢的应用程序服务(典型的有telnet应用)，例如，一次产生一个字节。这个应用程序一次将一个字节的数据写入发送端的TCP的缓存。如果发送端的TCP没有特定的指令，它就产生只包括一个字节数据的报文段。结果有很多41字节的IP数据报就在互连网中传来传去。</p>
+
+<p>解决的方法是防止发送端的TCP逐个字节地发送数据。必须强迫发送端的TCP收集数据，然后用一个更大的数据块来发送。发送端的TCP要等待多长时间呢？如果它等待过长，它就会使整个的过程产生较长的时延。如果它的等待时间不够长，它就可能发送较小的报文段，Nagle算法选择的等待时间是一个RTT,即下个ACK来到时。</p>
+
+<h1 id="接收端求解-delay-ack">接收端求解（delay-ack）</h1>
+
+<p>接收端的TCP可能产生糊涂窗口综合症，如果它为消耗数据很慢的应用程序服务，例如，一次消耗一个字节。假定发送应用程序产生了1000字节的数据块，但接收应用程序每次只吸收1字节的数据。再假定接收端的TCP的输入缓存为4000字节。发送端先发送第一个4000字节的数据。接收端将它存储在其缓存中。现在缓存满了。它通知窗口大小为零，这表示发送端必须停止发送数据。接收应用程序从接收端的TCP的输入缓存中读取第一个字节的数据。在入缓存中现在有了1字节的空间。接收端的TCP宣布其窗口大小为1字节，这表示正渴望等待发送数据的发送端的TCP会把这个宣布当作一个好消息，并发送只包括一个字节数据的报文段。这样的过程一直继续下去。一个字节的数据被消耗掉，然后发送只包含一个字节数据的报文段。</p>
+
+<p>有两种建议的解决方法：</p>
+
+<ol>
+<li><p>Clark解决方法</p>
+
+<p>Clark解决方法是只要有数据到达就发送确认，但宣布的窗口大小为零，直到或者缓存空间已能放入具有最大长度的报文段，或者缓存空间的一半已经空了。</p></li>
+
+<li><p>延迟确认ACK</p>
+
+<p>这表示当一个报文段到达时并不立即发送确认。接收端在确认收到的报文段之前一直等待，直到入缓存有足够的空间为止。延迟的确认防止了发送端的TCP滑动其窗口。当发送端的TCP发送完其数据后，它就停下来了。这样就防止了这种症状。迟延的确认还有另一个优点：它减少了通信量。接收端不需要确认每一个报文段。但它也有一个缺点，就是迟延的确认有可能迫使发送端重传其未被确认的报文段。可以用协议来平衡这个优点和缺点，例如现在定义了确认的延迟不能超过500毫秒。</p></li>
+</ol>
+
+<h1 id="滑动窗口">滑动窗口</h1>
+
+<p>TCP的滑动窗口主要有两个作用，一是提供TCP的可靠性，二是提供TCP的流控特性。同时滑动窗口机制还体现了TCP面向字节流的设计思路。</p>
+
+<p>TCP是双工的协议，会话的双方都可以同时接收、发送数据。TCP会话的双方都各自维护一个“发送窗口”和一个“接收窗口”。其中各自的“接收窗口”大小取决于应用、系统、硬件的限制（TCP传输速率不能大于应用的数据处理速率）。各自的“发送窗口”则要求取决于对端通告的“接收窗口”，要求相同。</p>
+
+<h1 id="ack再认识">ACK再认识</h1>
+
+<p>ack通常被理解为收到数据后给出的一个确认ACK，ACK包含两个非常重要的信息：</p>
+
+<ol>
+<li><p>期望接收到的下一字节的序号n，该n代表接收方已经接收到了前n-1字节数据，此时如果接收方收到第n+1字节数据而不是第n字节数据，接收方是不会发送序号为n+2的ACK的。举个例子，假如接收端收到1-1024字节，它会发送一个确认号为1025的ACK,但是接下来收到的是2049-3072，它是不会发送确认号为3072的ACK,而依旧发送1025的ACK。</p></li>
+
+<li><p>当前的窗口大小m，如此发送方在接收到ACK包含的这两个数据后就可以计算出还可以发送多少字节的数据给对方，假定当前发送方已发送到第x字节，则可以发送的字节数就是y=m-(x-n).这就是滑动窗口控制流量的基本原理</p></li>
+</ol>
+
+<h1 id="滑动窗口实现面向流的可靠性">滑动窗口实现面向流的可靠性</h1>
+
+<p>最基本的传输可靠性来源于“确认重传”机制。</p>
+
+<p>TCP的滑动窗口的可靠性也是建立在“确认重传”基础上的。</p>
+
+<ol>
+<li><p>发送窗口只有收到对端对于本段发送窗口内字节的ACK确认，才会移动发送窗口的左边界。</p></li>
+
+<li><p>接收窗口只有在前面所有的段都确认的情况下才会移动左边界。当在前面还有字节未接收但收到后面字节的情况下，窗口不会移动，并不对后续字节确认。以此确保对端会对这些数据重传。</p></li>
+</ol>
+
+<h1 id="滑动窗口的流控特性">滑动窗口的流控特性</h1>
+
+<p>TCP是通过接收端的通告窗口来实现流量控制的。通告窗口指示了接收端可接受的数据量。当窗口值变为0时，可以有效阻止发送端继续发送，知道窗口大小恢复为非零值。</p>
+
+<p>当接收端重新获得可用空间时，会给发送端传输一个窗口更新，告知其可继续发送数据。这样的窗口更新通常都不包含数据（为纯ACK），不能保证其传输的可靠性。</p>
+
+<h1 id="滑动窗口原理">滑动窗口原理</h1>
+
+<h2 id="发送方">发送方</h2>
+
+<p>任何时候在其发送缓存内的数据都可以分为4类：</p>
+
+<ol>
+<li><p>已经发送并得到对端ACK的</p></li>
+
+<li><p>已经发送但还未收到对端ACK的</p></li>
+
+<li><p>未发送但对端允许发送的</p></li>
+
+<li><p>未发送且对端不允许发送</p></li>
+</ol>
+
+<p>已经发送但还未收到对端ACK的”和“未发送但对端允许发送的”这两部分数据称之为发送窗口（中间两部分）。</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/QQ%E6%88%AA%E5%9B%BE20170602144137.png" alt="" /></p>
+
+<p>窗口的三种运动过程：</p>
+
+<ol>
+<li><p>关闭。窗口左边界右移，当已发送数据得到ACK确认时，窗口会减小。</p></li>
+
+<li><p>打开。窗口右边界右移，使得可发送数据量增大。当已确认数据得到处理，接收端可用缓存变大，窗口也随之变大。</p></li>
+
+<li><p>收缩。窗口右边界左移，一般很少发生，RFC也强烈不建议这么做，因为很可能会产生一些错误，比如一些数据已经发送出去了，又要收缩窗口，不让发送这些数据。</p></li>
+</ol>
+
+<p>注意窗口左边界不能左移，因为它控制的是已确认的ACK号，具有累积性，不能返回，被当作重复ACK丢弃。</p>
+
+<p>注意接收方不必确认每一个收到的分组，在TCP中，ACK确认是累积的，可以在接收到几个序号连续的报文段后只发送一个ACK确认报文，所以发送方只要收到一个分组的ACK，就可以认定之前的分组全部由接收方确认成功。但累积等待的时间最长不能超过0.5秒，以防止发送端超时重传。</p>
+
+<p>当左右边界相等时，称之为零窗口。此时发送端不能再发送新数据。这种情况下，TCP发送端开始探测对方窗口，伺机增大提供窗口。</p>
+
+<h1 id="接收方">接收方</h1>
+
+<p>在某一时刻在它的接收缓存内存在3种。</p>
+
+<ol>
+<li><p>已接收</p></li>
+
+<li><p>未接收准备接收</p></li>
+
+<li><p>未接收并未准备接收（由于ACK直接由TCP协议栈回复，默认无应用延迟，不存在“已接收未回复ACK”）。</p></li>
+</ol>
+
+<p>其中“未接收准备接收”称之为接收窗口。</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/QQ%E6%88%AA%E5%9B%BE20170602144036.png" alt="" /></p>
+
+<p>对接收端来说，到达序列号小于左窗口边界，被认为是重复数据而丢弃，超过右边界的则超出处理范围，也被丢弃。</p>
+
+<p>由于要保证TCP的累积ACK性，只有当到达数据序列号等于左边界时，数据才不会被丢弃，窗口才能向前滑动。</p>
+
+<p>对选择确认TCP来说，使用SACK选项，窗口内的其他报文段也可以被接收确认，但只有在接收到等于左边界的序列号数据时，窗口才能前移。</p>
+
+<h1 id="零窗口引起的死锁">零窗口引起的死锁</h1>
+
+<p>当接收端向发送端发送一个零窗口报文段（报文段首部中窗口值的大小设置为0），发送端就停止向接收端发送报文段。后来接收端想通知发送端，让其接着发送数据时，便向发送端发送一个非零窗口报文段。
+这样的窗口更新通常都不包含数据（为纯ACK），不能保证其传输的可靠性。</p>
+
+<p>因为没有可靠性保证，如果该报文段在路上丢失。而接收端以为该非零报文段已经发送给发送端。而发送端由于没有收到接收方的非零窗口报文段，于是两端都等待，陷入“死锁”的状态。</p>
+
+<p>为防止这种死锁，发送端会采用一个持续计时器间歇性地查询接收端，看其窗口是否已增长。持续计时器会触发窗口探测的传输，强制要求接受端返回ACK。窗口探测包含一个字节的数据，采用TCP可靠传输（丢失重传），由此可以避免由窗口更新丢失导致的死锁。</p>
+
+<p>注意：即便发送方收到了零窗口设置的报文段，发送端也能接收这几种报文段：探测报文段、ACK报文段，携带紧急数据的报文段。</p>
+
+<h1 id="与窗口管理相关的攻击">与窗口管理相关的攻击</h1>
+
+<p>TCP窗口可能受到多种攻击，主要形式为资源耗尽。通告窗口较小会使得TCP传输减慢，因此会更长时间地占用资源，如存储空间。</p>
+
+<p>参考：[<a href="http://www.cnblogs.com/zhaoyl/archive/2012/09/20/2695799.html](">http://www.cnblogs.com/zhaoyl/archive/2012/09/20/2695799.html](</a>)</p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2017-06-25
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      
+      <nav class="post-nav">
+        <a class="prev" href="/forz/post/tcp%E5%B7%AE%E9%94%99%E6%8E%A7%E5%88%B6%E6%B5%85%E6%9E%90/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">TCP差错控制浅析</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/forz/post/tcp%E6%8B%A5%E5%A1%9E%E6%8E%A7%E5%88%B6%E6%B5%85%E6%9E%90/">
+            <span class="next-text nav-default">TCP拥塞控制浅析</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+      <a href="forzfuyao@email.com" class="iconfont icon-email" title="email"></a>
+  <a href="http://localhost:1313/forz/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/forz/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

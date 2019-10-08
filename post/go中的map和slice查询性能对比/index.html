@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Go中的map和slice查询性能对比 - Forz</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="看到标题，第一反应，map肯定秒杀slice啊，我当时也是这么想的，毕竟前者的查询复杂度是O(1)，后者是O(n)。 1 2 3 4 5 6 7 8 9 10 11 12" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="http://localhost:1313/forz/post/go%E4%B8%AD%E7%9A%84map%E5%92%8Cslice%E6%9F%A5%E8%AF%A2%E6%80%A7%E8%83%BD%E5%AF%B9%E6%AF%94/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/forz/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/forz/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/forz/favicon-16x16.png">
+<link rel="manifest" href="/forz/manifest.json">
+<link rel="mask-icon" href="/forz/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link href="/forz/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Go中的map和slice查询性能对比" />
+<meta property="og:description" content="看到标题，第一反应，map肯定秒杀slice啊，我当时也是这么想的，毕竟前者的查询复杂度是O(1)，后者是O(n)。 1 2 3 4 5 6 7 8 9 10 11 12" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="http://localhost:1313/forz/post/go%E4%B8%AD%E7%9A%84map%E5%92%8Cslice%E6%9F%A5%E8%AF%A2%E6%80%A7%E8%83%BD%E5%AF%B9%E6%AF%94/" />
+<meta property="article:published_time" content="2019-08-26T15:21:06&#43;00:00"/>
+<meta property="article:modified_time" content="2019-08-26T15:21:06&#43;00:00"/>
+
+<meta itemprop="name" content="Go中的map和slice查询性能对比">
+<meta itemprop="description" content="看到标题，第一反应，map肯定秒杀slice啊，我当时也是这么想的，毕竟前者的查询复杂度是O(1)，后者是O(n)。 1 2 3 4 5 6 7 8 9 10 11 12">
+
+
+<meta itemprop="datePublished" content="2019-08-26T15:21:06&#43;00:00" />
+<meta itemprop="dateModified" content="2019-08-26T15:21:06&#43;00:00" />
+<meta itemprop="wordCount" content="674">
+
+
+
+<meta itemprop="keywords" content="" />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Go中的map和slice查询性能对比"/>
+<meta name="twitter:description" content="看到标题，第一反应，map肯定秒杀slice啊，我当时也是这么想的，毕竟前者的查询复杂度是O(1)，后者是O(n)。 1 2 3 4 5 6 7 8 9 10 11 12"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/forz/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/forz/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/forz/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/forz/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/forz/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/forz/" class="logo">Forz Blog</a>
+</div>
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/forz/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/categories/">Categories</a>
+      </li>
+  </ul>
+</nav>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Go中的map和slice查询性能对比</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2019-08-26 </span>
+        
+          <span class="more-meta"> 约 674 字 </span>
+          <span class="more-meta"> 预计阅读 2 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    
+  </div>
+</div>
+    <div class="post-content">
+      <p>看到标题，第一反应，map肯定秒杀slice啊，我当时也是这么想的，毕竟前者的查询复杂度是O(1)，后者是O(n)。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;math/rand&#34;</span>
+	<span class="s">&#34;time&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">const</span> <span class="nx">maxSize</span> <span class="p">=</span> <span class="mi">50</span>
+<span class="kd">const</span> <span class="nx">tests</span> <span class="p">=</span> <span class="mi">20000000</span>
+<span class="kd">const</span> <span class="nx">findMult</span> <span class="p">=</span> <span class="mi">1</span> <span class="c1">//9999999999 // 100 = 1% hit rate, 1 = 100% hit rate.
+</span><span class="c1"></span>
+<span class="kd">type</span> <span class="nx">lst</span> <span class="p">[]</span><span class="kt">int</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">l</span> <span class="nx">lst</span><span class="p">)</span> <span class="nf">has</span><span class="p">(</span><span class="nx">xxxx</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">l</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">i</span> <span class="o">==</span> <span class="nx">xxxx</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="kc">true</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="kc">false</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">mp</span> <span class="kd">map</span><span class="p">[</span><span class="kt">int</span><span class="p">]</span><span class="kd">struct</span><span class="p">{}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">mp</span><span class="p">)</span> <span class="nf">has</span><span class="p">(</span><span class="nx">xxxx</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">[</span><span class="nx">xxxx</span><span class="p">]</span>
+	<span class="k">return</span> <span class="nx">ok</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">rand</span><span class="p">.</span><span class="nf">Seed</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">().</span><span class="nf">UnixNano</span><span class="p">())</span>
+
+	<span class="k">for</span> <span class="nx">size</span> <span class="o">:=</span> <span class="mi">1</span><span class="p">;</span> <span class="nx">size</span> <span class="p">&lt;</span> <span class="nx">maxSize</span><span class="p">;</span> <span class="nx">size</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">l</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="nx">lst</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">size</span><span class="p">)</span>
+		<span class="nx">m</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="nx">mp</span><span class="p">,</span> <span class="nx">size</span><span class="p">)</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">size</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="nx">e</span> <span class="o">:=</span> <span class="nx">rand</span><span class="p">.</span><span class="nf">Int</span><span class="p">()</span>
+			<span class="nx">l</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">l</span><span class="p">,</span> <span class="nx">e</span><span class="p">)</span>
+			<span class="nx">m</span><span class="p">[</span><span class="nx">e</span><span class="p">]</span> <span class="p">=</span> <span class="kd">struct</span><span class="p">{}{}</span>
+		<span class="p">}</span>
+
+		<span class="nx">found</span> <span class="o">:=</span> <span class="mi">0</span>
+		<span class="nx">start</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">x</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">x</span> <span class="p">&lt;</span> <span class="nx">tests</span><span class="p">;</span> <span class="nx">x</span><span class="o">++</span> <span class="p">{</span>
+			<span class="nx">xxxx</span> <span class="o">:=</span> <span class="nx">rand</span><span class="p">.</span><span class="nf">Intn</span><span class="p">(</span><span class="nx">size</span> <span class="o">*</span> <span class="nx">findMult</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">l</span><span class="p">.</span><span class="nf">has</span><span class="p">(</span><span class="nx">xxxx</span><span class="p">)</span> <span class="p">{</span>
+				<span class="nx">found</span><span class="o">++</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="nx">sliceDuration</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">().</span><span class="nf">Sub</span><span class="p">(</span><span class="nx">start</span><span class="p">)</span>
+
+		<span class="nx">start</span> <span class="p">=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">x</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">x</span> <span class="p">&lt;</span> <span class="nx">tests</span><span class="p">;</span> <span class="nx">x</span><span class="o">++</span> <span class="p">{</span>
+			<span class="nx">xxxx</span> <span class="o">:=</span> <span class="nx">rand</span><span class="p">.</span><span class="nf">Intn</span><span class="p">(</span><span class="nx">size</span> <span class="o">*</span> <span class="nx">findMult</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">m</span><span class="p">.</span><span class="nf">has</span><span class="p">(</span><span class="nx">xxxx</span><span class="p">)</span> <span class="p">{</span>
+				<span class="nx">found</span><span class="o">++</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="nx">mapDuration</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">().</span><span class="nf">Sub</span><span class="p">(</span><span class="nx">start</span><span class="p">)</span>
+
+		<span class="c1">// Do something with found so it doesn&#39;t get optimized away.
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">found</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">rand</span><span class="p">.</span><span class="nf">Int</span><span class="p">()</span>
+		<span class="p">}</span>
+
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;%d\t%v\n&#34;</span><span class="p">,</span> <span class="nx">size</span><span class="p">,</span> <span class="nx">sliceDuration</span><span class="o">-</span><span class="nx">mapDuration</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>输出：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">1	-209.706862ms
+2	-286.768577ms
+3	-253.643371ms
+4	-184.176088ms
+5	-188.898868ms
+6	-194.644208ms
+7	-113.719066ms
+8	-501.892168ms
+9	-34.573439ms
+10	-380.242983ms
+11	-216.931934ms
+12	-631.616472ms
+13	-135.392189ms
+14	-229.107952ms
+15	-114.9351ms
+16	-373.97338ms
+17	-287.007278ms
+18	-34.734517ms
+19	-237.892748ms
+20	-222.025115ms
+21	-140.869821ms
+22	13.382928ms
+23	-341.238616ms
+24	-281.6694ms
+25	70.841324ms
+26	63.31161ms
+27	-179.818415ms
+28	-30.357644ms
+29	39.261291ms
+30	-50.066403ms
+31	-75.68084ms
+32	113.281835ms
+33	119.597633ms
+34	222.476972ms
+35	-89.222024ms
+36	95.265413ms
+37	164.569075ms
+38	150.392782ms
+39	247.403261ms
+40	365.580116ms
+41	284.544515ms
+42	275.936162ms
+43	330.8626ms
+44	428.790859ms
+45	94.745088ms
+46	388.334553ms
+47	189.708983ms
+48	387.604493ms
+49	308.960719ms</pre></td></tr></table>
+</div>
+</div>
+<p>25 个元素以下的用slice 性能比map 好</p>
+
+<p>现在可以得出结论了，当数据量小的时候，slice的查询速度是比map快的，为什么呢，因为golang的map底层是用hash实现的，既然有hash，那就要做映射，那就有hash函数，这个hash函数的开销千万不要忘记，不要一看到map就只记着O(1)</p>
+
+<p>数据集小，直接遍历查找的开销肯定比hash的开销小。</p>
+
+<p>当数据量上去了，map的优势自然而然就出来了。</p>
+
+<p>参考:<br />
+<a href="https://blog.csdn.net/jeffrey11223/article/details/78450938">https://blog.csdn.net/jeffrey11223/article/details/78450938</a>
+<a href="https://golangnote.com/topic/224.html">https://golangnote.com/topic/224.html</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2019-08-26
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      
+      <nav class="post-nav">
+        <a class="prev" href="/forz/post/%E5%A6%82%E4%BD%95%E4%BC%98%E9%9B%85%E5%9C%B0%E6%AF%94%E8%BE%83%E4%B8%A4%E4%B8%AA%E6%9C%AA%E7%9F%A5%E7%BB%93%E6%9E%84%E7%9A%84json/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">如何优雅地比较两个未知结构的JSON</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/forz/post/go%E4%B8%AD%E7%9A%84slice%E5%92%8Cmap%E7%9A%84%E6%AF%94%E8%BE%83%E6%96%B9%E6%B3%95/">
+            <span class="next-text nav-default">Go中的slice和map的比较方法</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+      <a href="forzfuyao@email.com" class="iconfont icon-email" title="email"></a>
+  <a href="http://localhost:1313/forz/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/forz/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

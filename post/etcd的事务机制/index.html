@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>etcd的事务机制 - Forz</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="事务机制 序列化（访问序列化） 像etcd这类分布式一致性系统时常要处理非常多的来自不同并发客户端的并发请求。尽管有众多并发的读和写，原子性依然" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="http://localhost:1313/forz/post/etcd%E7%9A%84%E4%BA%8B%E5%8A%A1%E6%9C%BA%E5%88%B6/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/forz/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/forz/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/forz/favicon-16x16.png">
+<link rel="manifest" href="/forz/manifest.json">
+<link rel="mask-icon" href="/forz/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link href="/forz/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="etcd的事务机制" />
+<meta property="og:description" content="事务机制 序列化（访问序列化） 像etcd这类分布式一致性系统时常要处理非常多的来自不同并发客户端的并发请求。尽管有众多并发的读和写，原子性依然" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="http://localhost:1313/forz/post/etcd%E7%9A%84%E4%BA%8B%E5%8A%A1%E6%9C%BA%E5%88%B6/" />
+<meta property="article:published_time" content="2019-09-07T21:18:50&#43;00:00"/>
+<meta property="article:modified_time" content="2019-09-07T21:18:50&#43;00:00"/>
+
+<meta itemprop="name" content="etcd的事务机制">
+<meta itemprop="description" content="事务机制 序列化（访问序列化） 像etcd这类分布式一致性系统时常要处理非常多的来自不同并发客户端的并发请求。尽管有众多并发的读和写，原子性依然">
+
+
+<meta itemprop="datePublished" content="2019-09-07T21:18:50&#43;00:00" />
+<meta itemprop="dateModified" content="2019-09-07T21:18:50&#43;00:00" />
+<meta itemprop="wordCount" content="6522">
+
+
+
+<meta itemprop="keywords" content="" />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="etcd的事务机制"/>
+<meta name="twitter:description" content="事务机制 序列化（访问序列化） 像etcd这类分布式一致性系统时常要处理非常多的来自不同并发客户端的并发请求。尽管有众多并发的读和写，原子性依然"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/forz/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/forz/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/forz/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/forz/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/forz/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/forz/" class="logo">Forz Blog</a>
+</div>
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/forz/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/categories/">Categories</a>
+      </li>
+  </ul>
+</nav>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">etcd的事务机制</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2019-09-07 </span>
+        <div class="post-category">
+            <a href="/forz/categories/etcd/"> etcd </a>
+            </div>
+          <span class="more-meta"> 约 6522 字 </span>
+          <span class="more-meta"> 预计阅读 14 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+<ul>
+<li><a href="#事务机制">事务机制</a>
+<ul>
+<li><a href="#序列化-访问序列化">序列化（访问序列化）</a></li>
+<li><a href="#etcd3事务">etcd3事务</a>
+<ul>
+<li><a href="#事务元语">事务元语</a></li>
+<li><a href="#软件事务内存-stm">软件事务内存（STM）</a></li>
+<li><a href="#实现stm">实现STM</a>
+<ul>
+<li><a href="#事务循环">事务循环</a></li>
+<li><a href="#读操作集和写操作集">读操作集和写操作集</a></li>
+<li><a href="#get和put">Get和Put</a></li>
+<li><a href="#提交">提交</a></li>
+</ul></li>
+<li><a href="#事务模型">事务模型</a>
+<ul>
+<li><a href="#readcommitted">ReadCommitted</a></li>
+<li><a href="#repeatablereads">RepeatableReads</a></li>
+<li><a href="#serializable">Serializable</a></li>
+<li><a href="#serializablesnapshot">SerializableSnapshot</a></li>
+</ul></li>
+<li><a href="#基于etcd的stm性能">基于etcd的STM性能</a></li>
+</ul></li>
+</ul></li>
+</ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      
+
+<h1 id="事务机制">事务机制</h1>
+
+<h2 id="序列化-访问序列化">序列化（访问序列化）</h2>
+
+<p>像etcd这类分布式一致性系统时常要处理非常多的来自不同并发客户端的并发请求。尽管有众多并发的读和写，原子性依然能够保证在每一次数据修订时数据模型是一致的。有很多文献讨论过各种方式来实现，或者是说明如何在分布式系统中做到原子性。etcd3的API支持了很多典型的模式。</p>
+
+<p>对于整个key-value存储而言，序列化给整个过程构建了一个时间轴上的点。一组序列化后的读操作将无法观测到自首次读取之后的所有新的写操作（译者注：这里的意思是一组序列化后的对同一个key的读操作，首次读取其值value之后，后续的读都是读到首次读取时的value，后续有写操作更改了这个key的值，这组序列化的读，仍然是读到更改之前的value）；所有的读像是从同一个快照上获取的数据。序列化一组写将在一个时间点上要么发布一个完整的所有写操作的更新，要么一个更新都没有。部分更新将不会出现，从而不会破坏整个应用程序的状态。</p>
+
+<p>然后我们通过一个示例来说明原子性对于避免错乱数据的重要性。下面的代码将从一个账户转移一定数量的资金到另外一个账户：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;fmt&#34;</span>
+    <span class="s">&#34;encoding/binary&#34;</span>
+    <span class="s">&#34;github.com/coreos/etcd/clientv3&#34;</span>
+<span class="p">)</span>
+<span class="kd">func</span> <span class="nf">toUInt64</span><span class="p">(</span><span class="nx">v</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="kt">uint64</span> <span class="p">{</span> <span class="nx">x</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">binary</span><span class="p">.</span><span class="nf">Uvarint</span><span class="p">(</span><span class="nx">v</span><span class="p">);</span> <span class="k">return</span> <span class="nx">x</span> <span class="p">}</span>
+<span class="kd">func</span> <span class="nf">fromUInt64</span><span class="p">(</span><span class="nx">v</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">[]</span><span class="kt">byte</span> <span class="p">{</span>
+    <span class="nx">b</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">binary</span><span class="p">.</span><span class="nx">MaxVarintLen64</span><span class="p">);</span>
+    <span class="k">return</span> <span class="nx">b</span><span class="p">[:</span><span class="nx">binary</span><span class="p">.</span><span class="nf">PutUvarint</span><span class="p">(</span><span class="nx">b</span><span class="p">,</span> <span class="nx">v</span><span class="p">)]</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">nosyncXfer</span><span class="p">(</span><span class="nx">etcd</span> <span class="o">*</span><span class="nx">clientv3</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">from</span><span class="p">,</span> <span class="nx">to</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">amount</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">fromKV</span><span class="p">,</span> <span class="nx">toKV</span> <span class="o">*</span><span class="nx">clientv3</span><span class="p">.</span><span class="nx">GetResponse</span>
+	<span class="k">if</span> <span class="nx">fromKV</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">etcd</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">(),</span> <span class="nx">from</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">toKV</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">etcd</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">(),</span> <span class="nx">to</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="nx">fromV</span><span class="p">,</span> <span class="nx">toV</span> <span class="o">:=</span> <span class="nf">toUInt64</span><span class="p">(</span><span class="nx">fromKV</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nx">Value</span><span class="p">),</span> <span class="nf">toUInt64</span><span class="p">(</span><span class="nx">toKV</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nx">Value</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">fromV</span> <span class="p">&lt;</span> <span class="nx">amount</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;insufficient value&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">etcd</span><span class="p">.</span><span class="nf">Put</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">(),</span> <span class="nx">to</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nf">fromUInt64</span><span class="p">(</span><span class="nx">toV</span><span class="o">+</span><span class="nx">amount</span><span class="p">)));</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">etcd</span><span class="p">.</span><span class="nf">Put</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">(),</span> <span class="nx">from</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nf">fromUInt64</span><span class="p">(</span><span class="nx">fromV</span><span class="o">-</span><span class="nx">amount</span><span class="p">)))</span>
+	<span class="k">return</span> <span class="nx">err</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>虽然整个示例代码非常的直观，但在并发访问时，给定一个不适当的导致冲突的访问顺序，并发的处理还是会破坏整个应用的状态。下图显示了一个导致冲突的时间顺序，两个并发的处理进程P1和P2分别基于公用etcd服务执行nosyncXfer。每一个方框表示了进程在收到一个消息后（用一个带箭头的线条表示）认为的当前etcd的键值数据状态。例如，进程P2在P1发起更新”a”和”b”之前，收到了”a”（粗体），进而导致P2多记录了不一致的a值（红色），并将其写回到etcd中</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190909151238.png" alt="" /></p>
+
+<p>大多数系统在处理示例代码中所需的原子性时，要么是借助于分布式共享锁，要么是基于事务工具。最终的，一些机制都会强制要求以原子的方式访问这一组key，同时还保持容错并避免在竞争争用下的性能下降。对于etcd3而言，这个原子性机制就是事务。</p>
+
+<h2 id="etcd3事务">etcd3事务</h2>
+
+<p>etcd3向etcd API中引入了事务用于原子性的更新一组key。一个etcd3事务是一个元语操作，他由归属于事务块中的Get、Put和Delete操作构成，并在etcd存储上受到事务保护。基于事务元语，使得构建各种复杂的并发控制算法成为可能。例如，etcd事务能够清晰的支持客户端软件事务内存(STM)</p>
+
+<h3 id="事务元语">事务元语</h3>
+
+<p>一个etcd事务是一个编码在etcd协议中的元语。这个元语使得客户端能在单次数据修订中提交对多个key的操作，整个操作单元在etcd上是序列化的。除了批量操作外，事务性也被保持；一个事务基于etcd存储上的状态条件来控制哪些操作将被提交。</p>
+
+<p>一个etcd事务的结构如下所示：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nf">Txn</span><span class="p">().</span><span class="nf">If</span><span class="p">(</span><span class="nx">cond1</span><span class="p">,</span> <span class="nx">cond2</span><span class="p">,</span> <span class="o">...</span><span class="p">).</span><span class="nf">Then</span><span class="p">(</span><span class="nx">op1</span><span class="p">,</span> <span class="nx">op2</span><span class="p">,</span> <span class="o">...</span><span class="p">,).</span><span class="nf">Else</span><span class="p">(</span><span class="nx">op1</span><span class="err">’</span><span class="p">,</span> <span class="nx">op2</span><span class="err">’</span><span class="p">,</span> <span class="err">…</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>一个事务由3个组成部分：条件块；成功块；失败块。首先是条件块，例如上面的If(cond1, cond2, …),如果所有的条件（例如，cond1, cond2, …)都为真，那么整个事务被认为成功，如果其中任何一个条件为假，则事务被视为失败。成功块，例如上面的Then(op1, op2, …)，当事务被认为成功时，将在单次数据修订中应用其中的所有操作（例如，op1, op2, …)。失败块，例如上面的Else(op1’, op2’, …)，当事务被视为失败时，将在一次版本修订中应用其中的所有操作（例如，op1, op2, …)</p>
+
+<p>条件块是多个条件的连接组合。每一个条件针对一个key有一个比较目标（值，创建的修订版本，修改的修订版本或者版本）和一个比较操作（&lt;, =, &gt;）。nosyncXfer示例中的问题，是覆盖了一个已经被取代（修改过的）key，这个是可以避免的，可以通过如果key的修改的修订版本和之前获取的修订版本不一致，则整个更新失败来保证。</p>
+
+<p>下面是示例代码，通过事务来保证安全的更新：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">txnXfer</span><span class="p">(</span><span class="nx">etcd</span> <span class="o">*</span><span class="nx">clientv3</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">from</span><span class="p">,</span> <span class="nx">to</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">amount</span> <span class="kt">uint64</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">ok</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">doTxnXfer</span><span class="p">(</span><span class="nx">etcd</span><span class="p">,</span> <span class="nx">from</span><span class="p">,</span> <span class="nx">to</span><span class="p">,</span> <span class="nx">amount</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">err</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">ok</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="kc">nil</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">doTxnXfer</span><span class="p">(</span><span class="nx">etcd</span> <span class="o">*</span><span class="nx">clientv3</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">from</span><span class="p">,</span> <span class="nx">to</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">amount</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">(</span><span class="kt">bool</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">getresp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">etcd</span><span class="p">.</span><span class="nf">Txn</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">()).</span>
+		<span class="nf">Then</span><span class="p">(</span><span class="nx">clientv3</span><span class="p">.</span><span class="nf">OpGet</span><span class="p">(</span><span class="nx">from</span><span class="p">),</span> <span class="nx">clientv3</span><span class="p">.</span><span class="nf">OpGet</span><span class="p">(</span><span class="nx">to</span><span class="p">)).</span>
+		<span class="nf">Commit</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">false</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="nx">fromKV</span> <span class="o">:=</span> <span class="nx">getresp</span><span class="p">.</span><span class="nx">Responses</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nf">GetResponseRange</span><span class="p">().</span><span class="nx">Kvs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+	<span class="nx">toKV</span> <span class="o">:=</span> <span class="nx">getresp</span><span class="p">.</span><span class="nx">Responses</span><span class="p">[</span><span class="mi">1</span><span class="p">].</span><span class="nf">GetResponseRange</span><span class="p">().</span><span class="nx">Kvs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+	<span class="nx">fromV</span><span class="p">,</span> <span class="nx">toV</span> <span class="o">:=</span> <span class="nf">toUInt64</span><span class="p">(</span><span class="nx">fromKV</span><span class="p">.</span><span class="nx">Value</span><span class="p">),</span> <span class="nf">toUInt64</span><span class="p">(</span><span class="nx">toKV</span><span class="p">.</span><span class="nx">Value</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">fromV</span> <span class="p">&lt;</span> <span class="nx">amount</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">false</span><span class="p">,</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;insufficient value&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">txn</span> <span class="o">:=</span> <span class="nx">etcd</span><span class="p">.</span><span class="nf">Txn</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">()).</span><span class="nf">If</span><span class="p">(</span>
+		<span class="nx">clientv3</span><span class="p">.</span><span class="nf">Compare</span><span class="p">(</span><span class="nx">clientv3</span><span class="p">.</span><span class="nf">ModRevision</span><span class="p">(</span><span class="nx">from</span><span class="p">),</span> <span class="s">&#34;=&#34;</span><span class="p">,</span> <span class="nx">fromKV</span><span class="p">.</span><span class="nx">ModRevision</span><span class="p">),</span>
+		<span class="nx">clientv3</span><span class="p">.</span><span class="nf">Compare</span><span class="p">(</span><span class="nx">clientv3</span><span class="p">.</span><span class="nf">ModRevision</span><span class="p">(</span><span class="nx">to</span><span class="p">),</span> <span class="s">&#34;=&#34;</span><span class="p">,</span> <span class="nx">toKV</span><span class="p">.</span><span class="nx">ModRevision</span><span class="p">))</span>
+	<span class="nx">txn</span> <span class="p">=</span> <span class="nx">txn</span><span class="p">.</span><span class="nf">Then</span><span class="p">(</span>
+		<span class="nx">clientv3</span><span class="p">.</span><span class="nf">OpPut</span><span class="p">(</span><span class="nx">from</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nf">fromUInt64</span><span class="p">(</span><span class="nx">fromV</span><span class="o">-</span><span class="nx">amount</span><span class="p">))),</span>
+		<span class="nx">clientv3</span><span class="p">.</span><span class="nf">OpPut</span><span class="p">(</span><span class="nx">to</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nf">fromUInt64</span><span class="p">(</span><span class="nx">toV</span><span class="o">+</span><span class="nx">amount</span><span class="p">))))</span>
+	<span class="nx">putresp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">txn</span><span class="p">.</span><span class="nf">Commit</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">false</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">putresp</span><span class="p">.</span><span class="nx">Succeeded</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>这段代码是基于原始版本的一点改进。所有的Get请求在一个事务中，在获取from和to时，期间的写操作不会对其产生影响。类似的，所有的Put请求也在一个事务中，进而确保from和to在最近被获取后，没有被修改过。下图是一个冲突过程的演示，原本会破坏数据一致性，但现在会接收一个事务，而另一个事务会失败并且重试</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190912171841.png" alt="" /></p>
+
+<h3 id="软件事务内存-stm">软件事务内存（STM）</h3>
+
+<p>通过事务重写的示例解决了数据一致性遭到破坏的问题，但是代码有很多不足之处。代码有些不够自然；在前头读取数据时的手动事务提交，跟踪修订版本，以及显示重试对一个样板模式而言，都显得太笨拙。理想情况下，安全的数据处理就像和普通的被隔离的内存数据处理一样直观。</p>
+
+<p>在由修改修订版本保护的事务中打包各种访问是对软件事务内存(STM)的硬编码。就像被修改修订版本保护的事务那样，STM系统会检测内存访问冲突，进而恢复，安全的回滚任何修改。在一个乐观的STM系统中，事务上下文会记录所有的读操作，并分别缓存读集和写集的所有写操作。在提交事务时，系统会校验任何读冲突（参见下面的示例）。一个无冲突的事务会将所有写操作集合写回内存。如果有冲突，则会重试，或者终止事务。</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190912175542.png" alt="" /></p>
+
+<p>为了演示STM的重试过程，上面的图重新展示了通过STM解决P1和P2冲突的过程。像之前一样，P1在P2收到”a”和”b”之间更新了”a”和”b”。P1的更新增加了key的修改修订版本至{a:2, b:2}当P2尝试通过STM提交事务时，老的读获取的”a”的修订版本信息（1）与当前的修订版本信息（2）冲突，导致服务器拒绝本次提交。P2的事务接着重试，重新获取读信息，重新应用事务，并最终无冲突的提交事务。</p>
+
+<p>下面是通过etcd3的STM客户端重写的示例代码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">import</span> <span class="nx">conc</span> <span class="s">&#34;github.com/coreos/etcd/clientv3/concurrency&#34;</span>
+<span class="kd">func</span> <span class="nf">stmXfer</span><span class="p">(</span><span class="nx">etcd</span> <span class="o">*</span><span class="nx">clientv3</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">from</span><span class="p">,</span> <span class="nx">to</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">amount</span> <span class="kt">uint64</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">conc</span><span class="p">.</span><span class="nf">NewSTMRepeatable</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">(),</span>
+		<span class="nx">etcd</span><span class="p">,</span>
+		<span class="kd">func</span><span class="p">(</span><span class="nx">s</span> <span class="nx">conc</span><span class="p">.</span><span class="nx">STM</span><span class="p">)</span> <span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">fromV</span> <span class="o">:=</span> <span class="nf">toUInt64</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">from</span><span class="p">)))</span>
+			<span class="nx">toV</span> <span class="o">:=</span> <span class="nf">toUInt64</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">to</span><span class="p">)))</span>
+			<span class="k">if</span> <span class="nx">fromV</span> <span class="p">&lt;</span> <span class="nx">amount</span> <span class="p">{</span>
+				<span class="k">return</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;insufficient value&#34;</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nf">Put</span><span class="p">(</span><span class="nx">to</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nf">fromUInt64</span><span class="p">(</span><span class="nx">toV</span><span class="o">+</span><span class="nx">amount</span><span class="p">)))</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nf">Put</span><span class="p">(</span><span class="nx">from</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nf">fromUInt64</span><span class="p">(</span><span class="nx">fromV</span><span class="o">-</span><span class="nx">amount</span><span class="p">)))</span>
+			<span class="k">return</span> <span class="kc">nil</span>
+		<span class="p">})</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>利用STM的版本更加简单：将一个函数交给STM运行时，由这个函数来处理细节。这样错误处理更少；STM层会自动捕获etcd错误并终止事务。事务示例中的重试循环也不见了，因为STM系统会自动进行重试。作用域也更为简单；事务可以通过在事务函数中返回错误码或者通过取消事务内存上下文的方式终止（例如， context.TODO())。最终，各种繁琐记账行为将更少：比较修订版本数据和构建事务都由STM的客户端代码负责完成了。</p>
+
+<h3 id="实现stm">实现STM</h3>
+
+<p>etcd3的软件事务内存(STM)是基于v3 API的原语实现的。为了展示使用etcd3的STM协议的机制，我们将在70行的Go代码上概述一个简单的可重复读取的乐观STM算法。这个实现包括了一个STM的一些通用特性，例如事务读操作集、写操作集管理，数据访问，提交，重试和中断。</p>
+
+<p>etcd的软件事务内存(Software Transactional Memory, STM) API对基于版本号的冲突解决逻辑进行了封装:它自动检测内存访问时的冲突，并自动尝试在冲突的时候对事务进行回退和重试。etcd v3的软件事务内存也是乐观的冲突控制的思路:在事务最终提交的时候检测是否有冲突，如果有则回退和重试;而悲观的冲突控制则是在事务开始之前就检测是否有冲突，如果有则暂不执行。</p>
+
+<p>STM系统可以确保的事项具体如下。</p>
+
+<ul>
+<li>事务是原子的，一个事务提交以后，如果该事务涉及了对多个key的操作，那么对多个key的操作要么都成功，要么都不成功。</li>
+<li>事务至少具有可重复读取隔离型，以保证不会读到脏数据。</li>
+<li>数据是一致的，提交的时候STM会自动检测到数据冲突并重试事务以解决这些冲突。</li>
+</ul>
+
+<p>STM的思路也很简单，它的整个生命周期就是一个乐观锁循环，首先提取condition中的key然后比较condition并保存key的version，然后进行更新逻辑，最后比较前面condition中用到的key是否version发生了变化，如果没有发生变化，则将更新的内容刷到磁盘，否则重试。</p>
+
+<h4 id="事务循环">事务循环</h4>
+
+<p>STM的处理过程由他的事务循环来控制：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">NewSTM</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">c</span> <span class="o">*</span><span class="nx">v3</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">apply</span> <span class="kd">func</span><span class="p">(</span><span class="o">*</span><span class="nx">STM</span><span class="p">)</span> <span class="kt">error</span><span class="p">)</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="nx">errc</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">error</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+            <span class="k">if</span> <span class="nx">r</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">r</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.(</span><span class="nx">stmError</span><span class="p">)</span>
+                <span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span> <span class="nb">panic</span><span class="p">(</span><span class="nx">r</span><span class="p">)</span> <span class="p">}</span>
+                <span class="nx">errc</span> <span class="o">&lt;-</span> <span class="nx">e</span><span class="p">.</span><span class="nx">err</span>
+            <span class="p">}</span>
+        <span class="p">}()</span>
+        <span class="kd">var</span> <span class="nx">err</span> <span class="kt">error</span>
+        <span class="k">for</span> <span class="p">{</span>
+            <span class="nx">s</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">STM</span><span class="p">{</span><span class="nx">c</span><span class="p">,</span> <span class="nx">ctx</span><span class="p">,</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="o">*</span><span class="nx">v3</span><span class="p">.</span><span class="nx">GetResponse</span><span class="p">),</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">)}</span>
+            <span class="k">if</span> <span class="nx">err</span> <span class="p">=</span> <span class="nf">apply</span><span class="p">(</span><span class="nx">s</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span> <span class="k">break</span> <span class="p">}</span>
+            <span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nf">commit</span><span class="p">()</span> <span class="p">{</span> <span class="k">break</span> <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+    <span class="k">return</span> <span class="nx">errc</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>事务循环管理STM事务的整个生命周期。一个新的事务启动一个事务循环，并且这个调用将返回一个future用于通知循环的结束。循环创建新的簿记数据结构，运行用户提供的apply函数来访问一些key，之后提交事务。如果STM的运行时无法访问etcd（例如，网络故障）或者context被取消，它将使用Go的panic/recover来取消事务。如果有冲突，循环将重复执行，通过一个新的事务来重试。</p>
+
+<h4 id="读操作集和写操作集">读操作集和写操作集</h4>
+
+<p>下面的结构描述了整个STM事务的上下文(context):</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">STM</span> <span class="kd">struct</span> <span class="p">{</span>
+   <span class="nx">c</span> <span class="o">*</span><span class="nx">v3</span><span class="p">.</span><span class="nx">Client</span>
+   <span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span>
+   <span class="nx">rset</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="o">*</span><span class="nx">v3</span><span class="p">.</span><span class="nx">GetResponse</span>
+   <span class="nx">wset</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>一个STM事务上下文追踪运行的事务的状态。他保留了一个客户端引用从而可通过事务中的Get和Put请求来获取数据。这些Get和Put请求来自于提交阶段冲突检测过程中的读操作集（rset）和写操作集（wset）。用户同样可取消这个事务，通过对上下文执行取消操作即可。</p>
+
+<h4 id="get和put">Get和Put</h4>
+
+<p>STM的Get和Put方法会检测和缓存etcd上key的访问：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">stmError</span> <span class="kd">struct</span> <span class="p">{</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">}</span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">STM</span><span class="p">)</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">string</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">wv</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">wset</span><span class="p">[</span><span class="nx">key</span><span class="p">];</span> <span class="nx">ok</span> <span class="p">{</span>
+       <span class="k">return</span> <span class="nx">wv</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="nx">rv</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">rset</span><span class="p">[</span><span class="nx">key</span><span class="p">];</span> <span class="nx">ok</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nb">string</span><span class="p">(</span><span class="nx">rv</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nx">Value</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">rk</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">c</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithSerializable</span><span class="p">())</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nx">rset</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">rk</span>
+    <span class="k">return</span> <span class="nb">string</span><span class="p">(</span><span class="nx">rk</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nx">Value</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">STM</span><span class="p">)</span> <span class="nf">Put</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">val</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span> <span class="nx">s</span><span class="p">.</span><span class="nx">wset</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">val</span> <span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>Get和Put跟踪由事务管理的数据。</p>
+
+<p>对于Put方法，key的值存储在写操作集中，延迟实际的更新，直到事务提交的时候才执行。</p>
+
+<p>对于Get方法，key的值是基于他最新能观察到的值：如果在写操作集上被覆写，则值来自写操作集；如果已经缓存了，则来自读操作集，或者如果两者都没有，则强制来自etcd。所有来自etcd的强制读取都将更新读操作集，从而做到可重复读取的隔离，并且会在冲突解决阶段跟踪key的修订版本信息。</p>
+
+<h4 id="提交">提交</h4>
+
+<p>当apply函数完成后，所有修改将通过事务提交回etcd：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">STM</span><span class="p">)</span> <span class="nf">commit</span><span class="p">()</span> <span class="kt">bool</span> <span class="p">{</span>
+    <span class="nx">cs</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">v3</span><span class="p">.</span><span class="nx">Cmp</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">rset</span><span class="p">))</span>
+    <span class="k">for</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">rk</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">s</span><span class="p">.</span><span class="nx">rset</span> <span class="p">{</span>
+        <span class="nx">cs</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">cs</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">Compare</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">ModRevision</span><span class="p">(</span><span class="nx">k</span><span class="p">),</span> <span class="err">“</span><span class="p">=</span><span class="err">”</span><span class="p">,</span> <span class="nx">rk</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nx">ModRevision</span><span class="p">))</span>
+    <span class="p">}</span>
+    <span class="nx">puts</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">v3</span><span class="p">.</span><span class="nx">Op</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">wset</span><span class="p">))</span>
+    <span class="k">for</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">s</span><span class="p">.</span><span class="nx">wset</span> <span class="p">{</span>
+        <span class="nx">puts</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">puts</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">OpPut</span><span class="p">(</span><span class="nx">k</span><span class="p">,</span> <span class="nx">v</span><span class="p">))</span>
+    <span class="p">}</span>
+    <span class="nx">txnresp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">c</span><span class="p">.</span><span class="nf">Txn</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">ctx</span><span class="p">).</span><span class="nf">If</span><span class="p">(</span><span class="nx">cs</span><span class="err">…</span><span class="p">).</span><span class="nf">Then</span><span class="p">(</span><span class="nx">puts</span><span class="err">…</span><span class="p">).</span><span class="nf">Commit</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nx">txnresp</span><span class="p">.</span><span class="nx">Succeeded</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>这个提交事务是基于读操作集和写操作集来构建的。为了检测冲突，事务由所有读操作集的修改修订版本保护；如果有任何一个key被更新了，事务将会失败。如果没有检测到冲突，事务将把写操作集的数据写到etcd，并最终成功。</p>
+
+<h3 id="事务模型">事务模型</h3>
+
+<p>etcd官方client实现了四种事务模型，通过分析源代码 clientv3/concurrency/stm.go，可以了解STM各种事务的语义。</p>
+
+<h4 id="readcommitted">ReadCommitted</h4>
+
+<p>读提交是指，一个事务提交之后，它做的变更才会被其他事务看到。</p>
+
+<p>由于etcd的kv操作(包括txn事务内的多个keys操作)都是原子操作，所以你不可能读到未提交的修改，ReadCommitted是etcd中的最低事务级别。</p>
+
+<p>Get操作：从etcd读取keys，就像普通的kv操作一样。第一次Get后，在事务中缓存，后续不再从etcd读取。</p>
+
+<p>If条件：None，没有任何冲突检测。</p>
+
+<h4 id="repeatablereads">RepeatableReads</h4>
+
+<p>可重复读是指，一个事务执行过程中看到的数据，总是跟这个事务在启动时看到的数据是一致的。</p>
+
+<p>Get操作：从etcd读取keys，就像普通的kv操作一样。第一次Get后，在事务中缓存，后续不再从etcd读取。</p>
+
+<p>If条件：在事务提交时，事务中Get的keys没有被改动过。</p>
+
+<p>MySQL事务“可重复读”是通过在事务第一次select时建立readview，来确保事务中读到的是到这一刻为止的最新数据，忽略后面发生的更新。而这里每个key的Get是独立的（也可以说，每个key都是获取的当前值，没有readview的概念)，在事务提交时，如果这些keys没有变动过，那么事务就可以提交。</p>
+
+<h4 id="serializable">Serializable</h4>
+
+<p>串行化，顾名思义是对同一行记录，“写”会加“写锁”，“读”会加“读锁”。当出现读写锁冲突的时候，后访问的事务必须等前一个事务执行完成，才能继续执行。</p>
+
+<p>像etcd这样的分布式系统，经常会有客户端进行并发访问。etcd v3的Serializability(可串行化)的事务隔离级别可以保证多个事务并行执行的效果，其与 以某种顺序来执行这多个事务的效果是一样的，因此Serializability可以避免脏读、重复读和幻读的发生。注意，Serializability只保证了以某种顺序执行事务，并不能保证一定要以某个确定的顺序来执行。</p>
+
+<p>Get操作：事务中的第一个Get操作发生时，保存服务器返回的当前revision；后续对其他keys的Get操作，指定获取revision版本的value。</p>
+
+<p>If条件：在事务提交时，事务中Get的keys没有被改动过。</p>
+
+<p>可见，这个约束比数据库串行化的约束要低，它没有验证事务要修改的keys是否被改动过，下面的SerializableSnapshot事务增加了这个约束。</p>
+
+<h4 id="serializablesnapshot">SerializableSnapshot</h4>
+
+<p>Get操作：事务中的第一个Get操作发生时，保存服务器返回的当前revision；后续对其他keys的Get操作，指定获取revision版本的value。</p>
+
+<p>If条件：在事务提交时，事务中Get的keys没有被改动过，事务中要修改的keys也没有被改动过。</p>
+
+<p>通过上面的分析，我们清楚了如何使用etcd的txn事务，构建符合ACID语义的事务框架。如果这些语义不能满足你的业务需求，通过扩展etcd的官方client sdk，写一个新STM事务类型即可。</p>
+
+<p>有一点要强调的是，数据库事务是“锁/阻塞”模式，而etcd的STM事务是“cas/重试”模式，这是有差别的。简单的说，数据库事务不会自己重试，而STM事务在发生冲突是会多次重试，必须要保证业务代码是可重试的，且必须有明确的失败条件(例如判断账户余额是否够转账)。</p>
+
+<h3 id="基于etcd的stm性能">基于etcd的STM性能</h3>
+
+<p>这一章评估基于etcd的STM的性能。如果STM符合预期的工作，其示例代码的请求吞吐量应该与key的数量成正比。相反，分布式锁的请求吞吐量是保持稳定的。接着，通过比较可重复读隔离策略与序列化隔离策略，我们深入的看一看STM隔离策略对吞吐量的影响</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190916104836.png" alt="" /></p>
+
+<p>上图显示了对示例代码建模的基准测试结果，使用了etcd3的基准测试工具”stm”命令。与预期相符，锁的吞吐量保持恒定，而STM的吞吐量随着key的增加而增加（译者注：我认为是因为随着key的数量增加，多个事务访问不同的key，之间的冲突变的更少，“并行化”可以变得更高，从而使得STM的吞吐量提高）。read-committed访问会破坏数据一致性，因为他不解决冲突，与read-committed访问相比序列化的STM仅仅增加了20%的额外开销。与锁相比，STM在大规模key时要快了15倍。令人惊讶的是，可重复的读隔离，尽管是较弱的隔离和可能需要较少的重试，但与串行化STM相比，性能却更差些。这也许是因为串行化隔离在实现上会在重试时预获取读操作集，而可重复的读隔离只在需要时才去获取key的值。</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190916104853.png" alt="" /></p>
+
+<p>如上图所示的重试几率证明了不同隔离级别的效果。在key较少时，冲突较多，此时可重复读隔离比串行化隔离重试更少，因为冲突策略允许更多的穿插写。随着key数量的增加，冲突的几率降低，可重复读隔离的优势则越来越少。最终，序列化的隔离策略将比可重复读隔离具有更少的重试次数，因为他有更快的重试逻辑，预读取读操作集，节省了获取数据的周期，缩短了冲突窗口。</p>
+
+<p>参考:<br />
+<a href="https://blog.betacat.io/post/mvcc-implementation-in-etcd/">https://blog.betacat.io/post/mvcc-implementation-in-etcd/</a><br />
+<a href="https://www.jianshu.com/p/a23031ec02a6">https://www.jianshu.com/p/a23031ec02a6</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2019-09-07
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      
+      <nav class="post-nav">
+        <a class="prev" href="/forz/post/etcd%E7%9A%84mvcc/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">etcd的MVCC</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/forz/post/%E7%94%A8etcd%E5%AE%9E%E7%8E%B0%E9%80%89%E4%B8%BE/">
+            <span class="next-text nav-default">用eTcd实现选举</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+      <a href="forzfuyao@email.com" class="iconfont icon-email" title="email"></a>
+  <a href="http://localhost:1313/forz/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/forz/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

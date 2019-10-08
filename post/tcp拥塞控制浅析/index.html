@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>TCP拥塞控制浅析 - Forz</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="拥塞的发生与不可避免 拥塞发生的主要原因在于网络能够提供的资源不足以满足用户的需求，这些资源包括缓存空间、链路带宽容量和中间节点的处理能力。由" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="http://localhost:1313/forz/post/tcp%E6%8B%A5%E5%A1%9E%E6%8E%A7%E5%88%B6%E6%B5%85%E6%9E%90/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/forz/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/forz/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/forz/favicon-16x16.png">
+<link rel="manifest" href="/forz/manifest.json">
+<link rel="mask-icon" href="/forz/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link href="/forz/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="TCP拥塞控制浅析" />
+<meta property="og:description" content="拥塞的发生与不可避免 拥塞发生的主要原因在于网络能够提供的资源不足以满足用户的需求，这些资源包括缓存空间、链路带宽容量和中间节点的处理能力。由" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="http://localhost:1313/forz/post/tcp%E6%8B%A5%E5%A1%9E%E6%8E%A7%E5%88%B6%E6%B5%85%E6%9E%90/" />
+<meta property="article:published_time" content="2017-06-25T20:07:31&#43;00:00"/>
+<meta property="article:modified_time" content="2017-06-25T20:07:31&#43;00:00"/>
+
+<meta itemprop="name" content="TCP拥塞控制浅析">
+<meta itemprop="description" content="拥塞的发生与不可避免 拥塞发生的主要原因在于网络能够提供的资源不足以满足用户的需求，这些资源包括缓存空间、链路带宽容量和中间节点的处理能力。由">
+
+
+<meta itemprop="datePublished" content="2017-06-25T20:07:31&#43;00:00" />
+<meta itemprop="dateModified" content="2017-06-25T20:07:31&#43;00:00" />
+<meta itemprop="wordCount" content="2165">
+
+
+
+<meta itemprop="keywords" content="" />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="TCP拥塞控制浅析"/>
+<meta name="twitter:description" content="拥塞的发生与不可避免 拥塞发生的主要原因在于网络能够提供的资源不足以满足用户的需求，这些资源包括缓存空间、链路带宽容量和中间节点的处理能力。由"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/forz/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/forz/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/forz/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/forz/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/forz/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/forz/" class="logo">Forz Blog</a>
+</div>
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/forz/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/categories/">Categories</a>
+      </li>
+  </ul>
+</nav>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">TCP拥塞控制浅析</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2017-06-25 </span>
+        <div class="post-category">
+            <a href="/forz/categories/%E7%BD%91%E7%BB%9C/"> 网络 </a>
+            </div>
+          <span class="more-meta"> 约 2165 字 </span>
+          <span class="more-meta"> 预计阅读 5 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+<ul>
+<li><a href="#拥塞的发生与不可避免">拥塞的发生与不可避免</a></li>
+<li><a href="#拥塞控制与流量控制的区别">拥塞控制与流量控制的区别</a></li>
+<li><a href="#拥塞控制方法">拥塞控制方法</a>
+<ul>
+<li><a href="#慢启动">慢启动</a></li>
+<li><a href="#拥塞避免">拥塞避免</a></li>
+<li><a href="#拥塞检测">拥塞检测</a>
+<ul>
+<li><a href="#计时器到时">计时器到时</a></li>
+<li><a href="#三个重复ack">三个重复ACK</a></li>
+</ul></li>
+</ul></li>
+<li><a href="#与tcp拥塞控制相关的攻击">与TCP拥塞控制相关的攻击</a>
+<ul>
+<li><a href="#ack分割攻击">ACK分割攻击</a></li>
+<li><a href="#重复ack欺骗攻击">重复ACK欺骗攻击</a></li>
+</ul></li>
+</ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      
+
+<h1 id="拥塞的发生与不可避免">拥塞的发生与不可避免</h1>
+
+<p>拥塞发生的主要原因在于网络能够提供的资源不足以满足用户的需求，这些资源包括缓存空间、链路带宽容量和中间节点的处理能力。由于互联网的设计机制导致其缺乏“接纳控制”能力，因此在网络资源不足时不能限制用户数量，而只能靠降低服务质量来继续为用户服务，也就是“尽力而为”的服务。</p>
+
+<p>但是，是不是说只要增加网络资源，就能避免拥塞呢？答案却是否定的！拥塞虽然是由于网络资源的稀缺引起的，但单纯增加资源并不能避免拥塞的发生。例如增加缓存空间到一定程度时，只会加重拥塞，而不是减轻拥塞，由于输出链路的容量和处理机的速度并没有得到提高，当数据包经过长时间排队完成转发时，它们很可能早已超时，从而引起源端超时重发，而这些数据包还会继续传输到下一路由器，从而浪费网络资源，加重网络拥塞。事实上，缓存空间不足导致的丢包更多的是拥塞的“症状”而非原因。</p>
+
+<p>另外，增加链路带宽及提高处理能力可能会使得上述情况缓解一些，但往往又会将瓶颈转移到其他的地方。问题的实质往往是整个系统的各个部分的不匹配。只有所有的部分都平衡了，问题才会得到解决。</p>
+
+<h1 id="拥塞控制与流量控制的区别">拥塞控制与流量控制的区别</h1>
+
+<p>两者目的不同：</p>
+
+<ol>
+<li><p>拥塞控制的目的是防止过多的数据注入到网络中，这样可以使网络中的路由器或链路不致过载。它是一个全局性的过程，涉及到所有的主机、所有的路由器，以及降低网络传输性能有关的所有因素。</p></li>
+
+<li><p>流量控制的目的是确保一个快速的发送方不会持续地以超过接收方吸收能力的速率传输数据。它是个端到端的问题。</p></li>
+</ol>
+
+<p>两者实现端不同：</p>
+
+<p>拥塞窗口是发送方使用的拥塞控制，滑动窗口是接收方使用的流量控制。</p>
+
+<h1 id="拥塞控制方法">拥塞控制方法</h1>
+
+<p>发送方维持一个叫做拥塞窗口cwnd（congestion window）的状态变量。拥塞窗口的大小取决于网络的拥塞程度，并且动态地在变化。发送方让自己的发送窗口等于拥塞窗口，另外考虑到接受方的接收能力，发送窗口可能小于拥塞窗口。</p>
+
+<p>发送方控制拥塞窗口的原则是：只要网络没有出现拥塞，拥塞窗口就再增大一些，以便把更多的分组发送出去。但只要网络出现拥塞，拥塞窗口就减小一些，以减少注入到网络中的分组数。</p>
+
+<p>几种拥塞控制方法：</p>
+
+<ol>
+<li>慢启动( slow-start )</li>
+<li>拥塞避免( congestion avoidance )</li>
+<li>快速恢复( fast recovery )。</li>
+</ol>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/1016224-20160907114651051-2033106021.png" alt="" /></p>
+
+<h2 id="慢启动">慢启动</h2>
+
+<p>慢启动算法的思路是这样的。当主机发送数据时，如果立即把大量数据字节注入到网络，那么就有可能引起网络拥塞，因为现在并不清楚网络的负荷情况。经验证明，较好的方法是先探测一下，即由小到大主键增大发送窗口。</p>
+
+<p>初始拥塞窗口cwnd=1个SMSS，假设没有出现丢包情况且每个数据包都有相应的ACK。每接收到一个好的ACK响应。慢启动算法会以min（N，SMSS）来增加cwnd值。这里的N是指在未经确认的传输数据中能通过这一“好的ACK”确认的字节数（以SMSS为单位）。所谓的“好的ACK”是指新接收的ACK号大于之前收到的ACK。</p>
+
+<p>因此，在接收到一个数据段的ACK后，通常cwnd值会增加到2，接着会增加到2，接着会发送两个数据段。如果成功收到相应的新的ACK，cwnd会由2变4，由4变8，以此类推。</p>
+
+<h2 id="拥塞避免">拥塞避免</h2>
+
+<p>在慢启动阶段，cwnd会快速增长，需要确认一个慢启动阈值ssthresh。一旦到达阈值，TCP会进入拥塞避免阶段。慢启动阈值不是固定的，而是随时间改变的。它的主要目的是，在没有丢包发生的情况下，记住上一次“最好的”操作窗口估计值。</p>
+
+<p>拥塞避免算法的思路是让拥塞窗口cwnd缓慢的增大，及每经过一个往返时间RTT就把发送方的拥塞窗口cwnd加1，而不是加倍。这样，拥塞窗口cwnd按线性规律缓慢增长，比慢启动算法的拥塞窗口增长速率缓慢得多。</p>
+
+<h2 id="拥塞检测">拥塞检测</h2>
+
+<h3 id="计时器到时">计时器到时</h3>
+
+<p>如果计时器到时，那么存在着非常严重的拥塞的可能性，一个报文段可能已在网络中丢失并且没有关于该发送段的消息。在这种情况下，TCP做出强烈的反应：</p>
+
+<ol>
+<li>设置ssthresh为当前cwnd的一半。</li>
+<li>设置cwnd为一个SMSS的大小。</li>
+<li>启动慢启动阶段。</li>
+</ol>
+
+<h3 id="三个重复ack">三个重复ACK</h3>
+
+<p>发送方收到3个重复ACK时使用快速恢复算法。快速恢复算法基于TCP快重传机制。</p>
+
+<p>快重传规定，发送方只要一连收到3个重复的确认就应当立即重传对方尚未收到的报文段，而不必继续等待为丢失的报文段设置重传计时器到期。</p>
+
+<p>快速恢复算法规定，当发送方连续收到三个重复确认时，考虑到如果网络出现拥塞的话就不会收到好几个重复的确认，所以发送方现在认为网络可能没有出现拥塞。所以此时不执行慢启动算法，就执行“乘法减小”算法：</p>
+
+<ol>
+<li>把ssthresh门限减半。</li>
+<li>而是将cwnd设置为ssthresh的大小</li>
+<li>然后执行拥塞避免算法。</li>
+</ol>
+
+<h1 id="与tcp拥塞控制相关的攻击">与TCP拥塞控制相关的攻击</h1>
+
+<p>一种常用的攻击方式是基于接收端的不当行为。它们都可以使TCP发送端以一个比正常状态更快的速率进行数据发送。</p>
+
+<h2 id="ack分割攻击">ACK分割攻击</h2>
+
+<p>ACK分割攻击的原理是：将原有的确认字节范围拆分成多个ACK信号并返回给发送端。由于TCP拥塞控制是基于ACK数据包的到达进行操作的（而不是依据ACK信号中的ACK字段）。这样发送端的CWND会比正常情况更快速地增长。要解决这一问题，可通过计算每个ACK能确认的数据量（而不是一个数据包的到达）来判断是否为真的ACK</p>
+
+<h2 id="重复ack欺骗攻击">重复ACK欺骗攻击</h2>
+
+<p>重复ACK欺骗攻击可以使发送端在快速恢复阶段增长它的拥塞窗口。在标准快速恢复模式中，每次接收到重复ACK cwnd 都会增长。这种攻击会比正常情况更快地生成多余的重复ACK。</p>
+
+<p>转载：
+[<a href="http://www.cnblogs.com/alec1312/p/5848890.html](">http://www.cnblogs.com/alec1312/p/5848890.html](</a>)</p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2017-06-25
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      
+      <nav class="post-nav">
+        <a class="prev" href="/forz/post/tcp%E6%B5%81%E9%87%8F%E6%8E%A7%E5%88%B6%E6%B5%85%E6%9E%90/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">TCP流量控制浅析</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/forz/post/tcp%E4%B8%AD%E7%9A%84%E5%9B%9B%E5%A4%A7%E5%AE%9A%E6%97%B6%E5%99%A8/">
+            <span class="next-text nav-default">TCP中的四大定时器</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+      <a href="forzfuyao@email.com" class="iconfont icon-email" title="email"></a>
+  <a href="http://localhost:1313/forz/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/forz/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

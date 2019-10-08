@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>libevent源码剖析(六) - Forz</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="前面已经对libevent的事件处理框架和event结构体做了描述，现在是时候剖析libevent对事件的详细处理流程了，本节将分析libe" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="http://localhost:1313/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E5%85%AD/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/forz/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/forz/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/forz/favicon-16x16.png">
+<link rel="manifest" href="/forz/manifest.json">
+<link rel="mask-icon" href="/forz/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link href="/forz/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="libevent源码剖析(六)" />
+<meta property="og:description" content="前面已经对libevent的事件处理框架和event结构体做了描述，现在是时候剖析libevent对事件的详细处理流程了，本节将分析libe" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="http://localhost:1313/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E5%85%AD/" />
+<meta property="article:published_time" content="2017-06-25T17:01:26&#43;00:00"/>
+<meta property="article:modified_time" content="2017-06-25T17:01:26&#43;00:00"/>
+
+<meta itemprop="name" content="libevent源码剖析(六)">
+<meta itemprop="description" content="前面已经对libevent的事件处理框架和event结构体做了描述，现在是时候剖析libevent对事件的详细处理流程了，本节将分析libe">
+
+
+<meta itemprop="datePublished" content="2017-06-25T17:01:26&#43;00:00" />
+<meta itemprop="dateModified" content="2017-06-25T17:01:26&#43;00:00" />
+<meta itemprop="wordCount" content="3370">
+
+
+
+<meta itemprop="keywords" content="" />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="libevent源码剖析(六)"/>
+<meta name="twitter:description" content="前面已经对libevent的事件处理框架和event结构体做了描述，现在是时候剖析libevent对事件的详细处理流程了，本节将分析libe"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/forz/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/forz/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/forz/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/forz/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/forz/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/forz/" class="logo">Forz Blog</a>
+</div>
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/forz/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/categories/">Categories</a>
+      </li>
+  </ul>
+</nav>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">libevent源码剖析(六)</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2017-06-25 </span>
+        <div class="post-category">
+            <a href="/forz/categories/libevent/"> Libevent </a>
+            </div>
+          <span class="more-meta"> 约 3370 字 </span>
+          <span class="more-meta"> 预计阅读 7 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+<ul>
+<li><a href="#1-事件处理框架-event-base">1 事件处理框架-event_base</a></li>
+<li><a href="#2-创建和初始化event-base">2 创建和初始化event_base</a></li>
+<li><a href="#3-接口函数">3 接口函数</a>
+<ul>
+<li><a href="#1-注册事件">1）注册事件</a></li>
+<li><a href="#2-删除事件">2）删除事件：</a></li>
+</ul></li>
+<li><a href="#4-小结">4 小结</a></li>
+</ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      
+
+<p>前面已经对libevent的事件处理框架和event结构体做了描述，现在是时候剖析libevent对事件的详细处理流程了，本节将分析libevent的事件处理框架event_base和libevent注册、删除事件的具体流程，可结合前一节libevent对event的管理。</p>
+
+<h1 id="1-事件处理框架-event-base">1 事件处理框架-event_base</h1>
+
+<p>回想Reactor模式的几个基本组件，本节讲解的部分对应于Reactor框架组件。在libevent中，这就表现为event_base结构体，结构体声明如下，它位于event-internal.h文件中：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="k">struct</span> <span class="n">event_base</span> <span class="p">{</span>  
+ <span class="k">const</span> <span class="k">struct</span> <span class="n">eventop</span> <span class="o">*</span><span class="n">evsel</span><span class="p">;</span>  
+ <span class="kt">void</span> <span class="o">*</span><span class="n">evbase</span><span class="p">;</span>　  
+ <span class="kt">int</span> <span class="n">event_count</span><span class="p">;</span>  <span class="cm">/* counts number of total events */</span>  
+ <span class="kt">int</span> <span class="n">event_count_active</span><span class="p">;</span> <span class="cm">/* counts number of active events */</span>  
+ <span class="kt">int</span> <span class="n">event_gotterm</span><span class="p">;</span>  <span class="cm">/* Set to terminate loop */</span>  
+ <span class="kt">int</span> <span class="n">event_break</span><span class="p">;</span>  <span class="cm">/* Set to terminate loop immediately */</span>  
+ <span class="cm">/* active event management */</span>  
+ <span class="k">struct</span> <span class="n">event_list</span> <span class="o">**</span><span class="n">activequeues</span><span class="p">;</span>  
+ <span class="kt">int</span> <span class="n">nactivequeues</span><span class="p">;</span>  
+ <span class="cm">/* signal handling info */</span>  
+ <span class="k">struct</span> <span class="n">evsignal_info</span> <span class="n">sig</span><span class="p">;</span>  
+ <span class="k">struct</span> <span class="n">event_list</span> <span class="n">eventqueue</span><span class="p">;</span>  
+ <span class="k">struct</span> <span class="n">timeval</span> <span class="n">event_tv</span><span class="p">;</span>  
+ <span class="k">struct</span> <span class="n">min_heap</span> <span class="n">timeheap</span><span class="p">;</span>  
+ <span class="k">struct</span> <span class="n">timeval</span> <span class="n">tv_cache</span><span class="p">;</span>  
+<span class="p">};</span>  </code></pre></td></tr></table>
+</div>
+</div>
+<p>下面详细解释一下结构体中各字段的含义。</p>
+
+<p>evsel和evbase这两个字段的设置可能会让人有些迷惑，这里你可以把evsel和evbase看作是类和静态函数的关系，比如添加事件时的调用行为：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">evsel-&gt;add(evbase, ev)</pre></td></tr></table>
+</div>
+</div>
+<p>实际执行操作的是evbase；这相当于class::add(instance, ev)，instance就是class的一个对象实例。</p>
+
+<p>evsel指向了全局变量static const struct eventop *eventops[]中的一个；</p>
+
+<p>前面也说过，libevent将系统提供的I/O demultiplex机制统一封装成了eventop结构；因此eventops[]包含了select、poll、kequeue和epoll等等其中的若干个全局实例对象。
+evbase实际上是一个eventop实例对象；
+先来看看eventop结构体，它的成员是一系列的函数指针, 在event-internal.h文件中：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="k">struct</span> <span class="n">eventop</span> <span class="p">{</span>
+     <span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">name</span><span class="p">;</span>
+     <span class="kt">void</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="n">init</span><span class="p">)(</span><span class="k">struct</span> <span class="n">event_base</span> <span class="o">*</span><span class="p">);</span> <span class="c1">// 初始化
+</span><span class="c1"></span>     <span class="kt">int</span> <span class="p">(</span><span class="o">*</span><span class="n">add</span><span class="p">)(</span><span class="kt">void</span> <span class="o">*</span><span class="p">,</span> <span class="k">struct</span> <span class="n">event</span> <span class="o">*</span><span class="p">);</span> <span class="c1">// 注册事件
+</span><span class="c1"></span>     <span class="kt">int</span> <span class="p">(</span><span class="o">*</span><span class="n">del</span><span class="p">)(</span><span class="kt">void</span> <span class="o">*</span><span class="p">,</span> <span class="k">struct</span> <span class="n">event</span> <span class="o">*</span><span class="p">);</span> <span class="c1">// 删除事件
+</span><span class="c1"></span>     <span class="kt">int</span> <span class="p">(</span><span class="o">*</span><span class="n">dispatch</span><span class="p">)(</span><span class="k">struct</span> <span class="n">event_base</span> <span class="o">*</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="p">,</span> <span class="k">struct</span> <span class="n">timeval</span> <span class="o">*</span><span class="p">);</span> <span class="c1">// 事件分发
+</span><span class="c1"></span>     <span class="kt">void</span> <span class="p">(</span><span class="o">*</span><span class="n">dealloc</span><span class="p">)(</span><span class="k">struct</span> <span class="n">event_base</span> <span class="o">*</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="p">);</span> <span class="c1">// 注销，释放资源
+</span><span class="c1"></span>     <span class="cm">/* set if we need to reinitialize the event base */</span>
+     <span class="kt">int</span> <span class="n">need_reinit</span><span class="p">;</span>
+<span class="p">};</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>也就是说，在libevent中，每种I/O demultiplex机制的实现都必须提供这五个函数接口，来完成自身的初始化、销毁释放；对事件的注册、注销和分发。
+比如对于epoll，libevent实现了5个对应的接口函数，并在初始化时并将eventop的5个函数指针指向这5个函数，那么程序就可以使用epoll作为I/O demultiplex机制了，这个在后面会再次提到。</p>
+
+<p>activequeues是一个二级指针，前面讲过libevent支持事件优先级，因此你可以把它看作是数组，其中的元素activequeues[priority]是一个链表，链表的每个节点指向一个优先级为priority的就绪事件event。</p>
+
+<p>eventqueue，链表，保存了所有的注册事件event的指针。</p>
+
+<p>sig是由来管理信号的结构体，将在后面信号处理时专门讲解；
+timeheap是管理定时事件的小根堆，将在后面定时事件处理时专门讲解；
+event_tv和tv_cache是libevent用于时间管理的变量，将在后面讲到；
+其它各个变量都能因名知意，就不再啰嗦了。</p>
+
+<h1 id="2-创建和初始化event-base">2 创建和初始化event_base</h1>
+
+<p>创建一个event_base对象也既是创建了一个新的libevent实例，程序需要通过调用event_init()（内部调用event_base_new函数执行具体操作）函数来创建，该函数同时还对新生成的libevent实例进行了初始化。
+该函数首先为event_base实例申请空间，然后初始化timer mini-heap，选择并初始化合适的系统I/O 的demultiplexer机制，初始化各事件链表；</p>
+
+<p>函数还检测了系统的时间设置，为后面的时间管理打下基础。</p>
+
+<h1 id="3-接口函数">3 接口函数</h1>
+
+<p>前面提到Reactor框架的作用就是提供事件的注册、注销接口；根据系统提供的事件多路分发机制执行事件循环，当有事件进入“就绪”状态时，调用注册事件的回调函数来处理事件。</p>
+
+<p>Libevent中对应的接口函数主要就是：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="kt">int</span>  <span class="nf">event_add</span><span class="p">(</span><span class="k">struct</span> <span class="n">event</span> <span class="o">*</span><span class="n">ev</span><span class="p">,</span> <span class="k">const</span> <span class="k">struct</span> <span class="n">timeval</span> <span class="o">*</span><span class="n">timeout</span><span class="p">);</span>  
+<span class="kt">int</span>  <span class="nf">event_del</span><span class="p">(</span><span class="k">struct</span> <span class="n">event</span> <span class="o">*</span><span class="n">ev</span><span class="p">);</span>  
+<span class="kt">int</span>  <span class="nf">event_base_loop</span><span class="p">(</span><span class="k">struct</span> <span class="n">event_base</span> <span class="o">*</span><span class="n">base</span><span class="p">,</span> <span class="kt">int</span> <span class="n">loops</span><span class="p">);</span>  
+<span class="kt">void</span> <span class="nf">event_active</span><span class="p">(</span><span class="k">struct</span> <span class="n">event</span> <span class="o">*</span><span class="n">event</span><span class="p">,</span> <span class="kt">int</span> <span class="n">res</span><span class="p">,</span> <span class="kt">short</span> <span class="n">events</span><span class="p">);</span>  
+<span class="kt">void</span> <span class="nf">event_process_active</span><span class="p">(</span><span class="k">struct</span> <span class="n">event_base</span> <span class="o">*</span><span class="n">base</span><span class="p">);</span>  </code></pre></td></tr></table>
+</div>
+</div>
+<p>本节将按介绍事件注册和删除的代码流程，libevent的事件循环框架将在下一节再具体描述。</p>
+
+<p>对于定时事件，这些函数将调用timer heap管理接口执行插入和删除操作；对于I/O和Signal事件将调用eventopadd和delete接口函数执行插入和删除操作（eventop会对Signal事件调用Signal处理接口执行操作）；这些组件将在后面的内容描述。</p>
+
+<h2 id="1-注册事件">1）注册事件</h2>
+
+<p>函数原型：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">int event_add(struct event *ev, const struct timeval *tv)       
+参数：ev：指向要注册的事件；
+tv：超时时间；</pre></td></tr></table>
+</div>
+</div>
+<p>函数将ev注册到ev-&gt;ev_base上，事件类型由ev-&gt;ev_events指明，如果注册成功，ev将被插入到已注册链表中；如果tv不是NULL，则会同时注册定时事件，将ev添加到timer堆上；</p>
+
+<p>如果其中有一步操作失败，那么函数保证没有事件会被注册，可以讲这相当于一个原子操作。这个函数也体现了libevent细节之处的巧妙设计，且仔细看程序代码，部分有省略，注释直接附在代码中。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="kt">int</span> <span class="nf">event_add</span><span class="p">(</span><span class="k">struct</span> <span class="n">event</span> <span class="o">*</span><span class="n">ev</span><span class="p">,</span> <span class="k">const</span> <span class="k">struct</span> <span class="n">timeval</span> <span class="o">*</span><span class="n">tv</span><span class="p">)</span>  
+<span class="p">{</span>  
+ <span class="k">struct</span> <span class="n">event_base</span> <span class="o">*</span><span class="n">base</span> <span class="o">=</span> <span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_base</span><span class="p">;</span> <span class="c1">// 要注册到的event_base  
+</span><span class="c1"></span> <span class="k">const</span> <span class="k">struct</span> <span class="n">eventop</span> <span class="o">*</span><span class="n">evsel</span> <span class="o">=</span> <span class="n">base</span><span class="o">-&gt;</span><span class="n">evsel</span><span class="p">;</span>  
+ <span class="kt">void</span> <span class="o">*</span><span class="n">evbase</span> <span class="o">=</span> <span class="n">base</span><span class="o">-&gt;</span><span class="n">evbase</span><span class="p">;</span> <span class="c1">// base使用的系统I/O策略  
+</span><span class="c1"></span> <span class="c1">// 新的timer事件，调用timer heap接口在堆上预留一个位置  
+</span><span class="c1"></span> <span class="c1">// 注：这样能保证该操作的原子性：  
+</span><span class="c1"></span> <span class="c1">// 向系统I/O机制注册可能会失败，而当在堆上预留成功后，  
+</span><span class="c1"></span> <span class="c1">// 定时事件的添加将肯定不会失败；  
+</span><span class="c1"></span> <span class="c1">// 而预留位置的可能结果是堆扩充，但是内部元素并不会改变  
+</span><span class="c1"></span> <span class="k">if</span> <span class="p">(</span><span class="n">tv</span> <span class="o">!=</span> <span class="nb">NULL</span> <span class="o">&amp;&amp;</span> <span class="o">!</span><span class="p">(</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_flags</span> <span class="o">&amp;</span> <span class="n">EVLIST_TIMEOUT</span><span class="p">))</span> <span class="p">{</span>  
+  <span class="k">if</span> <span class="p">(</span><span class="n">min_heap_reserve</span><span class="p">(</span><span class="o">&amp;</span><span class="n">base</span><span class="o">-&gt;</span><span class="n">timeheap</span><span class="p">,</span>  
+   <span class="mi">1</span> <span class="o">+</span> <span class="n">min_heap_size</span><span class="p">(</span><span class="o">&amp;</span><span class="n">base</span><span class="o">-&gt;</span><span class="n">timeheap</span><span class="p">))</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>  
+   <span class="k">return</span> <span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span>  <span class="cm">/* ENOMEM == errno */</span>  
+ <span class="p">}</span>  
+ <span class="c1">// 如果事件ev不在已注册或者激活链表中，则调用evbase注册事件  
+</span><span class="c1"></span> <span class="k">if</span> <span class="p">((</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_events</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">EV_READ</span><span class="o">|</span><span class="n">EV_WRITE</span><span class="o">|</span><span class="n">EV_SIGNAL</span><span class="p">))</span> <span class="o">&amp;&amp;</span>  
+  <span class="o">!</span><span class="p">(</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_flags</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">EVLIST_INSERTED</span><span class="o">|</span><span class="n">EVLIST_ACTIVE</span><span class="p">)))</span> <span class="p">{</span>  
+   <span class="n">res</span> <span class="o">=</span> <span class="n">evsel</span><span class="o">-&gt;</span><span class="n">add</span><span class="p">(</span><span class="n">evbase</span><span class="p">,</span> <span class="n">ev</span><span class="p">);</span>  
+   <span class="k">if</span> <span class="p">(</span><span class="n">res</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="c1">// 注册成功，插入event到已注册链表中  
+</span><span class="c1"></span><span class="n">event_queue_insert</span><span class="p">(</span><span class="n">base</span><span class="p">,</span> <span class="n">ev</span><span class="p">,</span> <span class="n">EVLIST_INSERTED</span><span class="p">);</span>  
+ <span class="p">}</span>  
+ <span class="c1">// 准备添加定时事件  
+</span><span class="c1"></span> <span class="k">if</span> <span class="p">(</span><span class="n">res</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span> <span class="o">&amp;&amp;</span> <span class="n">tv</span> <span class="o">!=</span> <span class="nb">NULL</span><span class="p">)</span> <span class="p">{</span>  
+  <span class="k">struct</span> <span class="n">timeval</span> <span class="n">now</span><span class="p">;</span>  
+  <span class="c1">// EVLIST_TIMEOUT表明event已经在定时器堆中了，删除旧的  
+</span><span class="c1"></span>  <span class="k">if</span> <span class="p">(</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_flags</span> <span class="o">&amp;</span> <span class="n">EVLIST_TIMEOUT</span><span class="p">)</span>  
+   <span class="n">event_queue_remove</span><span class="p">(</span><span class="n">base</span><span class="p">,</span> <span class="n">ev</span><span class="p">,</span> <span class="n">EVLIST_TIMEOUT</span><span class="p">);</span>  
+  <span class="c1">// 如果事件已经是就绪状态则从激活链表中删除  
+</span><span class="c1"></span>  <span class="k">if</span> <span class="p">((</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_flags</span> <span class="o">&amp;</span> <span class="n">EVLIST_ACTIVE</span><span class="p">)</span> <span class="o">&amp;&amp;</span>  
+   <span class="p">(</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_res</span> <span class="o">&amp;</span> <span class="n">EV_TIMEOUT</span><span class="p">))</span> <span class="p">{</span>  
+<span class="c1">// 将ev_callback调用次数设置为0  
+</span><span class="c1"></span><span class="k">if</span> <span class="p">(</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_ncalls</span> <span class="o">&amp;&amp;</span> <span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_pncalls</span><span class="p">)</span> <span class="p">{</span>  
+ <span class="o">*</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_pncalls</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>  
+<span class="p">}</span>  
+<span class="n">event_queue_remove</span><span class="p">(</span><span class="n">base</span><span class="p">,</span> <span class="n">ev</span><span class="p">,</span> <span class="n">EVLIST_ACTIVE</span><span class="p">);</span>  
+  <span class="p">}</span>  
+  <span class="c1">// 计算时间，并插入到timer小根堆中  
+</span><span class="c1"></span>  <span class="n">gettime</span><span class="p">(</span><span class="n">base</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">now</span><span class="p">);</span>  
+  <span class="n">evutil_timeradd</span><span class="p">(</span><span class="o">&amp;</span><span class="n">now</span><span class="p">,</span> <span class="n">tv</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_timeout</span><span class="p">);</span>  
+  <span class="n">event_queue_insert</span><span class="p">(</span><span class="n">base</span><span class="p">,</span> <span class="n">ev</span><span class="p">,</span> <span class="n">EVLIST_TIMEOUT</span><span class="p">);</span>  
+ <span class="p">}</span>  
+ <span class="k">return</span> <span class="p">(</span><span class="n">res</span><span class="p">);</span>  
+<span class="p">}</span>  
+
+<span class="n">event_queue_insert</span><span class="p">()</span><span class="err">负责将事件插入到对应的链表中，下面是程序代码；</span>  
+<span class="n">event_queue_remove</span><span class="p">()</span><span class="err">负责将事件从对应的链表中删除，这里就不再重复贴代码了；</span>  
+<span class="kt">void</span> <span class="n">event_queue_insert</span><span class="p">(</span><span class="k">struct</span> <span class="n">event_base</span> <span class="o">*</span><span class="n">base</span><span class="p">,</span> <span class="k">struct</span> <span class="n">event</span> <span class="o">*</span><span class="n">ev</span><span class="p">,</span> <span class="kt">int</span> <span class="n">queue</span><span class="p">)</span>  
+<span class="p">{</span>  
+ <span class="c1">// ev可能已经在激活列表中了，避免重复插入  
+</span><span class="c1"></span> <span class="k">if</span> <span class="p">(</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_flags</span> <span class="o">&amp;</span> <span class="n">queue</span><span class="p">)</span> <span class="p">{</span>  
+  <span class="k">if</span> <span class="p">(</span><span class="n">queue</span> <span class="o">&amp;</span> <span class="n">EVLIST_ACTIVE</span><span class="p">)</span>  
+   <span class="k">return</span><span class="p">;</span>  
+ <span class="p">}</span>  
+ <span class="c1">// ...  
+</span><span class="c1"></span> <span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_flags</span> <span class="o">|=</span> <span class="n">queue</span><span class="p">;</span> <span class="c1">// 记录queue标记  
+</span><span class="c1"></span> <span class="k">switch</span> <span class="p">(</span><span class="n">queue</span><span class="p">)</span> <span class="p">{</span>  
+ <span class="k">case</span> <span class="nl">EVLIST_INSERTED</span><span class="p">:</span> <span class="c1">// I/O或Signal事件，加入已注册事件链表  
+</span><span class="c1"></span>  <span class="n">TAILQ_INSERT_TAIL</span><span class="p">(</span><span class="o">&amp;</span><span class="n">base</span><span class="o">-&gt;</span><span class="n">eventqueue</span><span class="p">,</span> <span class="n">ev</span><span class="p">,</span> <span class="n">ev_next</span><span class="p">);</span>  
+  <span class="k">break</span><span class="p">;</span>  
+ <span class="k">case</span> <span class="nl">EVLIST_ACTIVE</span><span class="p">:</span> <span class="c1">// 就绪事件，加入激活链表  
+</span><span class="c1"></span>  <span class="n">base</span><span class="o">-&gt;</span><span class="n">event_count_active</span><span class="o">++</span><span class="p">;</span>  
+  <span class="n">TAILQ_INSERT_TAIL</span><span class="p">(</span><span class="n">base</span><span class="o">-&gt;</span><span class="n">activequeues</span><span class="p">[</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_pri</span><span class="p">],</span> <span class="n">ev</span><span class="p">,</span> <span class="n">ev_active_next</span><span class="p">);</span>  
+  <span class="k">break</span><span class="p">;</span>  
+ <span class="k">case</span> <span class="nl">EVLIST_TIMEOUT</span><span class="p">:</span> <span class="c1">// 定时事件，加入堆  
+</span><span class="c1"></span>  <span class="n">min_heap_push</span><span class="p">(</span><span class="o">&amp;</span><span class="n">base</span><span class="o">-&gt;</span><span class="n">timeheap</span><span class="p">,</span> <span class="n">ev</span><span class="p">);</span>  
+  <span class="k">break</span><span class="p">;</span>  
+ <span class="p">}</span>  
+<span class="p">}</span>  </code></pre></td></tr></table>
+</div>
+</div>
+<h2 id="2-删除事件">2）删除事件：</h2>
+
+<p>函数原型为：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">int  event_del(struct event *ev);</pre></td></tr></table>
+</div>
+</div>
+<p>该函数将删除事件ev，对于I/O事件，从I/O 的demultiplexer上将事件注销；对于Signal事件，将从Signal事件链表中删除；对于定时事件，将从堆上删除；</p>
+
+<p>删除事件的操作则不一定是原子的，比如删除时间事件之后，有可能从系统I/O机制中注销会失败。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="kt">int</span> <span class="nf">event_del</span><span class="p">(</span><span class="k">struct</span> <span class="n">event</span> <span class="o">*</span><span class="n">ev</span><span class="p">)</span>  
+<span class="p">{</span>  
+ <span class="k">struct</span> <span class="n">event_base</span> <span class="o">*</span><span class="n">base</span><span class="p">;</span>  
+ <span class="k">const</span> <span class="k">struct</span> <span class="n">eventop</span> <span class="o">*</span><span class="n">evsel</span><span class="p">;</span>  
+ <span class="kt">void</span> <span class="o">*</span><span class="n">evbase</span><span class="p">;</span>  
+ <span class="c1">// ev_base为NULL，表明ev没有被注册  
+</span><span class="c1"></span> <span class="k">if</span> <span class="p">(</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_base</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span>  
+  <span class="k">return</span> <span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span>  
+ <span class="c1">// 取得ev注册的event_base和eventop指针  
+</span><span class="c1"></span> <span class="n">base</span> <span class="o">=</span> <span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_base</span><span class="p">;</span>  
+ <span class="n">evsel</span> <span class="o">=</span> <span class="n">base</span><span class="o">-&gt;</span><span class="n">evsel</span><span class="p">;</span>  
+ <span class="n">evbase</span> <span class="o">=</span> <span class="n">base</span><span class="o">-&gt;</span><span class="n">evbase</span><span class="p">;</span>  
+ <span class="c1">// 将ev_callback调用次数设置为  
+</span><span class="c1"></span> <span class="k">if</span> <span class="p">(</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_ncalls</span> <span class="o">&amp;&amp;</span> <span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_pncalls</span><span class="p">)</span> <span class="p">{</span>  
+  <span class="o">*</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_pncalls</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>  
+ <span class="p">}</span>  
+
+ <span class="c1">// 从对应的链表中删除  
+</span><span class="c1"></span> <span class="k">if</span> <span class="p">(</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_flags</span> <span class="o">&amp;</span> <span class="n">EVLIST_TIMEOUT</span><span class="p">)</span>  
+  <span class="n">event_queue_remove</span><span class="p">(</span><span class="n">base</span><span class="p">,</span> <span class="n">ev</span><span class="p">,</span> <span class="n">EVLIST_TIMEOUT</span><span class="p">);</span>  
+ <span class="k">if</span> <span class="p">(</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_flags</span> <span class="o">&amp;</span> <span class="n">EVLIST_ACTIVE</span><span class="p">)</span>  
+  <span class="n">event_queue_remove</span><span class="p">(</span><span class="n">base</span><span class="p">,</span> <span class="n">ev</span><span class="p">,</span> <span class="n">EVLIST_ACTIVE</span><span class="p">);</span>  
+ <span class="k">if</span> <span class="p">(</span><span class="n">ev</span><span class="o">-&gt;</span><span class="n">ev_flags</span> <span class="o">&amp;</span> <span class="n">EVLIST_INSERTED</span><span class="p">)</span> <span class="p">{</span>  
+  <span class="n">event_queue_remove</span><span class="p">(</span><span class="n">base</span><span class="p">,</span> <span class="n">ev</span><span class="p">,</span> <span class="n">EVLIST_INSERTED</span><span class="p">);</span>  
+  <span class="c1">// EVLIST_INSERTED表明是I/O或者Signal事件，  
+</span><span class="c1"></span>  <span class="c1">// 需要调用I/O demultiplexer注销事件  
+</span><span class="c1"></span>  <span class="k">return</span> <span class="p">(</span><span class="n">evsel</span><span class="o">-&gt;</span><span class="n">del</span><span class="p">(</span><span class="n">evbase</span><span class="p">,</span> <span class="n">ev</span><span class="p">));</span>  
+ <span class="p">}</span>  
+ <span class="k">return</span> <span class="p">(</span><span class="mi">0</span><span class="p">);</span>  
+<span class="p">}</span>  </code></pre></td></tr></table>
+</div>
+</div>
+<h1 id="4-小结">4 小结</h1>
+
+<p>分析了event_base这一重要结构体，初步看到了libevent对系统的I/O demultiplex机制的封装event_op结构，并结合源代码分析了事件的注册和删除处理，下面将会接着分析事件管理框架中的主事件循环部分。</p>
+
+<p>转载：[<a href="http://blog.csdn.net/sparkliang/article/details/4985955](">http://blog.csdn.net/sparkliang/article/details/4985955](</a>)</p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2017-06-25
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      
+      <nav class="post-nav">
+        <a class="prev" href="/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E4%B8%83/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">libevent源码剖析(七)</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E4%BA%94/">
+            <span class="next-text nav-default">libevent源码剖析(五</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+      <a href="forzfuyao@email.com" class="iconfont icon-email" title="email"></a>
+  <a href="http://localhost:1313/forz/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/forz/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

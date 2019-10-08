@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>为什么不要在单个sql.Tx中使用协程 - Forz</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="问题来源 简单来说就是企图在一个事务中开启多个协程执行并发查询,会出现busy buffer的问题 接下来这篇文章将尝试深入探讨产生 busy buffer 的根本原因" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="http://localhost:1313/forz/post/%E4%B8%BA%E4%BB%80%E4%B9%88%E4%B8%8D%E8%A6%81%E5%9C%A8%E5%8D%95%E4%B8%AAsql.tx%E4%B8%AD%E4%BD%BF%E7%94%A8%E5%8D%8F%E7%A8%8B/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/forz/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/forz/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/forz/favicon-16x16.png">
+<link rel="manifest" href="/forz/manifest.json">
+<link rel="mask-icon" href="/forz/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link href="/forz/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="为什么不要在单个sql.Tx中使用协程" />
+<meta property="og:description" content="问题来源 简单来说就是企图在一个事务中开启多个协程执行并发查询,会出现busy buffer的问题 接下来这篇文章将尝试深入探讨产生 busy buffer 的根本原因" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="http://localhost:1313/forz/post/%E4%B8%BA%E4%BB%80%E4%B9%88%E4%B8%8D%E8%A6%81%E5%9C%A8%E5%8D%95%E4%B8%AAsql.tx%E4%B8%AD%E4%BD%BF%E7%94%A8%E5%8D%8F%E7%A8%8B/" />
+<meta property="article:published_time" content="2019-07-04T16:03:49&#43;00:00"/>
+<meta property="article:modified_time" content="2019-07-04T16:03:49&#43;00:00"/>
+
+<meta itemprop="name" content="为什么不要在单个sql.Tx中使用协程">
+<meta itemprop="description" content="问题来源 简单来说就是企图在一个事务中开启多个协程执行并发查询,会出现busy buffer的问题 接下来这篇文章将尝试深入探讨产生 busy buffer 的根本原因">
+
+
+<meta itemprop="datePublished" content="2019-07-04T16:03:49&#43;00:00" />
+<meta itemprop="dateModified" content="2019-07-04T16:03:49&#43;00:00" />
+<meta itemprop="wordCount" content="2274">
+
+
+
+<meta itemprop="keywords" content="Go,Mysql," />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="为什么不要在单个sql.Tx中使用协程"/>
+<meta name="twitter:description" content="问题来源 简单来说就是企图在一个事务中开启多个协程执行并发查询,会出现busy buffer的问题 接下来这篇文章将尝试深入探讨产生 busy buffer 的根本原因"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/forz/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/forz/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/forz/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/forz/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/forz/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/forz/" class="logo">Forz Blog</a>
+</div>
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/forz/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/categories/">Categories</a>
+      </li>
+  </ul>
+</nav>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">为什么不要在单个sql.Tx中使用协程</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2019-07-04 </span>
+        <div class="post-category">
+            <a href="/forz/categories/go/"> Go </a>
+            </div>
+          <span class="more-meta"> 约 2274 字 </span>
+          <span class="more-meta"> 预计阅读 5 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+<ul>
+<li><a href="#问题来源">问题来源</a></li>
+<li><a href="#为什么会出现-busy-buffer">为什么会出现 busy buffer？</a></li>
+<li><a href="#为什么不关闭-rows-会出现-busy-buffer">为什么不关闭 Rows 会出现 busy buffer</a></li>
+<li><a href="#为什么不要在一个事务中执行并发的查询">为什么不要在一个事务中执行并发的查询？</a></li>
+<li><a href="#可以在一个事务中执行并发的更新吗">可以在一个事务中执行并发的更新吗？</a></li>
+</ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      
+
+<h1 id="问题来源">问题来源</h1>
+
+<p>简单来说就是企图在一个事务中开启多个协程执行并发查询,会出现busy buffer的问题</p>
+
+<p>接下来这篇文章将尝试深入探讨产生 busy buffer 的根本原因。</p>
+
+<h1 id="为什么会出现-busy-buffer">为什么会出现 busy buffer？</h1>
+
+<p>事务执行的语句的返回的 Rows 如果没有关闭，那么在事务里再次执行其他语句，会返回 busy buffer，这样也对，但有些肤浅，也不够准确。</p>
+
+<p>我们所使用的 database/sql 提供的是一个数据库的抽象，具体负责连接数据库、收发包的则是 go-sql-driver/mysql。当在一个事务中执行一条 exec 语句时，客户端通过 mysqlConn 向 db 发送 CommandPacket，具体的执行流程是：tx.ExecContext -&gt; tx.db.execDC-&gt; ctxDriverExec -&gt; mc.Exec(Execer) -&gt; mc.writeCommandPacketStr(mysqlConn)。</p>
+
+<p>向 mysqlConn 连接中的 buffer中写数据之前，需要预先申请空间，多出的4个字节为头部。一个 mysqlConn 连接中在同一时间只有一个 buffer 可以用，如果 buffer 被占用，就会返回 ErrBusyBuffer，实际上就是 busy buffer</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 来自：go-sql-driver/mysql@1.4.0/packets.go#L419
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">mc</span> <span class="o">*</span><span class="nx">mysqlConn</span><span class="p">)</span> <span class="nf">writeCommandPacketStr</span><span class="p">(</span><span class="nx">command</span> <span class="kt">byte</span><span class="p">,</span> <span class="nx">arg</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+ <span class="c1">// Reset Packet Sequence
+</span><span class="c1"></span>    <span class="nx">mc</span><span class="p">.</span><span class="nx">sequence</span> <span class="p">=</span> <span class="mi">0</span>
+    <span class="nx">pktLen</span> <span class="o">:=</span> <span class="mi">1</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="nx">arg</span><span class="p">)</span>
+    <span class="nx">data</span> <span class="o">:=</span> <span class="nx">mc</span><span class="p">.</span><span class="nx">buf</span><span class="p">.</span><span class="nf">takeBuffer</span><span class="p">(</span><span class="nx">pktLen</span> <span class="o">+</span> <span class="mi">4</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">data</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="c1">// cannot take the buffer. Something must be wrong with the connection
+</span><span class="c1"></span>        <span class="nx">errLog</span><span class="p">.</span><span class="nf">Print</span><span class="p">(</span><span class="nx">ErrBusyBuffer</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nx">errBadConnNoWrite</span>
+     <span class="p">}</span>
+    <span class="c1">// Add command byte
+</span><span class="c1"></span>    <span class="nx">data</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span> <span class="p">=</span> <span class="nx">command</span>
+    <span class="c1">// Add arg
+</span><span class="c1"></span>    <span class="nb">copy</span><span class="p">(</span><span class="nx">data</span><span class="p">[</span><span class="mi">5</span><span class="p">:],</span> <span class="nx">arg</span><span class="p">)</span>
+     <span class="c1">// Send CMD packet
+</span><span class="c1"></span>    <span class="k">return</span> <span class="nx">mc</span><span class="p">.</span><span class="nf">writePacket</span><span class="p">(</span><span class="nx">data</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="c1">// 来自：go-sql-driver/mysql@1.4.0/buffer.go#L112
+</span><span class="c1">// takeBuffer returns a buffer with the requested size.
+</span><span class="c1">// If possible, a slice from the existing buffer is returned.
+</span><span class="c1">// Otherwise a bigger buffer is made.
+</span><span class="c1">// Only one buffer (total) can be used at a time.（一次仅仅只能有一个 buffer 被使用）
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">buffer</span><span class="p">)</span> <span class="nf">takeBuffer</span><span class="p">(</span><span class="nx">length</span> <span class="kt">int</span><span class="p">)</span> <span class="p">[]</span><span class="kt">byte</span> <span class="p">{</span>
+    <span class="c1">// 如果 buffer 有值，就会返回 nil （即不能分配 buffer）
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">b</span><span class="p">.</span><span class="nx">length</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="kc">nil</span>
+    <span class="p">}</span>
+    <span class="c1">// test (cheap) general case first
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">length</span> <span class="o">&lt;=</span> <span class="nx">defaultBufSize</span> <span class="o">||</span> <span class="nx">length</span> <span class="o">&lt;=</span> <span class="nb">cap</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">buf</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nx">b</span><span class="p">.</span><span class="nx">buf</span><span class="p">[:</span><span class="nx">length</span><span class="p">]</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="nx">length</span> <span class="p">&lt;</span> <span class="nx">maxPacketSize</span> <span class="p">{</span>
+        <span class="nx">b</span><span class="p">.</span><span class="nx">buf</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">length</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nx">b</span><span class="p">.</span><span class="nx">buf</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">length</span><span class="p">)</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>那么 buffer 什么时候清空，然后 buffer.length 重新等于 0，可以执行新的查询呢？把 buffer 里面的内容全部读出来就可以了，也就是调用 readPacket()。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 来自：go-sql-driver/mysql@1.4.0/packets.go#L27
+</span><span class="c1">// Read packet to buffer ‘data’
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">mc</span> <span class="o">*</span><span class="nx">mysqlConn</span><span class="p">)</span> <span class="nf">readPacket</span><span class="p">()</span> <span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+     <span class="kd">var</span> <span class="nx">prevData</span> <span class="p">[]</span><span class="kt">byte</span>
+     <span class="k">for</span> <span class="p">{</span>
+         <span class="c1">// read packet header
+</span><span class="c1"></span>         <span class="nx">data</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">mc</span><span class="p">.</span><span class="nx">buf</span><span class="p">.</span><span class="nf">readNext</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+         <span class="c1">//…校验
+</span><span class="c1"></span>         <span class="c1">// read packet body [pktLen bytes]
+</span><span class="c1"></span>         <span class="nx">data</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">mc</span><span class="p">.</span><span class="nx">buf</span><span class="p">.</span><span class="nf">readNext</span><span class="p">(</span><span class="nx">pktLen</span><span class="p">)</span>
+         <span class="c1">//…其他判断
+</span><span class="c1"></span>         <span class="nx">prevData</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">prevData</span><span class="p">,</span> <span class="nx">data</span><span class="err">…</span><span class="p">)</span>
+     <span class="p">}</span>
+<span class="p">}</span>
+<span class="c1">// 来自：go-sql-driver/mysql@1.4.0/buffer.go#L94
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">buffer</span><span class="p">)</span> <span class="nf">readNext</span><span class="p">(</span><span class="nx">need</span> <span class="kt">int</span><span class="p">)</span> <span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+     <span class="k">if</span> <span class="nx">b</span><span class="p">.</span><span class="nx">length</span> <span class="p">&lt;</span> <span class="nx">need</span> <span class="p">{</span>
+         <span class="c1">// refill
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nf">fill</span><span class="p">(</span><span class="nx">need</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+         <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+     <span class="p">}</span>
+ <span class="p">}</span>
+ 
+     <span class="nx">offset</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">idx</span>
+     <span class="nx">b</span><span class="p">.</span><span class="nx">idx</span> <span class="o">+=</span> <span class="nx">need</span>
+     <span class="nx">b</span><span class="p">.</span><span class="nx">length</span> <span class="o">-=</span> <span class="nx">need</span>
+     <span class="k">return</span> <span class="nx">b</span><span class="p">.</span><span class="nx">buf</span><span class="p">[</span><span class="nx">offset</span><span class="p">:</span><span class="nx">b</span><span class="p">.</span><span class="nx">idx</span><span class="p">],</span> <span class="kc">nil</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<h1 id="为什么不关闭-rows-会出现-busy-buffer">为什么不关闭 Rows 会出现 busy buffer</h1>
+
+<p>首先，这里的 Rows 是执行 query 返回的结果，当我们执行 rows, err := tx.Query(&ldquo;SELECT 1&rdquo;) 拿到 Rows 时，数据还在 buffer 里面，并没有读出来。</p>
+
+<p>这时如果有其他协程在这个事务里执行语句，要向 db 发包，就会出现 busy buffer，因为在一个事务里，只有一个连接可以用。</p>
+
+<p>前面提到，把数据从 buffer 中读出来就可以重新利用这一条 mysqlConn 发包，那么把 Rows 中的数据读出来还会出现这个问题吗？是可以的，加上一句 for rows.Next(){rows1.Scan()}就不会出现 busy buffer 了。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 来自：go-sql-driver/mysql@1.4.0/rows.go
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">rows</span> <span class="o">*</span><span class="nx">textRows</span><span class="p">)</span> <span class="nf">Next</span><span class="p">(</span><span class="nx">dest</span> <span class="p">[]</span><span class="nx">driver</span><span class="p">.</span><span class="nx">Value</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+ <span class="k">if</span> <span class="nx">mc</span> <span class="o">:=</span> <span class="nx">rows</span><span class="p">.</span><span class="nx">mc</span><span class="p">;</span> <span class="nx">mc</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+ <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">mc</span><span class="p">.</span><span class="nb">error</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+ <span class="k">return</span> <span class="nx">err</span>
+ <span class="p">}</span>
+ <span class="c1">// Fetch next row from stream
+</span><span class="c1"></span> <span class="c1">// 这里会调用 mc.readPacket() 将 buffer 里的数据读出来。
+</span><span class="c1"></span> <span class="k">return</span> <span class="nx">rows</span><span class="p">.</span><span class="nf">readRow</span><span class="p">(</span><span class="nx">dest</span><span class="p">)</span>
+ <span class="p">}</span>
+ <span class="k">return</span> <span class="nx">io</span><span class="p">.</span><span class="nx">EOF</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>当然关闭也是可以的，我们看一下关闭 rows 后 buffer 会怎样。会由 mysqlConn 来负责处理没有读的 buffer，会调用 mc.readUntilEOF() 将 buffer 里的内容全部读出来，直到 EOF。mc.discardResults() 也会调用 mc.readUntilEOF()，而 mc.readUntilEOF() 则会调用 mc.readPacket()。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 来自：go-sql-driver/mysql@1.4.0/rows.go
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">rows</span> <span class="o">*</span><span class="nx">mysqlRows</span><span class="p">)</span> <span class="nf">Close</span><span class="p">()</span> <span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">f</span> <span class="o">:=</span> <span class="nx">rows</span><span class="p">.</span><span class="nx">finish</span><span class="p">;</span> <span class="nx">f</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nf">f</span><span class="p">()</span>
+    <span class="nx">rows</span><span class="p">.</span><span class="nx">finish</span> <span class="p">=</span> <span class="kc">nil</span>
+    <span class="p">}</span>
+    <span class="nx">mc</span> <span class="o">:=</span> <span class="nx">rows</span><span class="p">.</span><span class="nx">mc</span>
+    <span class="k">if</span> <span class="nx">mc</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="k">return</span> <span class="kc">nil</span>
+    <span class="p">}</span>
+ <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">mc</span><span class="p">.</span><span class="nb">error</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nx">err</span>
+ <span class="p">}</span>
+ <span class="c1">// Remove unread packets from stream
+</span><span class="c1"></span> <span class="k">if</span> <span class="p">!</span><span class="nx">rows</span><span class="p">.</span><span class="nx">rs</span><span class="p">.</span><span class="nx">done</span> <span class="p">{</span>
+    <span class="nx">err</span> <span class="p">=</span> <span class="nx">mc</span><span class="p">.</span><span class="nf">readUntilEOF</span><span class="p">()</span>
+ <span class="p">}</span>
+ <span class="k">if</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">mc</span><span class="p">.</span><span class="nf">discardResults</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nx">err</span>
+    <span class="p">}</span>
+ <span class="p">}</span>
+<span class="nx">rows</span><span class="p">.</span><span class="nx">mc</span> <span class="p">=</span> <span class="kc">nil</span>
+ <span class="k">return</span> <span class="nx">err</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>当然了，打开的资源是要关闭的，因此只执行 for rows.Next(){rows1.Scan()}是不够的，还要关闭 rows.</p>
+
+<h1 id="为什么不要在一个事务中执行并发的查询">为什么不要在一个事务中执行并发的查询？</h1>
+
+<p>首先不要用并发的协程去操作同一个连接，实际上上面的分析也说明了，如果你这么做了，go-sql-driver/mysql 很有可能会返回给你一个 busy buffer。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 来自 src/database/sql/driver.go
+</span><span class="c1">// Conn is a connection to a database. It is not used concurrently
+</span><span class="c1">// by multiple goroutines.
+</span><span class="c1">//
+</span><span class="c1">// Conn is assumed to be stateful.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Conn</span> <span class="kd">interface</span> <span class="p">{</span>
+ <span class="c1">// Prepare returns a prepared statement, bound to this connection.
+</span><span class="c1"></span> <span class="nf">Prepare</span><span class="p">(</span><span class="nx">query</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">Stmt</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span>
+ <span class="c1">// Close invalidates and potentially stops any current
+</span><span class="c1"></span> <span class="c1">// prepared statements and transactions, marking this
+</span><span class="c1"></span> <span class="c1">// connection as no longer in use.
+</span><span class="c1"></span> <span class="c1">//
+</span><span class="c1"></span> <span class="c1">// Because the sql package maintains a free pool of
+</span><span class="c1"></span> <span class="c1">// connections and only calls Close when there’s a surplus of
+</span><span class="c1"></span> <span class="c1">// idle connections, it shouldn’t be necessary for drivers to
+</span><span class="c1"></span> <span class="c1">// do their own connection caching.
+</span><span class="c1"></span> <span class="nf">Close</span><span class="p">()</span> <span class="kt">error</span>
+ <span class="c1">// Begin starts and returns a new transaction.
+</span><span class="c1"></span> <span class="c1">//
+</span><span class="c1"></span> <span class="c1">// Deprecated: Drivers should implement ConnBeginTx instead (or additionally).
+</span><span class="c1"></span> <span class="nf">Begin</span><span class="p">()</span> <span class="p">(</span><span class="nx">Tx</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>一个事务只有一个连接，当调用 db.Begin() 开启一个事务时，sql.DB 会从连接池中取出一个连接或者创建一个新的连接分配给这个事务。</p>
+
+<h1 id="可以在一个事务中执行并发的更新吗">可以在一个事务中执行并发的更新吗？</h1>
+
+<p>是可以的，因为更新或者插入的操作调用的是 Exec()，db 返回的 result 在这里就直接从 buffer 中读出来了。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 来自：go-sql-driver/mysql@1.4.0/connection.go
+</span><span class="c1">// Internal function to execute commands
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">mc</span> <span class="o">*</span><span class="nx">mysqlConn</span><span class="p">)</span> <span class="nf">exec</span><span class="p">(</span><span class="nx">query</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+ <span class="c1">// Send command
+</span><span class="c1"></span> <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">mc</span><span class="p">.</span><span class="nf">writeCommandPacketStr</span><span class="p">(</span><span class="nx">comQuery</span><span class="p">,</span> <span class="nx">query</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+ <span class="k">return</span> <span class="nx">mc</span><span class="p">.</span><span class="nf">markBadConn</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+ <span class="p">}</span>
+ <span class="c1">// Read Result
+</span><span class="c1"></span> <span class="nx">resLen</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">mc</span><span class="p">.</span><span class="nf">readResultSetHeaderPacket</span><span class="p">()</span>
+ <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+ <span class="k">return</span> <span class="nx">err</span>
+ <span class="p">}</span>
+ <span class="k">if</span> <span class="nx">resLen</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+ <span class="c1">// columns
+</span><span class="c1"></span> <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">mc</span><span class="p">.</span><span class="nf">readUntilEOF</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+ <span class="k">return</span> <span class="nx">err</span>
+ <span class="p">}</span>
+ <span class="c1">// rows
+</span><span class="c1"></span> <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">mc</span><span class="p">.</span><span class="nf">readUntilEOF</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+ <span class="k">return</span> <span class="nx">err</span>
+ <span class="p">}</span>
+ <span class="p">}</span>
+ <span class="k">return</span> <span class="nx">mc</span><span class="p">.</span><span class="nf">discardResults</span><span class="p">()</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>转载:<a href="https://medium.com/impopper-engineering/go-concurrency-query-in-mysql-transactions-f6018c7b16b2">https://medium.com/impopper-engineering/go-concurrency-query-in-mysql-transactions-f6018c7b16b2</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2019-07-04
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/forz/tags/go/">Go</a>
+          <a href="/forz/tags/mysql/">Mysql</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/forz/post/goroutine%E7%9A%84%E8%B0%83%E5%BA%A6%E6%9C%BA%E5%88%B6%E5%9F%BA%E6%9C%AC%E5%8E%9F%E7%90%86/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Goroutine的调度机制基本原理</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/forz/post/%E9%85%8D%E7%BD%AEsql-db%E8%8E%B7%E5%BE%97%E6%9B%B4%E5%A5%BD%E7%9A%84%E6%80%A7%E8%83%BD/">
+            <span class="next-text nav-default">配置sql.DB获得更好的性能</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+      <a href="forzfuyao@email.com" class="iconfont icon-email" title="email"></a>
+  <a href="http://localhost:1313/forz/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/forz/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

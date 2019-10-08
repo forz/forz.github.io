@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>libevent源码剖析(十二) - Forz</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="Libevent本身不是多线程安全的，在多核的时代，如何能充分利用CPU的能力呢，这一节来说说如何在多线程环境中使用libevent，跟源代" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="http://localhost:1313/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E5%8D%81%E4%BA%8C/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/forz/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/forz/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/forz/favicon-16x16.png">
+<link rel="manifest" href="/forz/manifest.json">
+<link rel="mask-icon" href="/forz/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link href="/forz/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="libevent源码剖析(十二)" />
+<meta property="og:description" content="Libevent本身不是多线程安全的，在多核的时代，如何能充分利用CPU的能力呢，这一节来说说如何在多线程环境中使用libevent，跟源代" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="http://localhost:1313/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E5%8D%81%E4%BA%8C/" />
+<meta property="article:published_time" content="2017-06-25T17:02:21&#43;00:00"/>
+<meta property="article:modified_time" content="2017-06-25T17:02:21&#43;00:00"/>
+
+<meta itemprop="name" content="libevent源码剖析(十二)">
+<meta itemprop="description" content="Libevent本身不是多线程安全的，在多核的时代，如何能充分利用CPU的能力呢，这一节来说说如何在多线程环境中使用libevent，跟源代">
+
+
+<meta itemprop="datePublished" content="2017-06-25T17:02:21&#43;00:00" />
+<meta itemprop="dateModified" content="2017-06-25T17:02:21&#43;00:00" />
+<meta itemprop="wordCount" content="1763">
+
+
+
+<meta itemprop="keywords" content="" />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="libevent源码剖析(十二)"/>
+<meta name="twitter:description" content="Libevent本身不是多线程安全的，在多核的时代，如何能充分利用CPU的能力呢，这一节来说说如何在多线程环境中使用libevent，跟源代"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/forz/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/forz/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/forz/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/forz/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/forz/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/forz/" class="logo">Forz Blog</a>
+</div>
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/forz/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/categories/">Categories</a>
+      </li>
+  </ul>
+</nav>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">libevent源码剖析(十二)</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2017-06-25 </span>
+        <div class="post-category">
+            <a href="/forz/categories/libevent/"> Libevent </a>
+            </div>
+          <span class="more-meta"> 约 1763 字 </span>
+          <span class="more-meta"> 预计阅读 4 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+<ul>
+<li><a href="#1-错误使用示例">1 错误使用示例</a></li>
+<li><a href="#2-支持多线程的几种模式">2 支持多线程的几种模式</a></li>
+<li><a href="#2-1-暴力抢占">2.1 暴力抢占</a></li>
+<li><a href="#2-2-纯粹的消息通知机制">2.2 纯粹的消息通知机制</a></li>
+<li><a href="#2-3-消息通知-同步层">2.3 消息通知+同步层</a></li>
+<li><a href="#3例子-memcached">3例子——memcached</a></li>
+<li><a href="#4-小结">4 小结</a></li>
+</ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      
+
+<p>Libevent本身不是多线程安全的，在多核的时代，如何能充分利用CPU的能力呢，这一节来说说如何在多线程环境中使用libevent，跟源代码并没有太大的关系，纯粹是使用上的技巧。</p>
+
+<h1 id="1-错误使用示例">1 错误使用示例</h1>
+
+<p>在多核的CPU上只使用一个线程始终是对不起CPU的处理能力啊，那好吧，那就多创建几个线程，比如下面的简单服务器场景。</p>
+
+<ol>
+<li>主线程创建工作线程1；</li>
+<li>接着主线程监听在端口上，等待新的连接；</li>
+<li>在线程1中执行event事件循环，等待事件到来；</li>
+<li>新连接到来，主线程调用libevent接口event_add将新连接注册到libevent上；</li>
+</ol>
+
+<p>… …</p>
+
+<p>上面的逻辑看起来没什么错误，在很多服务器设计中都可能用到主线程和工作线程的模式….
+可是就在线程1注册事件时，主线程很可能也在操作事件，比如删除，修改，通过libevent的源代码也能看到，没有同步保护机制，问题麻烦了，看起来不能这样做啊，难道只能使用单线程不成！？</p>
+
+<h1 id="2-支持多线程的几种模式">2 支持多线程的几种模式</h1>
+
+<p>Libevent并不是线程安全的，但这不代表libevent不支持多线程模式，其实方法在前面已经将signal事件处理时就接触到了，那就是消息通知机制。</p>
+
+<p>一句话，“你发消息通知我，然后再由我在合适的时间来处理”；</p>
+
+<p>说到这就再多说几句，再打个比方，把你自己比作一个工作线程，而你的头是主线程，你有一个消息信箱来接收别人发给你的消息，当时头有个新任务要指派给你。</p>
+
+<h1 id="2-1-暴力抢占">2.1 暴力抢占</h1>
+
+<p>那么第一节中使用的多线程方法相当下面的流程：</p>
+
+<ol>
+<li>当时你正在做事，比如在写文档；</li>
+<li>你的头找到了一个任务，要指派给你，比如帮他搞个PPT，哈；</li>
+<li>头命令你马上搞PPT，你这是不得不停止手头的工作，把PPT搞定了再接着写文档；</li>
+</ol>
+
+<p>…</p>
+
+<h1 id="2-2-纯粹的消息通知机制">2.2 纯粹的消息通知机制</h1>
+
+<p>那么基于纯粹的消息通知机制的多线程方式就像下面这样：</p>
+
+<ol>
+<li>当时你正在写文档；</li>
+<li>你的头找到了一个任务，要指派给你，帮他搞个PPT；</li>
+<li>头发个消息到你信箱，有个PPT要帮他搞定，这时你并不鸟他；</li>
+<li>你写好文档，接着检查消息发现头有个PPT要你搞定，你开始搞PPT；</li>
+</ol>
+
+<p>…</p>
+
+<p>第一种的好处是消息可以立即得到处理，但是很方法很粗暴，你必须立即处理这个消息，所以你必须处理好切换问题，省得把文档上的内容不小心写到PPT里。在操作系统的进程通信中，消息队列（消息信箱）都是操作系统维护的，你不必关心。</p>
+
+<p>第二种的优点是通过消息通知，切换问题省心了，不过消息是不能立即处理的（基于消息通知机制，这个总是难免的），而且所有的内容都通过消息发送，比如PPT的格式、内容等等信息，这无疑增加了通信开销。</p>
+
+<h1 id="2-3-消息通知-同步层">2.3 消息通知+同步层</h1>
+
+<p>有个折中机制可以减少消息通信的开销，就是提取一个同步层，还拿上面的例子来说，你把工作安排都存放在一个工作队列中，而且你能够保证“任何人把新任务扔到这个队列”，“自己取出当前第一个任务”等这些操作都能够保证不会把队列搞乱（其实就是个加锁的队列容器）。</p>
+
+<p>再来看看处理过程和上面有什么不同：</p>
+
+<ol>
+<li>当时你正在写文档；</li>
+<li>你的头找到了一个任务，要指派给你，帮他搞个PPT；</li>
+<li>头有个PPT要你搞定，他把任务push到你的工作队列中，包括了PPT的格式、内容等信息；</li>
+<li>头发个消息（一个字节）到你信箱，有个PPT要帮他搞定，这时你并不鸟他；</li>
+<li>你写好文档，发现有新消息（这预示着有新任务来了），检查工作队列知道头有个PPT要你搞定，你开始搞PPT；</li>
+</ol>
+
+<p>…</p>
+
+<p>工作队列其实就是一个加锁的容器（队列、链表等等），这个很容易实现实现；而消息通知仅需要一个字节，具体的任务都push到了在工作队列中，因此想比2.2减少了不少通信开销。</p>
+
+<p>多线程编程有很多陷阱，线程间资源的同步互斥不是一两句能说得清的，而且出现bug很难跟踪调试；这也有很多的经验和教训，因此如果让我选择，在绝大多数情况下都会选择机制3作为实现多线程的方法。</p>
+
+<h1 id="3例子-memcached">3例子——memcached</h1>
+
+<p>Memcached中的网络部分就是基于libevent完成的，其中的多线程模型就是典型的消息通知+同步层机制。下面的图足够说明其多线程模型了，其中有详细的文字说明。</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/Picture1.jpg" alt="" /></p>
+
+<h1 id="4-小结">4 小结</h1>
+
+<p>本节更是libevent的使用方面的技巧，讨论了一下如何让libevent支持多线程，以及几种支持多线程的机制，和memcached使用libevent的多线程模型。</p>
+
+<p>转载：[<a href="http://blog.csdn.net/sparkliang/article/details/5130822](">http://blog.csdn.net/sparkliang/article/details/5130822](</a>)</p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2017-06-25
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      
+      <nav class="post-nav">
+        <a class="prev" href="/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E5%8D%81%E4%B8%89/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">libevent源码剖析(十三)</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E5%8D%81%E4%B8%80/">
+            <span class="next-text nav-default">libevent源码剖析(十一)</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+      <a href="forzfuyao@email.com" class="iconfont icon-email" title="email"></a>
+  <a href="http://localhost:1313/forz/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/forz/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

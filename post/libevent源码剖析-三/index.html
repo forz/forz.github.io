@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>libevent源码剖析(三) - Forz</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="1 前言 学习源代码该从哪里入手？我觉得从程序的基本使用场景和代码的整体处理流程入手是个不错的方法，至少从个人的经验上讲，用此方法分析libev" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="http://localhost:1313/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E4%B8%89/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/forz/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/forz/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/forz/favicon-16x16.png">
+<link rel="manifest" href="/forz/manifest.json">
+<link rel="mask-icon" href="/forz/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link href="/forz/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="libevent源码剖析(三)" />
+<meta property="og:description" content="1 前言 学习源代码该从哪里入手？我觉得从程序的基本使用场景和代码的整体处理流程入手是个不错的方法，至少从个人的经验上讲，用此方法分析libev" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="http://localhost:1313/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E4%B8%89/" />
+<meta property="article:published_time" content="2017-06-25T17:00:59&#43;00:00"/>
+<meta property="article:modified_time" content="2017-06-25T17:00:59&#43;00:00"/>
+
+<meta itemprop="name" content="libevent源码剖析(三)">
+<meta itemprop="description" content="1 前言 学习源代码该从哪里入手？我觉得从程序的基本使用场景和代码的整体处理流程入手是个不错的方法，至少从个人的经验上讲，用此方法分析libev">
+
+
+<meta itemprop="datePublished" content="2017-06-25T17:00:59&#43;00:00" />
+<meta itemprop="dateModified" content="2017-06-25T17:00:59&#43;00:00" />
+<meta itemprop="wordCount" content="1585">
+
+
+
+<meta itemprop="keywords" content="" />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="libevent源码剖析(三)"/>
+<meta name="twitter:description" content="1 前言 学习源代码该从哪里入手？我觉得从程序的基本使用场景和代码的整体处理流程入手是个不错的方法，至少从个人的经验上讲，用此方法分析libev"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/forz/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/forz/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/forz/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/forz/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/forz/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/forz/" class="logo">Forz Blog</a>
+</div>
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/forz/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/categories/">Categories</a>
+      </li>
+  </ul>
+</nav>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">libevent源码剖析(三)</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2017-06-25 </span>
+        <div class="post-category">
+            <a href="/forz/categories/libevent/"> Libevent </a>
+            </div>
+          <span class="more-meta"> 约 1585 字 </span>
+          <span class="more-meta"> 预计阅读 4 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+<ul>
+<li><a href="#1-前言">1 前言</a></li>
+<li><a href="#2-基本应用场景">2 基本应用场景</a>
+<ul>
+<li><a href="#1-首先初始化libevent库-并保存返回的指针">1）首先初始化libevent库，并保存返回的指针</a></li>
+<li><a href="#2-初始化事件event-设置回调函数和关注的事件">2）初始化事件event，设置回调函数和关注的事件</a></li>
+<li><a href="#3-设置event从属的event-base">3）设置event从属的event_base</a></li>
+<li><a href="#4-是正式的添加事件的时候了">4）是正式的添加事件的时候了</a></li>
+<li><a href="#5-程序进入无限循环-等待就绪事件并执行事件处理">5）程序进入无限循环，等待就绪事件并执行事件处理</a></li>
+</ul></li>
+<li><a href="#3-实例代码">3 实例代码</a></li>
+<li><a href="#4-事件处理流程">4 事件处理流程</a></li>
+<li><a href="#5-小结">5 小结</a></li>
+</ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      
+
+<h1 id="1-前言">1 前言</h1>
+
+<p>学习源代码该从哪里入手？我觉得从程序的基本使用场景和代码的整体处理流程入手是个不错的方法，至少从个人的经验上讲，用此方法分析libevent是比较有效的。</p>
+
+<h1 id="2-基本应用场景">2 基本应用场景</h1>
+
+<p>基本应用场景也是使用libevnet的基本流程，下面来考虑一个最简单的场景，使用livevent设置定时器，应用程序只需要执行下面几个简单的步骤即可。</p>
+
+<h2 id="1-首先初始化libevent库-并保存返回的指针">1）首先初始化libevent库，并保存返回的指针</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">struct event_base * base = event_init();</pre></td></tr></table>
+</div>
+</div>
+<p>实际上这一步相当于初始化一个Reactor实例；在初始化libevent后，就可以注册事件了。</p>
+
+<h2 id="2-初始化事件event-设置回调函数和关注的事件">2）初始化事件event，设置回调函数和关注的事件</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">evtimer_set(&amp;ev, timer_cb, NULL);</pre></td></tr></table>
+</div>
+</div>
+<p>事实上这等价于调用</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">event_set(&amp;ev, -1, 0, timer_cb, NULL);
+event_set的函数原型是：
+
+void event_set(struct event *ev, int fd, short event, void (*cb)(int, short, void *), void *arg)
+
+ev：执行要初始化的event对象；
+fd：该event绑定的“句柄”，对于信号事件，它就是关注的信号；
+event：在该fd上关注的事件类型，它可以是EV_READ, EV_WRITE, EV_SIGNAL；
+cb：这是一个函数指针，当fd上的事件event发生时，调用该函数执行处理，它有三个参数，调用时由event_base负责传入，按顺序，实际上就是event_set时的fd, event和arg；
+arg：传递给cb函数指针的参数；</pre></td></tr></table>
+</div>
+</div>
+<p>由于定时事件不需要fd，并且定时事件是根据添加时（event_add）的超时值设定的，因此这里event也不需要设置。</p>
+
+<p>这一步相当于初始化一个event handler，在libevent中事件类型保存在event结构体中。</p>
+
+<p>注意：libevent并不会管理event事件集合，这需要应用程序自行管理；</p>
+
+<h2 id="3-设置event从属的event-base">3）设置event从属的event_base</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">event_base_set(base, &amp;ev);    </pre></td></tr></table>
+</div>
+</div>
+<p>这一步相当于指明event要注册到哪个event_base实例上；</p>
+
+<h2 id="4-是正式的添加事件的时候了">4）是正式的添加事件的时候了</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">event_add(&amp;ev, timeout);</pre></td></tr></table>
+</div>
+</div>
+<p>基本信息都已设置完成，只要简单的调用event_add()函数即可完成，其中timeout是定时值；
+这一步相当于调用Reactor::register_handler()函数注册事件。</p>
+
+<h2 id="5-程序进入无限循环-等待就绪事件并执行事件处理">5）程序进入无限循环，等待就绪事件并执行事件处理</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">event_base_dispatch(base);</pre></td></tr></table>
+</div>
+</div>
+<h1 id="3-实例代码">3 实例代码</h1>
+
+<p>上面例子的程序代码如下所示</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="k">struct</span> <span class="n">event</span> <span class="n">ev</span><span class="p">;</span>  
+<span class="k">struct</span> <span class="n">timeval</span> <span class="n">tv</span><span class="p">;</span>  
+<span class="kt">void</span> <span class="nf">time_cb</span><span class="p">(</span><span class="kt">int</span> <span class="n">fd</span><span class="p">,</span> <span class="kt">short</span> <span class="n">event</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">argc</span><span class="p">)</span>  
+<span class="p">{</span>  
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;timer wakeup/n&#34;</span><span class="p">);</span>  
+    <span class="n">event_add</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ev</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">tv</span><span class="p">);</span> <span class="c1">// reschedule timer  
+</span><span class="c1"></span><span class="p">}</span>  
+<span class="kt">int</span> <span class="nf">main</span><span class="p">()</span>  
+<span class="p">{</span>  
+    <span class="k">struct</span> <span class="n">event_base</span> <span class="o">*</span><span class="n">base</span> <span class="o">=</span> <span class="n">event_init</span><span class="p">();</span>  
+    <span class="n">tv</span><span class="p">.</span><span class="n">tv_sec</span> <span class="o">=</span> <span class="mi">10</span><span class="p">;</span> <span class="c1">// 10s period  
+</span><span class="c1"></span>    <span class="n">tv</span><span class="p">.</span><span class="n">tv_usec</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>  
+    <span class="n">evtimer_set</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ev</span><span class="p">,</span> <span class="n">time_cb</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>  
+    <span class="n">event_add</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ev</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">tv</span><span class="p">);</span>  
+    <span class="n">event_base_dispatch</span><span class="p">(</span><span class="n">base</span><span class="p">);</span>  
+<span class="p">}</span>  </code></pre></td></tr></table>
+</div>
+</div>
+<h1 id="4-事件处理流程">4 事件处理流程</h1>
+
+<p>当应用程序向libevent注册一个事件后，libevent内部是怎么样进行处理的呢？下面的图就给出了这一基本流程。</p>
+
+<p>1） 首先应用程序准备并初始化event，设置好事件类型和回调函数；这对应于前面第步骤2和3；</p>
+
+<p>2） 向libevent添加该事件event。对于定时事件，libevent使用一个小根堆管理，key为超时时
+间；对于Signal和I/O事件，libevent将其放入到等待链表（wait list）中，这是一个双向链表结构；</p>
+
+<p>3） 程序调用event_base_dispatch()系列函数进入无限循环，等待事件，以select()函数为例；</p>
+
+<p>每次循环前libevent会检查定时事件的最小超时时间tv，根据tv设置select()的最大等待时间，以便于后面及时处理超时事件；</p>
+
+<p>当select()返回后，首先检查超时事件，然后检查I/O事件；</p>
+
+<p>Libevent将所有的就绪事件，放入到激活链表中；</p>
+
+<p>然后对激活链表中的事件，调用事件的回调函数执行事件处理；</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/event%20flow633958001521875000.JPG" alt="" /></p>
+
+<h1 id="5-小结">5 小结</h1>
+
+<p>本节介绍了libevent的简单实用场景，并旋风般的介绍了libevent的事件处理流程，读者应该对libevent有了基本的印象，下面将会详细介绍libevent的事件管理框架（Reactor模式中的Reactor框架）做详细的介绍，在此之前会对源代码文件做简单的分类。</p>
+
+<p>转载：[<a href="http://blog.csdn.net/sparkliang/article/details/4957820](">http://blog.csdn.net/sparkliang/article/details/4957820](</a>)</p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2017-06-25
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      
+      <nav class="post-nav">
+        <a class="prev" href="/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E5%9B%9B/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">libevent源码剖析(四)</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E4%BA%8C/">
+            <span class="next-text nav-default">libevent源码剖析(二)</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+      <a href="forzfuyao@email.com" class="iconfont icon-email" title="email"></a>
+  <a href="http://localhost:1313/forz/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/forz/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

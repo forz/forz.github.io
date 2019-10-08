@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>etcd的MVCC - Forz</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="MVCC MVCC（Multi-version Cocurrent Control）即多版本并发控制技术，多用于数据库中的事务管理，其基本思想是保存一个数据的多个历史版" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="http://localhost:1313/forz/post/etcd%E7%9A%84mvcc/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/forz/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/forz/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/forz/favicon-16x16.png">
+<link rel="manifest" href="/forz/manifest.json">
+<link rel="mask-icon" href="/forz/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link href="/forz/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="etcd的MVCC" />
+<meta property="og:description" content="MVCC MVCC（Multi-version Cocurrent Control）即多版本并发控制技术，多用于数据库中的事务管理，其基本思想是保存一个数据的多个历史版" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="http://localhost:1313/forz/post/etcd%E7%9A%84mvcc/" />
+<meta property="article:published_time" content="2019-09-16T13:50:13&#43;00:00"/>
+<meta property="article:modified_time" content="2019-09-16T13:50:13&#43;00:00"/>
+
+<meta itemprop="name" content="etcd的MVCC">
+<meta itemprop="description" content="MVCC MVCC（Multi-version Cocurrent Control）即多版本并发控制技术，多用于数据库中的事务管理，其基本思想是保存一个数据的多个历史版">
+
+
+<meta itemprop="datePublished" content="2019-09-16T13:50:13&#43;00:00" />
+<meta itemprop="dateModified" content="2019-09-16T13:50:13&#43;00:00" />
+<meta itemprop="wordCount" content="5717">
+
+
+
+<meta itemprop="keywords" content="" />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="etcd的MVCC"/>
+<meta name="twitter:description" content="MVCC MVCC（Multi-version Cocurrent Control）即多版本并发控制技术，多用于数据库中的事务管理，其基本思想是保存一个数据的多个历史版"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/forz/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/forz/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/forz/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/forz/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/forz/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/forz/" class="logo">Forz Blog</a>
+</div>
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/forz/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/categories/">Categories</a>
+      </li>
+  </ul>
+</nav>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">etcd的MVCC</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2019-09-16 </span>
+        <div class="post-category">
+            <a href="/forz/categories/etcd/"> etcd </a>
+            </div>
+          <span class="more-meta"> 约 5717 字 </span>
+          <span class="more-meta"> 预计阅读 12 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+<ul>
+<li><a href="#mvcc">MVCC</a>
+<ul>
+<li><a href="#数据结构">数据结构</a>
+<ul>
+<li><a href="#revision">revision</a></li>
+<li><a href="#keyindex">keyIndex</a></li>
+<li><a href="#treeindex">treeIndex</a></li>
+<li><a href="#backend">backend</a></li>
+<li><a href="#日志与快照">日志与快照</a></li>
+</ul></li>
+<li><a href="#写操作">写操作</a></li>
+<li><a href="#读操作">读操作</a></li>
+</ul></li>
+</ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      
+
+<h1 id="mvcc">MVCC</h1>
+
+<p>MVCC（Multi-version Cocurrent Control）即多版本并发控制技术，多用于数据库中的事务管理，其基本思想是保存一个数据的多个历史版本，从而解决事务管理中数据隔离的问题。</p>
+
+<p>这里的版本一般选择使用时间戳或事务ID来标识。在处理一个写请求时，MVCC不是简单的用新值覆盖旧值，而是为这一项添加一个新版本的数据。在读取一个数据项时，要先确定一个要读取的版本，然后根据版本找到对应的数据。这种写操作创建新版本，读操作访问旧版本的方式使得读写操作彼此隔离，他们之间就不需要用锁来协调。换句话说，在MVCC里读操作永远不会被阻塞，因此它特别适合etcd这种读操作比较多的场景。</p>
+
+<p>MVCC的基本原理就是这么简单，下面来结合具体代码，看看etcd是怎么实现的。</p>
+
+<h2 id="数据结构">数据结构</h2>
+
+<p>etcd的代码中，有关MVCC的实现都在一个叫mvcc的包里。在正式介绍读写流程之前，我们先来了解下这个包里面定义的几个基础数据结构。</p>
+
+<h3 id="revision">revision</h3>
+
+<p>MVCC的每一个写操作都会创建一个新版本的数据，读操作会从有限多个版本的数据中挑选一个“最合适”(要么是最新版本，要么是指定版本) 的结果直接返回。通过这种方式，读写操作之间的冲突就不再需要受到关注。MVCC能最大化地实现高效的读写并发，尤其是高效的读，因此其非常适合etcd这种“读多写少”的场景。</p>
+
+<p>前面已经说过，etcd v3存储的逻辑视图是一个扁平的二进制键空间。该键空间对key有一个词法排序索引，因此范围查询的成本很低。</p>
+
+<p>etcd的键空间可维护多个revision。每个原子的修改操作(例如，一个事务操作可能包含多个操作)都会在键空间上创建一个新的revision。之前revision的所有数据均保持不变。旧版本(version)的key仍然可以通过之前的revision进行访问。同样，revision也是被索引的，因此Watcher可以实现高效的范围watch。revision在etcd中可以起到逻辑时钟的作用。revision在群集的生命周期内是单调递增的。如果因为要节省空间而压缩键空间，那么在此revision之前的所有revision都将被删除，只保留该revision 之后的。</p>
+
+<p>我们将key的创建和删除过程称为一个生命周期。在etcd中，每个key都可能有多个生命周期，也就是说被创建、删除多次。创建一个新key时，如果在当前revision中该key不存在(即之前也没有创建过)，那么它的version就会被设置成1。删除key会生成一个key的墓碑，可通过将其version重置为0来结束key的当前生命周期。对key的每一次修改都会增加其version，因此，key的version在key的一次生命周期中是单调递增的。</p>
+
+<p>revison是集群存储状态的版本号，存储状态的每一次更新(例如，写 、删除、事务等)都会让revison 的值加1。</p>
+
+<ul>
+<li>ResponseHeader.Revision代表该请求成功执行之后etcd的revision。</li>
+<li>KeyValue.CreateRevision代表etcd的某个key最后一次创建时etcd的revison</li>
+<li>KeyValue.ModRevision则代表etcd的某个key最后一次更新时etcd的revison。</li>
+</ul>
+
+<p>verison特指etcd键空间某个key从创建开始被修改的次数，即 KeyValue.Versiono etcd v3 支持的 Get ( …, WithRev(rev)) 操作会获取etcd处于rev这个revision时的数据，就好像etcd的revision还是rev 的时候一样。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// A revision indicates modification of the key-value space.
+</span><span class="c1">// The set of changes that share same main revision changes the key-value space atomically.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">revision</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="c1">// main is the main revision of a set of changes that happen atomically.
+</span><span class="c1"></span>    <span class="nx">main</span> <span class="kt">int64</span>
+
+    <span class="c1">// sub is the the sub revision of a change in a set of changes that happen
+</span><span class="c1"></span>    <span class="c1">// atomically. Each change has different increasing sub revision in that
+</span><span class="c1"></span>    <span class="c1">// set.
+</span><span class="c1"></span>    <span class="nx">sub</span> <span class="kt">int64</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>这里的main属性对应事务ID，全局递增不重复，它在etcd中被当做一个逻辑时钟来使用。sub代表一次事务中不同的修改操作（如put和delete）编号，从0开始依次递增。所以在一次事务中，每一个修改操作所绑定的revision依次为{txID, 0}, {txID, 1}, {txID, 2}…</p>
+
+<h3 id="keyindex">keyIndex</h3>
+
+<p>etcd将物理数据存储为一棵持久B+树中的键值对。 为了高效，每个revision的存储状态都只包含相对于之前revision的增量。一个revision可能对应于树中的多个key。</p>
+
+<p>B+树中键值对的key即revision, revision是一个2元组(main, sub)，其中main是该revision的主版本号（每次事务发起时+1），sub是同一revision的副版本号（事务中每次修改命令+1），其用于区分同一个revision的不同key。 B+树中键值对的value包含了相对于之前revision的修改，即相对于之前revision的一个增量。</p>
+
+<p>B+树按key的字典字节序进行排序。这样，etcd对revision增量的范围查询(range query，即从某个 revision 到 另一个 revision)会很快一一因为我们已经记录了从一个特定revision到其他revision的修改量。etcd v3 的压缩操作会删除过时的键值对。</p>
+
+<p>etcd v3还在内存中维护了一个基于B树的二级索引来加快对key的范围查询。该B树索引的key是向用户暴露的etcd存储的key，而该B树索引的value则是一个指向上文讨论的持久化B+树的增量的指针。etcd的压缩操作会删除指向B树索引的无效指针。</p>
+
+<p>keyIndex用来记录一个key的生命周期中所涉及过的版本（revision）。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">keyIndex</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">key</span>         <span class="p">[]</span><span class="kt">byte</span>
+    <span class="nx">modified</span>    <span class="nx">revision</span> <span class="c1">// the main rev of the last modification
+</span><span class="c1"></span>    <span class="nx">generations</span> <span class="p">[]</span><span class="nx">generation</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>它保存的是当前key的具体值（key），最近一次修改的版本号（modified），以及记录key生命周期的generation，一个generation代表了一个key从创建到被删除的过程。因为一个key可能会经历创建 -&gt; 删除 -&gt; 创建的好几个轮回，所以它有可能会有一个或多个generation。下面来看看一个generation包含哪些内容：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// generation contains multiple revisions of a key.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">generation</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">ver</span>     <span class="kt">int64</span>
+    <span class="nx">created</span> <span class="nx">revision</span> <span class="c1">// when the generation is created (put in first revision).
+</span><span class="c1"></span>    <span class="nx">revs</span>    <span class="p">[]</span><span class="nx">revision</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>可以看到，一个generation中最重要的信息就是那个revision数组，代表在它这一代中，所经历过的版本变更。</p>
+
+<p>假设我们有一个值为foo的key</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">ki</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">keyIndex</span><span class="p">{</span><span class="nx">key</span><span class="p">:</span> <span class="p">[]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&#34;foo&#34;</span><span class="p">)}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>为它记录两次版本变更</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">ki</span><span class="p">.</span><span class="nf">put</span><span class="p">(</span><span class="nx">zap</span><span class="p">.</span><span class="nf">NewExample</span><span class="p">(),</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="c1">// 第一次变更发生在ID为2的事务中，且是第一次操作
+</span><span class="c1"></span><span class="nx">ki</span><span class="p">.</span><span class="nf">put</span><span class="p">(</span><span class="nx">zap</span><span class="p">.</span><span class="nf">NewExample</span><span class="p">(),</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span> <span class="o">//</span> <span class="nx">第二次变更发生在ID为4的事务中</span><span class="err">，</span><span class="nx">且是第三次操作</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>那这个keyIndex变成这样的结构</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">key</span><span class="p">:</span> <span class="s">&#34;foo&#34;</span>
+<span class="nx">modified</span><span class="p">:</span> <span class="p">{</span><span class="mi">4</span><span class="p">,</span> <span class="mi">2</span><span class="p">}</span>
+<span class="nx">generations</span><span class="p">:</span>
+    <span class="p">[{</span><span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">},</span> <span class="p">{</span><span class="mi">4</span><span class="p">,</span> <span class="mi">2</span><span class="p">}]</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>如果在此后的事务中这个key经历了被删除，再创建的过程：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">ki</span><span class="p">.</span><span class="nf">tombstone</span><span class="p">(</span><span class="nx">zap</span><span class="p">.</span><span class="nf">NewExample</span><span class="p">(),</span> <span class="mi">6</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>  <span class="c1">// 在第6次事务中被删除
+</span><span class="c1"></span><span class="nx">ki</span><span class="p">.</span><span class="nf">put</span><span class="p">(</span><span class="nx">zap</span><span class="p">.</span><span class="nf">NewExample</span><span class="p">(),</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+<span class="nx">ki</span><span class="p">.</span><span class="nf">put</span><span class="p">(</span><span class="nx">zap</span><span class="p">.</span><span class="nf">NewExample</span><span class="p">(),</span> <span class="mi">10</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>那它会多一个generation</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">key</span><span class="p">:</span> <span class="s">&#34;foo&#34;</span>
+<span class="nx">modified</span><span class="p">:</span> <span class="p">{</span><span class="mi">10</span><span class="p">,</span> <span class="mi">0</span><span class="p">}</span>
+<span class="nx">generations</span><span class="p">:</span>
+    <span class="p">[{</span><span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">},</span> <span class="p">{</span><span class="mi">4</span><span class="p">,</span> <span class="mi">2</span><span class="p">},</span> <span class="p">{</span><span class="mi">6</span><span class="p">,</span> <span class="mi">0</span><span class="p">}(</span><span class="nx">t</span><span class="p">)],</span>
+    <span class="p">[{</span><span class="mi">8</span><span class="p">,</span> <span class="mi">0</span><span class="p">},</span> <span class="p">{</span><span class="mi">10</span><span class="p">,</span> <span class="mi">0</span><span class="p">}]</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>好了，在知道了key的版本信息及相应的操作后，我们来看看怎么把它们组织起来：</p>
+
+<h3 id="treeindex">treeIndex</h3>
+
+<p>treeIndex顾名思义就是一个树状索引，它通过在内存中维护一个BTree，来达到加速查询key的功能。</p>
+
+<p>这棵树的每一个节点都是keyIndex。这样，给定一个key就能很快查到它对应的keyIndex，进而可以得知它的版本信息。树状结构比较简单，看看图就能明白，我就不再分析了。</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190907225020.png" alt="" /></p>
+
+<p>值得注意的是，这里只存有key的信息，value保存在磁盘里，一方面key一般比较小，同样的内存可以支持存储更多的key；另一方面，value和版本是一一对应的，内存中维护了版本的信息，也就没必要再多存一份value了。</p>
+
+<p>看完了key以及key在内存中的组织结构，我们再来看看value是怎么处理的。</p>
+
+<h3 id="backend">backend</h3>
+
+<p>backend封装了etcd中的存储，按照设计，backend可以对接多种存储，当前使用的是boltdb，但作为一个CNCF项目，官方也在考虑接入更多的存储引擎1。boltdb是一个单机的支持事务的KV存储，etcd的事务是基于boltdb的事务实现的。</p>
+
+<p>BoltDB是基于B树和mmap的数据库，基本原理是用mmap将磁盘的page映射到内存的page，而操作系统则是通过COW (copy-on-write) 技术进行page管理，通过cow技术，系统可实现无锁的读写并发，但是无法实现无锁的写写并发，这就注定了这类数据库读性能超高，但写性能一般，因此非常适合于“读多写少”的场景。同时BoltDB支持完全可序列化的ACID事务。因此最适合作为etcd的底层存储引擎。</p>
+
+<p>我们知道，etcd v3当前使用BoltDB将数据存储在磁盘中。etcd在BoltDB中存储的key是reversion, value是etcd自己的key-value组合，也就是说etcd会在BoltDB中保存每个版本，从而实现多版本机制。</p>
+
+<p>这样的实现方式有一个很明显的问题，那就是如果保存一个key的所有历史版本，那么整个数据库就会越来越大，最终超出磁盘的容量。因此MVCC还需要定期删除老的版本，etcd提供了命令行工具以及配置选项，供用户手动删除老版本数据，或者每隔一段时间定期删除老版本数据，etcd中称这个删除老版本数据的操作为数据压缩(compact)。</p>
+
+<p>了解了etcd v3的磁盘存储之后 ，可以看到要想从BoltDB中查询数据，必须通过reversion，但是客户端都是通过key来查询value的，所以etcd在内存中还维护了一个kvindex，保存的就是key与reversion之前的映射关系，用来加速查询的。kvindex，是基于Google开源的Golang的B树实现的，也就是前文提到的etcdv3在内存中维护的二级索引。这样当客户端通过key来查询value的时候，会先在kvindex中查询这个key的所有revision，然后再通过revision从BoltDB中查询数据。</p>
+
+<p>etcd在boltdb中存储的key是reversion，value是etcd自己的key-value组合。因此，每次更新时，新的reversion会被记在keyIndex中，同时，这个reversion所对应的key-value组合会被存到boltdb中。</p>
+
+<p>举个例子： 用etcdctl通过批量接口写入两条记录：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">etcdctl</span> <span class="nx">txn</span> <span class="o">&lt;&lt;</span><span class="p">&lt;</span><span class="err">&#39;</span>
+<span class="nx">put</span> <span class="nx">key1</span> <span class="s">&#34;v1&#34;</span>
+<span class="nx">put</span> <span class="nx">key2</span> <span class="s">&#34;v2&#34;</span>
+<span class="err">&#39;</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>再通过批量接口更新这两条记录：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">etcdctl</span> <span class="nx">txn</span> <span class="o">&lt;&lt;</span><span class="p">&lt;</span><span class="err">&#39;</span>
+<span class="nx">put</span> <span class="nx">key1</span> <span class="s">&#34;v12&#34;</span>
+<span class="nx">put</span> <span class="nx">key2</span> <span class="s">&#34;v22&#34;</span>
+<span class="err">&#39;</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>boltdb中其实有了4条数据：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">rev</span><span class="p">={</span><span class="mi">3</span> <span class="mi">0</span><span class="p">},</span> <span class="nx">key</span><span class="p">=</span><span class="s">&#34;key1&#34;</span><span class="p">,</span> <span class="nx">value</span><span class="p">=</span><span class="s">&#34;v1&#34;</span>
+<span class="nx">rev</span><span class="p">={</span><span class="mi">3</span> <span class="mi">1</span><span class="p">},</span> <span class="nx">key</span><span class="p">=</span><span class="s">&#34;key2&#34;</span><span class="p">,</span> <span class="nx">value</span><span class="p">=</span><span class="s">&#34;v2&#34;</span>
+<span class="nx">rev</span><span class="p">={</span><span class="mi">4</span> <span class="mi">0</span><span class="p">},</span> <span class="nx">key</span><span class="p">=</span><span class="s">&#34;key1&#34;</span><span class="p">,</span> <span class="nx">value</span><span class="p">=</span><span class="s">&#34;v12&#34;</span>
+<span class="nx">rev</span><span class="p">={</span><span class="mi">4</span> <span class="mi">1</span><span class="p">},</span> <span class="nx">key</span><span class="p">=</span><span class="s">&#34;key2&#34;</span><span class="p">,</span> <span class="nx">value</span><span class="p">=</span><span class="s">&#34;v22&#34;</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>所以总的来说，内存btree维护的是key =&gt; keyIndex的映射，keyIndex内维护多版本的revision信息，而revision可以映射到磁盘bbolt中具体的value。下面这个图很好的表示了这个过程：</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190907225540.png" alt="" /></p>
+
+<h3 id="日志与快照">日志与快照</h3>
+
+<p>etcd对数据的持久化，采用的是binlog(日志，也称为WAL, 即Write-Ahead-Log)加Snapshot(快照)的方式。</p>
+
+<p>在计算机科学中，预写式日志(Write-Ahead-Log,WAL)是关系数据库系统中用于提供原子性和持久性的一系列技术。在使用WAL的系统中，所有的修改在提交之前都要先写入log文件中。</p>
+
+<p>log文件中通常包括redo信息和undo信息。假设一个程序在执行某些操作的过程中机器掉电了。在重新启动时，程序可能需要知道当时执行的操作是完全成功了还是部分成功了或者是完全失败了。如果使用了WAL，那么程序就可以检查log文件，并对突然掉电时计划执行的操作内容与实际上执行的操作内容进行比较。在这个比较的基础上，程序就可以决定是撤销已做的操作还是继续完成己做的操作，或者只是保持原样。</p>
+
+<p>etcd数据库的所有更新操作都需要先写到binlog中，而binlog是实时写到磁盘上的，因此这样就可以保证不会丢失数据，即使机器断电，重启以后etcd也能通过读取并重放binlog里的操作记录来重建整个数据库。</p>
+
+<p>etcd数据的高可用和一致性是通过Raft来实现的，Master节点会通过Raft协议向Slave节点复制binlog, Slave节点根据binlog对操作进行重放，以维持数据的多个副本的一致性。也就是说binlog不仅仅是实现数据库持久化的一种手段，其实还是实现不同副本间一致性协议的最重要手段。客户端对数据库发起的所有写操作都会记录在binlog中，待主节点将更新日志在集群多数节点之间完成同步以后，便在内存中的数据库中应用该日志项的内容，进而完成一次客户的写请求。</p>
+
+<p>如果一个etcd集群运行了很久，那么就会有很多binlog，这样在故障恢复时，需要花很多时间来复原数据，这时候就需要快照系统，它会把当前存储的当前数据存储下来。然后删除生成快照之前的log内容，这样只需要重现少量的log就能恢复数据了。</p>
+
+<p>etcd v3的日志管理和快照管理的流程与v2的基本一致，区别是做快照的时候etcd v2是把内存里的数据库序列化成JSON，然后持久化到磁盘，而etcd v3是读取磁盘里的数据库的当前版本(从BoltDB中读取)，然后序列化到磁盘。</p>
+
+<h2 id="写操作">写操作</h2>
+
+<p>首先写操作的入口是applierV3的Put函数，它开启一个写事务，然后进过层层封装，最后干活的是写事务的put函数，精简后的逻辑大概是这样的：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// https://github.com/etcd-io/etcd/blob/v3.3.10/mvcc/kvstore_txn.go#L151
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">tw</span> <span class="o">*</span><span class="nx">storeTxnWrite</span><span class="p">)</span> <span class="nf">put</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">leaseID</span> <span class="nx">lease</span><span class="p">.</span><span class="nx">LeaseID</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">rev</span> <span class="o">:=</span> <span class="nx">tw</span><span class="p">.</span><span class="nx">beginRev</span> <span class="o">+</span> <span class="mi">1</span>
+
+    <span class="nx">ibytes</span> <span class="o">:=</span> <span class="nf">newRevBytes</span><span class="p">()</span>
+    <span class="nx">idxRev</span> <span class="o">:=</span> <span class="nx">revision</span><span class="p">{</span><span class="nx">main</span><span class="p">:</span> <span class="nx">rev</span><span class="p">,</span> <span class="nx">sub</span><span class="p">:</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">tw</span><span class="p">.</span><span class="nx">changes</span><span class="p">))}</span>
+    <span class="nf">revToBytes</span><span class="p">(</span><span class="nx">idxRev</span><span class="p">,</span> <span class="nx">ibytes</span><span class="p">)</span>
+
+    <span class="nx">kv</span> <span class="o">:=</span> <span class="nx">mvccpb</span><span class="p">.</span><span class="nx">KeyValue</span><span class="p">{</span>
+        <span class="nx">Key</span><span class="p">:</span>            <span class="nx">key</span><span class="p">,</span>
+        <span class="nx">Value</span><span class="p">:</span>          <span class="nx">value</span><span class="p">,</span>
+        <span class="nx">CreateRevision</span><span class="p">:</span> <span class="nx">c</span><span class="p">,</span>
+        <span class="nx">ModRevision</span><span class="p">:</span>    <span class="nx">rev</span><span class="p">,</span>
+        <span class="nx">Version</span><span class="p">:</span>        <span class="nx">ver</span><span class="p">,</span>
+        <span class="nx">Lease</span><span class="p">:</span>          <span class="nb">int64</span><span class="p">(</span><span class="nx">leaseID</span><span class="p">),</span>
+    <span class="p">}</span>
+    <span class="nx">d</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">kv</span><span class="p">.</span><span class="nf">Marshal</span><span class="p">()</span>
+
+    <span class="nx">tw</span><span class="p">.</span><span class="nx">tx</span><span class="p">.</span><span class="nf">UnsafeSeqPut</span><span class="p">(</span><span class="nx">keyBucketName</span><span class="p">,</span> <span class="nx">ibytes</span><span class="p">,</span> <span class="nx">d</span><span class="p">)</span>
+    <span class="nx">tw</span><span class="p">.</span><span class="nx">s</span><span class="p">.</span><span class="nx">kvindex</span><span class="p">.</span><span class="nf">Put</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">idxRev</span><span class="p">)</span>
+    <span class="nx">tw</span><span class="p">.</span><span class="nx">changes</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">tw</span><span class="p">.</span><span class="nx">changes</span><span class="p">,</span> <span class="nx">kv</span><span class="p">)</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>正如前面所分析的，这里的put操作首先获取了当前事务的ID（tw.beginRev），以及当前事务中已经进行过的更改数（tw.changes），然后以此为基础生成了revision，并向boltdb和treeIndex分别执行了两次写入操作。</p>
+
+<h2 id="读操作">读操作</h2>
+
+<p>读操作的入口是applierV3的Range函数，跟写操作一样，它开启了一个只读事务，然后一路调用到rangeKeys函数：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// https://github.com/etcd-io/etcd/blob/v3.3.10/mvcc/kvstore_txn.go#L111
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">tr</span> <span class="o">*</span><span class="nx">storeTxnRead</span><span class="p">)</span> <span class="nf">rangeKeys</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">end</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">curRev</span> <span class="kt">int64</span><span class="p">,</span> <span class="nx">ro</span> <span class="nx">RangeOptions</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">RangeResult</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">rev</span> <span class="o">:=</span> <span class="nx">ro</span><span class="p">.</span><span class="nx">Rev</span>
+
+    <span class="nx">revpairs</span> <span class="o">:=</span> <span class="nx">tr</span><span class="p">.</span><span class="nx">s</span><span class="p">.</span><span class="nx">kvindex</span><span class="p">.</span><span class="nf">Revisions</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">end</span><span class="p">,</span> <span class="nx">rev</span><span class="p">)</span>
+
+    <span class="nx">limit</span> <span class="o">:=</span> <span class="nb">int</span><span class="p">(</span><span class="nx">ro</span><span class="p">.</span><span class="nx">Limit</span><span class="p">)</span>
+    <span class="nx">kvs</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">mvccpb</span><span class="p">.</span><span class="nx">KeyValue</span><span class="p">,</span> <span class="nx">limit</span><span class="p">)</span>
+    <span class="nx">revBytes</span> <span class="o">:=</span> <span class="nf">newRevBytes</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="nx">i</span><span class="p">,</span> <span class="nx">revpair</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">revpairs</span><span class="p">[:</span><span class="nb">len</span><span class="p">(</span><span class="nx">kvs</span><span class="p">)]</span> <span class="p">{</span>
+        <span class="nf">revToBytes</span><span class="p">(</span><span class="nx">revpair</span><span class="p">,</span> <span class="nx">revBytes</span><span class="p">)</span>
+        <span class="nx">_</span><span class="p">,</span> <span class="nx">vs</span> <span class="o">:=</span> <span class="nx">tr</span><span class="p">.</span><span class="nx">tx</span><span class="p">.</span><span class="nf">UnsafeRange</span><span class="p">(</span><span class="nx">keyBucketName</span><span class="p">,</span> <span class="nx">revBytes</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="nx">kvs</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nf">Unmarshal</span><span class="p">(</span><span class="nx">vs</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">RangeResult</span><span class="p">{</span><span class="nx">KVs</span><span class="p">:</span> <span class="nx">kvs</span><span class="p">,</span> <span class="nx">Count</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="nx">revpairs</span><span class="p">),</span> <span class="nx">Rev</span><span class="p">:</span> <span class="nx">curRev</span><span class="p">},</span> <span class="kc">nil</span>
+    <span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>这里函数的参数curRev代表当前事务ID。拿到这个ID后，我们去treeIndex中查询，满足指定条件的revision有哪些，然后再根据这些revision去boltdb中查询当时存的key-value是什么。</p>
+
+<p>参考:<br />
+<a href="https://blog.betacat.io/post/mvcc-implementation-in-etcd/">https://blog.betacat.io/post/mvcc-implementation-in-etcd/</a><br />
+<a href="https://www.jianshu.com/p/a23031ec02a6">https://www.jianshu.com/p/a23031ec02a6</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2019-09-16
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      
+      <nav class="post-nav">
+        <a class="prev" href="/forz/post/%E7%94%A8redis%E5%AE%9E%E7%8E%B0%E5%88%86%E5%B8%83%E5%BC%8F%E9%94%81/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">用redis实现分布式锁</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/forz/post/etcd%E7%9A%84%E4%BA%8B%E5%8A%A1%E6%9C%BA%E5%88%B6/">
+            <span class="next-text nav-default">etcd的事务机制</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+      <a href="forzfuyao@email.com" class="iconfont icon-email" title="email"></a>
+  <a href="http://localhost:1313/forz/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/forz/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

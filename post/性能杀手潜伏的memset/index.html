@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>性能杀手：”潜伏”的memset - Forz</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="memset性能陷阱 memset是大家常用的函数，而且一般的编程书籍都会谆谆告诫大家：申请内存后要初始化，防止使用未经初始化的内存导致不可预" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="http://localhost:1313/forz/post/%E6%80%A7%E8%83%BD%E6%9D%80%E6%89%8B%E6%BD%9C%E4%BC%8F%E7%9A%84memset/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/forz/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/forz/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/forz/favicon-16x16.png">
+<link rel="manifest" href="/forz/manifest.json">
+<link rel="mask-icon" href="/forz/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link href="/forz/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="性能杀手：”潜伏”的memset" />
+<meta property="og:description" content="memset性能陷阱 memset是大家常用的函数，而且一般的编程书籍都会谆谆告诫大家：申请内存后要初始化，防止使用未经初始化的内存导致不可预" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="http://localhost:1313/forz/post/%E6%80%A7%E8%83%BD%E6%9D%80%E6%89%8B%E6%BD%9C%E4%BC%8F%E7%9A%84memset/" />
+<meta property="article:published_time" content="2017-06-24T10:27:08&#43;00:00"/>
+<meta property="article:modified_time" content="2017-06-24T10:27:08&#43;00:00"/>
+
+<meta itemprop="name" content="性能杀手：”潜伏”的memset">
+<meta itemprop="description" content="memset性能陷阱 memset是大家常用的函数，而且一般的编程书籍都会谆谆告诫大家：申请内存后要初始化，防止使用未经初始化的内存导致不可预">
+
+
+<meta itemprop="datePublished" content="2017-06-24T10:27:08&#43;00:00" />
+<meta itemprop="dateModified" content="2017-06-24T10:27:08&#43;00:00" />
+<meta itemprop="wordCount" content="1734">
+
+
+
+<meta itemprop="keywords" content="" />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="性能杀手：”潜伏”的memset"/>
+<meta name="twitter:description" content="memset性能陷阱 memset是大家常用的函数，而且一般的编程书籍都会谆谆告诫大家：申请内存后要初始化，防止使用未经初始化的内存导致不可预"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/forz/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/forz/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/forz/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/forz/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/forz/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/forz/" class="logo">Forz Blog</a>
+</div>
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/forz/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/categories/">Categories</a>
+      </li>
+  </ul>
+</nav>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">性能杀手：”潜伏”的memset</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2017-06-24 </span>
+        <div class="post-category">
+            <a href="/forz/categories/c&#43;&#43;/"> C&#43;&#43; </a>
+            </div>
+          <span class="more-meta"> 约 1734 字 </span>
+          <span class="more-meta"> 预计阅读 4 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+<ul>
+<li><a href="#memset性能陷阱">memset性能陷阱</a></li>
+<li><a href="#潜伏-的memset">“潜伏”的memset</a></li>
+<li><a href="#总结汇总">【总结汇总】</a></li>
+</ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      
+
+<h1 id="memset性能陷阱">memset性能陷阱</h1>
+
+<p>memset是大家常用的函数，而且一般的编程书籍都会谆谆告诫大家：申请内存后要初始化，防止使用未经初始化的内存导致不可预知的结果，所以我们一般都会按照如下方式编写代码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">char* buffer = (char*)malloc(1024);
+memset(buffer, 0x00, 1024);</pre></td></tr></table>
+</div>
+</div>
+<p>代码看起来很标准，也很美观，但这里却隐藏着一个陷阱：memset的性能并不高！如果你的内存在1K左右，可能还察觉不到，但如果是1M，那性能影响就很明显了，我们来看实测数据（Redhat EL5 Intel&reg; Xeon&reg; CPU E5620 2.40GHz, gcc 4.1.2）：</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/QQ%E6%88%AA%E5%9B%BE20170521125936.png" alt="" /></p>
+
+<p>所以如果你在代码里循环调用memset，或者每次流程处理都要调用memset，而且每次都要memset 1M以上，那么你就要小心了，1000次的memset 1M就能够消耗你100多ms的时间，对于高并发高性能的系统来说，这个时间是非常可观的，这就意味着即使不考虑业务处理，1秒钟你最多也不可能处理超过10000次请求。</p>
+
+<h1 id="潜伏-的memset">“潜伏”的memset</h1>
+
+<p>但这只是memset的第一个陷阱，还有更加隐蔽的第二个陷阱，而且这个陷阱你从代码上根本看不出和memset有什么关系！下面我们就来看这个“潜伏”的memset究竟是如何潜伏的。</p>
+
+<p>代码很简单，就是在栈内存中申请缓冲区，然后再赋值：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">char buffer[1024] = {0};</pre></td></tr></table>
+</div>
+</div>
+<p>这一行代码很简单，和上面代码不同的地方就在于一个在堆内存中申请，一个在栈内存中申请。但就是这么一行简单的代码，却隐藏了一个陷阱：初始化的时候调用了memset。我们用ltrace工具来看看：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="kt">int</span> <span class="nf">main</span><span class="p">(){</span>
+
+   <span class="kt">char</span> <span class="n">buffer</span><span class="p">[</span><span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="mi">0</span><span class="p">};</span>
+
+<span class="p">}</span>
+
+
+<span class="n">__libc_start_main</span><span class="p">(</span><span class="mh">0x8048444</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mh">0xbff9b0a4</span><span class="p">,</span> <span class="mh">0x80484b0</span><span class="p">,</span> <span class="mh">0x80484a0</span> <span class="o">&lt;</span><span class="n">unfinished</span> <span class="p">...</span><span class="o">&gt;</span>
+
+<span class="n">memset</span><span class="p">(</span><span class="mh">0xbfe9afec</span><span class="p">,</span> <span class="err">&#39;</span><span class="o">/</span><span class="mo">000</span><span class="err">&#39;</span><span class="p">,</span> <span class="mi">1048576</span><span class="p">)</span>                      <span class="o">=</span> <span class="mh">0xbfe9afec</span>
+
+<span class="o">+++</span> <span class="n">exited</span> <span class="p">(</span><span class="n">status</span> <span class="mi">236</span><span class="p">)</span> <span class="o">+++</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>可能会有同学会说，你全部都初始化为0了，当然慢了，如果我只初始化第一个元素，是不是会没有这个问题呢？</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="kt">int</span> <span class="nf">main</span><span class="p">(){</span>
+
+   <span class="kt">char</span> <span class="n">buffer</span><span class="p">[</span><span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="mi">0</span><span class="p">,};</span>
+
+<span class="p">}</span>
+
+
+<span class="n">__libc_start_main</span><span class="p">(</span><span class="mh">0x8048444</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mh">0xbfb54f84</span><span class="p">,</span> <span class="mh">0x80484b0</span><span class="p">,</span> <span class="mh">0x80484a0</span> <span class="o">&lt;</span><span class="n">unfinished</span> <span class="p">...</span><span class="o">&gt;</span>
+
+<span class="n">memset</span><span class="p">(</span><span class="mh">0xbfa54ecc</span><span class="p">,</span> <span class="err">&#39;</span><span class="o">/</span><span class="mo">000</span><span class="err">&#39;</span><span class="p">,</span> <span class="mi">1048576</span><span class="p">)</span>                      <span class="o">=</span> <span class="mh">0xbfa54ecc</span>
+
+<span class="o">+++</span> <span class="n">exited</span> <span class="p">(</span><span class="n">status</span> <span class="mi">204</span><span class="p">)</span> <span class="o">+++</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>从上面的ltrace输出可以看出，不管你是全部设置为0，还是只设置第一个，都会调用memset，而且memset的长度都是1024*1024，难道这行代码和括号里的值没有关系，无论怎样都会调用memset？我们再来验证一下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="kt">int</span> <span class="nf">main</span><span class="p">(){</span>
+
+   <span class="kt">char</span> <span class="n">buffer</span><span class="p">[</span><span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">]</span> <span class="o">=</span> <span class="p">{};</span>
+
+<span class="p">}</span>
+
+<span class="n">__libc_start_main</span><span class="p">(</span><span class="mh">0x8048444</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mh">0xbff0e844</span><span class="p">,</span> <span class="mh">0x80484b0</span><span class="p">,</span> <span class="mh">0x80484a0</span> <span class="o">&lt;</span><span class="n">unfinished</span> <span class="p">...</span><span class="o">&gt;</span>
+
+<span class="n">memset</span><span class="p">(</span><span class="mh">0xbfe0e78c</span><span class="p">,</span> <span class="err">&#39;</span><span class="o">/</span><span class="mo">000</span><span class="err">&#39;</span><span class="p">,</span> <span class="mi">1048576</span><span class="p">)</span>                      <span class="o">=</span> <span class="mh">0xbfe0e78c</span>
+
+<span class="o">+++</span> <span class="n">exited</span> <span class="p">(</span><span class="n">status</span> <span class="mi">140</span><span class="p">)</span> <span class="o">+++</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>再验证括号里设置其它值：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="kt">int</span> <span class="nf">main</span><span class="p">(){</span>
+
+   <span class="kt">char</span> <span class="n">buffer</span><span class="p">[</span><span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="mi">100</span><span class="p">};</span>
+
+<span class="p">}</span>
+
+<span class="n">__libc_start_main</span><span class="p">(</span><span class="mh">0x8048444</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mh">0xbfea51b4</span><span class="p">,</span> <span class="mh">0x80484b0</span><span class="p">,</span> <span class="mh">0x80484a0</span> <span class="o">&lt;</span><span class="n">unfinished</span> <span class="p">...</span><span class="o">&gt;</span>
+
+<span class="n">memset</span><span class="p">(</span><span class="mh">0xbfda50fc</span><span class="p">,</span> <span class="err">&#39;</span><span class="o">/</span><span class="mo">000</span><span class="err">&#39;</span><span class="p">,</span> <span class="mi">1048576</span><span class="p">)</span>                      <span class="o">=</span> <span class="mh">0xbfda50fc</span>
+
+<span class="o">+++</span> <span class="n">exited</span> <span class="p">(</span><span class="n">status</span> <span class="mi">252</span><span class="p">)</span> <span class="o">+++</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>经过4次代码验证，确实证实了不管{}里面是什么内容，都会调用memset，将所有内存设置为0。</p>
+
+<p>实际上上面的代码里面还有一个陷阱，下面这两行语句的效果是一样的，第一行并不是将所有的内存位都设置为0，而只是设置第0个内存位为0.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">char buffer[1024 * 1024] = {0};
+
+char buffer[1024 * 1024] = {0,};</pre></td></tr></table>
+</div>
+</div>
+<p>因为隐藏调用了memset，所以设置为0的时候还看不出，我们换一个值就看的很清楚了：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="cp">#include</span> <span class="cpf">&lt;stdio.h&gt;</span><span class="cp">
+</span><span class="cp"></span>
+<span class="kt">int</span> <span class="nf">main</span><span class="p">(){</span>
+
+    <span class="kt">char</span> <span class="n">buffer</span><span class="p">[</span><span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span> <span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="mi">100</span><span class="p">};</span>
+
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;%d/n&#34;</span><span class="p">,</span> <span class="o">*</span><span class="n">buffer</span><span class="p">);</span>    <span class="c1">//100 
+</span><span class="c1"></span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;%d/n&#34;</span><span class="p">,</span> <span class="o">*</span><span class="p">(</span><span class="n">buffer</span><span class="o">+</span><span class="mi">1</span><span class="p">));</span>    <span class="c1">//0
+</span><span class="c1"></span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>各种赋值的情况我们已经验证过了，当然也要验证一下不赋值的情况，下面是验证情况：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="kt">int</span> <span class="nf">main</span><span class="p">(){</span>
+
+<span class="kt">char</span> <span class="n">buffer</span><span class="p">[</span><span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span> <span class="p">];</span>
+
+<span class="o">*</span><span class="n">buffer</span> <span class="o">=</span> <span class="sc">&#39;A&#39;</span><span class="p">;</span>
+
+<span class="n">printf</span><span class="p">(</span><span class="s">&#34;%d/n&#34;</span><span class="p">,</span> <span class="o">*</span><span class="n">buffer</span><span class="p">);</span>
+
+<span class="p">}</span>
+
+
+
+<span class="n">__libc_start_main</span><span class="p">(</span><span class="mh">0x8048444</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mh">0xbfbab8f4</span><span class="p">,</span> <span class="mh">0x80484b0</span><span class="p">,</span> <span class="mh">0x80484a0</span> <span class="o">&lt;</span><span class="n">unfinished</span> <span class="p">...</span><span class="o">&gt;</span>
+
+<span class="n">printf</span><span class="p">(</span><span class="s">&#34;%d/n&#34;</span><span class="p">,</span> <span class="mi">6565</span><span class="p">)</span>                                                                <span class="o">=</span> <span class="mi">3</span>
+
+<span class="o">+++</span> <span class="n">exited</span> <span class="p">(</span><span class="n">status</span> <span class="mi">3</span><span class="p">)</span> <span class="o">+++</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>从ltrace结果可以清楚的看出：即使使用了内存，这次也并没有调用memset了。</p>
+
+<p>除了char类型外，其它的类型也都是这样的，有兴趣的同学可以自己尝试一下，这里就不贴详细的代码了。</p>
+
+<h1 id="总结汇总">【总结汇总】</h1>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/QQ%E6%88%AA%E5%9B%BE20170521143312.png" alt="" /></p>
+
+<p>综合前面的代码分析和性能测试，建议大家在编写代码的时候不要用char buffer[1024 1024] = XXX;这种方式，而要使用char buffer[1024 1024];除非确定一定要memset。</p>
+
+<p>有的同学就会问到：既然这样，难道我们就不用memset了？</p>
+
+<p>我的理解是：memset 1k以下，次数也不多，则可以用；否则除非你确定一定要memset，否则就不要用，你可以用其它替代方法。</p>
+
+<p>例如：</p>
+
+<p>1）如果内存是用来存放字符串的，你完全可以使用sprintf等函数，让其自动添加结束符；或者自己记录字符串的长度，在最后手动设置字符串结束符。</p>
+
+<p>2）对于C++的struct来说，可以定义默认构造函数来完成初始化。</p>
+
+<p>在gcc编译时加上 O2或者O3 优化参数，就不会隐含调用memset了.由此也引出两个值得注意的点：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">1. Debug模式和Release模式处理不一样，因此可能出现Debug模式下没有问题，正式发布上线后就有问题
+
+2. 研发开发的时候为了方便可以用Debug模式，但给测试同学测试的时候一定要用Release模式，否则就可能出现上述问题</pre></td></tr></table>
+</div>
+</div>
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2017-06-24
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      
+      <nav class="post-nav">
+        <a class="prev" href="/forz/post/%E8%A7%A3%E6%9E%90inline/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">解析“inline”</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/forz/post/%E8%AF%A6%E8%A7%A3char%E7%B1%BB%E5%9E%8B/">
+            <span class="next-text nav-default">详解char类型</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+      <a href="forzfuyao@email.com" class="iconfont icon-email" title="email"></a>
+  <a href="http://localhost:1313/forz/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/forz/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

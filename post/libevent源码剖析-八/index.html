@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>libevent源码剖析(八) - Forz</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="现在我们已经了解了libevent的基本框架：事件管理框架和事件主循环。上节提到了libevent中I/O事件和Signal以及Timer事" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="http://localhost:1313/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E5%85%AB/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/forz/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/forz/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/forz/favicon-16x16.png">
+<link rel="manifest" href="/forz/manifest.json">
+<link rel="mask-icon" href="/forz/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link href="/forz/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="libevent源码剖析(八)" />
+<meta property="og:description" content="现在我们已经了解了libevent的基本框架：事件管理框架和事件主循环。上节提到了libevent中I/O事件和Signal以及Timer事" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="http://localhost:1313/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E5%85%AB/" />
+<meta property="article:published_time" content="2017-06-25T17:01:43&#43;00:00"/>
+<meta property="article:modified_time" content="2017-06-25T17:01:43&#43;00:00"/>
+
+<meta itemprop="name" content="libevent源码剖析(八)">
+<meta itemprop="description" content="现在我们已经了解了libevent的基本框架：事件管理框架和事件主循环。上节提到了libevent中I/O事件和Signal以及Timer事">
+
+
+<meta itemprop="datePublished" content="2017-06-25T17:01:43&#43;00:00" />
+<meta itemprop="dateModified" content="2017-06-25T17:01:43&#43;00:00" />
+<meta itemprop="wordCount" content="2237">
+
+
+
+<meta itemprop="keywords" content="" />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="libevent源码剖析(八)"/>
+<meta name="twitter:description" content="现在我们已经了解了libevent的基本框架：事件管理框架和事件主循环。上节提到了libevent中I/O事件和Signal以及Timer事"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/forz/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/forz/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/forz/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/forz/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/forz/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/forz/" class="logo">Forz Blog</a>
+</div>
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/forz/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/forz/categories/">Categories</a>
+      </li>
+  </ul>
+</nav>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">libevent源码剖析(八)</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2017-06-25 </span>
+        <div class="post-category">
+            <a href="/forz/categories/libevent/"> Libevent </a>
+            </div>
+          <span class="more-meta"> 约 2237 字 </span>
+          <span class="more-meta"> 预计阅读 5 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+<ul>
+<li><a href="#1-集成策略-使用socket-pair">1 集成策略——使用socket pair</a></li>
+<li><a href="#2-集成到事件主循环-通知event-base">2 集成到事件主循环——通知event_base</a></li>
+<li><a href="#3-evsignal-info结构体">3 evsignal_info结构体</a></li>
+<li><a href="#4-注册-注销signal事件">4 注册、注销signal事件</a></li>
+<li><a href="#5-小结">5 小结</a></li>
+</ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      
+
+<p>现在我们已经了解了libevent的基本框架：事件管理框架和事件主循环。上节提到了libevent中I/O事件和Signal以及Timer事件的集成，这一节将分析如何将Signal集成到事件主循环的框架中。</p>
+
+<h1 id="1-集成策略-使用socket-pair">1 集成策略——使用socket pair</h1>
+
+<p>前一节已经做了足够多的介绍了，基本方法就是采用“消息机制”。在libevent中这是通过socket pair完成的，下面就来详细分析一下。</p>
+
+<p>Socket pair就是一个socket对，包含两个socket，一个读socket，一个写socket。工作方式如下图所示：</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/sock%20pair.JPG" alt="" /></p>
+
+<p>创建一个socket pair并不是复杂的操作，可以参见下面的流程图，清晰起见，其中忽略了一些错误处理和检查。</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/sock%20pair%20flow.JPG" alt="" /></p>
+
+<p>Libevent提供了辅助函数evutil_socketpair()来创建一个socket pair，可以结合上面的创建流程来分析该函数。</p>
+
+<h1 id="2-集成到事件主循环-通知event-base">2 集成到事件主循环——通知event_base</h1>
+
+<p>Socket pair创建好了，可是libevent的事件主循环还是不知道Signal是否发生了啊，看来我们还差了最后一步，那就是：为socket pair的读socket在libevent的event_base实例上注册一个persist的读事件。</p>
+
+<p>这样当向写socket写入数据时，读socket就会得到通知，触发读事件，从而event_base就能相应的得到通知了。</p>
+
+<p>前面提到过，Libevent会在事件主循环中检查标记，来确定是否有触发的signal，如果标记被设置就处理这些signal，这段代码在各个具体的I/O机制中，以Epoll为例，在epoll_dispatch()函数中，代码片段如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="n">res</span> <span class="o">=</span> <span class="n">epoll_wait</span><span class="p">(</span><span class="n">epollop</span><span class="o">-&gt;</span><span class="n">epfd</span><span class="p">,</span> <span class="n">events</span><span class="p">,</span> <span class="n">epollop</span><span class="o">-&gt;</span><span class="n">nevents</span><span class="p">,</span> <span class="n">timeout</span><span class="p">);</span>  
+<span class="k">if</span> <span class="p">(</span><span class="n">res</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>  
+    <span class="k">if</span> <span class="p">(</span><span class="n">errno</span> <span class="o">!=</span> <span class="n">EINTR</span><span class="p">)</span> <span class="p">{</span>  
+        <span class="n">event_warn</span><span class="p">(</span><span class="s">&#34;epoll_wait&#34;</span><span class="p">);</span>  
+        <span class="k">return</span> <span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span>  
+    <span class="p">}</span>  
+    <span class="n">evsignal_process</span><span class="p">(</span><span class="n">base</span><span class="p">);</span><span class="c1">// 处理signal事件  
+</span><span class="c1"></span>    <span class="k">return</span> <span class="p">(</span><span class="mi">0</span><span class="p">);</span>  
+<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="p">(</span><span class="n">base</span><span class="o">-&gt;</span><span class="n">sig</span><span class="p">.</span><span class="n">evsignal_caught</span><span class="p">)</span> <span class="p">{</span>  
+    <span class="n">evsignal_process</span><span class="p">(</span><span class="n">base</span><span class="p">);</span><span class="c1">// 处理signal事件  
+</span><span class="c1"></span><span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>完整的处理框架如下所示：</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/frame.JPG" alt="" /></p>
+
+<p>注1：libevent中，初始化阶段并不注册读socket的读事件，而是在注册信号阶段才会测试并注册；</p>
+
+<p>注2：libevent中，检查I/O事件是在各系统I/O机制的dispatch()函数中完成的，该dispatch()函数在event_base_loop()函数中被调用；</p>
+
+<h1 id="3-evsignal-info结构体">3 evsignal_info结构体</h1>
+
+<p>Libevent中Signal事件的管理是通过结构体evsignal_info完成的，结构体位于evsignal.h文件中，定义如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="k">struct</span> <span class="n">evsignal_info</span> <span class="p">{</span>  
+    <span class="k">struct</span> <span class="n">event</span> <span class="n">ev_signal</span><span class="p">;</span>  
+    <span class="kt">int</span> <span class="n">ev_signal_pair</span><span class="p">[</span><span class="mi">2</span><span class="p">];</span>  
+    <span class="kt">int</span> <span class="n">ev_signal_added</span><span class="p">;</span>  
+    <span class="k">volatile</span> <span class="n">sig_atomic_t</span> <span class="n">evsignal_caught</span><span class="p">;</span>  
+    <span class="k">struct</span> <span class="n">event_list</span> <span class="n">evsigevents</span><span class="p">[</span><span class="n">NSIG</span><span class="p">];</span>  
+    <span class="n">sig_atomic_t</span> <span class="n">evsigcaught</span><span class="p">[</span><span class="n">NSIG</span><span class="p">];</span>  
+<span class="cp">#ifdef HAVE_SIGACTION  
+</span><span class="cp"></span>    <span class="k">struct</span> <span class="n">sigaction</span> <span class="o">**</span><span class="n">sh_old</span><span class="p">;</span>  
+<span class="cp">#else  
+</span><span class="cp"></span>    <span class="n">ev_sighandler_t</span> <span class="o">**</span><span class="n">sh_old</span><span class="p">;</span>  
+<span class="cp">#endif  
+</span><span class="cp"></span>    <span class="kt">int</span> <span class="n">sh_old_max</span><span class="p">;</span>  
+<span class="p">};</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>下面详细介绍一下个字段的含义和作用：</p>
+
+<p>ev_signal， 为socket pair的读socket向event_base注册读事件时使用的event结构体；</p>
+
+<p>ev_signal_pair，socket pair对，作用见第一节的介绍；</p>
+
+<p>ev_signal_added，记录ev_signal事件是否已经注册了；</p>
+
+<p>evsignal_caught，是否有信号发生的标记；是volatile类型，因为它会在另外的线程中被修改；</p>
+
+<p>evsigvents[NSIG]，数组，evsigevents[signo]表示注册到信号signo的事件链表；</p>
+
+<p>evsigcaught[NSIG]，具体记录每个信号触发的次数，</p>
+
+<p>evsigcaught[signo]是记录信号signo被触发的次数；</p>
+
+<p>sh_old记录了原来的signal处理函数指针，当信号signo注册的event被清空时，需要重新设置其处理函数；</p>
+
+<p>evsignal_info的初始化包括，创建socket pair，设置ev_signal事件（但并没有注册，而是等到有信号注册时才检查并注册），并将所有标记置零，初始化信号的注册事件链表指针等。</p>
+
+<h1 id="4-注册-注销signal事件">4 注册、注销signal事件</h1>
+
+<p>注册signal事件是通过evsignal_add(struct event *ev)函数完成的，libevent对所有的信号注册同一个处理函数evsignal_handler()，该函数将在下一段介绍，注册过程如下：</p>
+
+<ol>
+<li>获得ev要注册到的信号signo；</li>
+<li>如果信号signo未被注册，那么就为signo注册信号处理函数evsignal_handler()；</li>
+<li>如果事件ev_signal还没哟注册，就注册ev_signal事件；</li>
+<li>将事件ev添加到signo的event链表中；</li>
+</ol>
+
+<p>从signo上注销一个已注册的signal事件就更简单了，直接从其已注册事件的链表中移除即可。如果事件链表已空，那么就恢复旧的处理函数；</p>
+
+<p>下面的讲解都以signal()函数为例，sigaction()函数的处理和signal()相似。</p>
+
+<p>处理函数evsignal_handler()函数做的事情很简单，就是记录信号的发生次数，并通知event_base有信号触发，需要处理：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="k">static</span> <span class="kt">void</span> <span class="nf">evsignal_handler</span><span class="p">(</span><span class="kt">int</span> <span class="n">sig</span><span class="p">)</span>  
+<span class="p">{</span>  
+    <span class="kt">int</span> <span class="n">save_errno</span> <span class="o">=</span> <span class="n">errno</span><span class="p">;</span> <span class="c1">// 不覆盖原来的错误代码  
+</span><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">evsignal_base</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span> <span class="p">{</span>  
+        <span class="n">event_warn</span><span class="p">(</span><span class="s">&#34;%s: received signal %d, but have no base configured&#34;</span><span class="p">,</span> <span class="n">__func__</span><span class="p">,</span> <span class="n">sig</span><span class="p">);</span>  
+        <span class="k">return</span><span class="p">;</span>  
+    <span class="p">}</span>  
+    <span class="c1">// 记录信号sig的触发次数，并设置event触发标记  
+</span><span class="c1"></span>    <span class="n">evsignal_base</span><span class="o">-&gt;</span><span class="n">sig</span><span class="p">.</span><span class="n">evsigcaught</span><span class="p">[</span><span class="n">sig</span><span class="p">]</span><span class="o">++</span><span class="p">;</span>  
+    <span class="n">evsignal_base</span><span class="o">-&gt;</span><span class="n">sig</span><span class="p">.</span><span class="n">evsignal_caught</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span>  
+<span class="cp">#ifndef HAVE_SIGACTION  
+</span><span class="cp"></span>    <span class="n">signal</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="n">evsignal_handler</span><span class="p">);</span> <span class="c1">// 重新注册信号  
+</span><span class="c1"></span><span class="cp">#endif  
+</span><span class="cp"></span>    <span class="c1">// 向写socket写一个字节数据，触发event_base的I/O事件，从而通知其有信号触发，需要处理  
+</span><span class="c1"></span>    <span class="n">send</span><span class="p">(</span><span class="n">evsignal_base</span><span class="o">-&gt;</span><span class="n">sig</span><span class="p">.</span><span class="n">ev_signal_pair</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s">&#34;a&#34;</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>  
+    <span class="n">errno</span> <span class="o">=</span> <span class="n">save_errno</span><span class="p">;</span> <span class="c1">// 错误代码  
+</span><span class="c1"></span><span class="p">}</span>  </code></pre></td></tr></table>
+</div>
+</div>
+<h1 id="5-小结">5 小结</h1>
+
+<p>本节介绍了libevent对signal事件的具体处理框架，包括事件注册、删除和socket pair通知机制，以及是如何将Signal事件集成到事件主循环之中的。</p>
+
+<p>转载：[<a href="http://blog.csdn.net/sparkliang/article/details/5011400](">http://blog.csdn.net/sparkliang/article/details/5011400](</a>)</p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2017-06-25
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      
+      <nav class="post-nav">
+        <a class="prev" href="/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E4%B9%9D/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">libevent源码剖析(九)</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/forz/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E4%B8%83/">
+            <span class="next-text nav-default">libevent源码剖析(七)</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+      <a href="forzfuyao@email.com" class="iconfont icon-email" title="email"></a>
+  <a href="http://localhost:1313/forz/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/forz/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
