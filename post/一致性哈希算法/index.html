@@ -51,7 +51,7 @@
 
 <meta itemprop="datePublished" content="2017-08-27T07:04:28&#43;00:00" />
 <meta itemprop="dateModified" content="2017-08-27T07:04:28&#43;00:00" />
-<meta itemprop="wordCount" content="6977">
+<meta itemprop="wordCount" content="9759">
 
 
 
@@ -128,8 +128,8 @@
         <div class="post-category">
             <a href="/categories/%E7%AE%97%E6%B3%95/"> 算法 </a>
             </div>
-          <span class="more-meta"> 约 6977 字 </span>
-          <span class="more-meta"> 预计阅读 14 分钟 </span>
+          <span class="more-meta"> 约 9759 字 </span>
+          <span class="more-meta"> 预计阅读 20 分钟 </span>
         
       </div>
     </header>
@@ -145,7 +145,11 @@
 <li><a href="#哈希算法的好坏定义">哈希算法的好坏定义</a></li>
 <li><a href="#一致性hash算法的神秘面纱">一致性Hash算法的神秘面纱</a></li>
 <li><a href="#一致性hash算法的容错性和可扩展性">一致性Hash算法的容错性和可扩展性</a></li>
-<li><a href="#hash环的数据倾斜问题">Hash环的数据倾斜问题</a></li>
+<li><a href="#hash环的数据倾斜问题">Hash环的数据倾斜问题</a>
+<ul>
+<li><a href="#虚拟节点">虚拟节点</a></li>
+<li><a href="#均匀映射">均匀映射</a></li>
+</ul></li>
 <li><a href="#热点问题">热点问题</a>
 <ul>
 <li><a href="#维护多个一致性hash环">维护多个一致性HASH环</a></li>
@@ -153,7 +157,26 @@
 <li><a href="#均衡权重">均衡权重</a></li>
 </ul></li>
 <li><a href="#扩散问题">扩散问题</a></li>
-<li><a href="#jump-consistent-hash">Jump consistent hash</a></li>
+<li><a href="#跳跃一致性哈希算法">跳跃一致性哈希算法</a>
+<ul>
+<li><a href="#算法内容">算法内容</a></li>
+<li><a href="#算法原理">算法原理</a>
+<ul>
+<li><a href="#基础原理">基础原理</a></li>
+<li><a href="#算法优化">算法优化</a></li>
+<li><a href="#线性同余">线性同余</a></li>
+</ul></li>
+<li><a href="#算法分析">算法分析</a>
+<ul>
+<li><a href="#优点">优点</a></li>
+<li><a href="#缺点">缺点</a>
+<ul>
+<li><a href="#无法调整节点权重">无法调整节点权重</a></li>
+<li><a href="#新增丢失节点处理困难">新增丢失节点处理困难</a></li>
+</ul></li>
+</ul></li>
+<li><a href="#算法测试">算法测试</a></li>
+</ul></li>
 </ul>
 </nav>
   </div>
@@ -207,6 +230,10 @@
 <li><p>负载(Load)：负载问题实际上是从另一个角度看待分散性问题。既然不同的终端可能将相同的内容映射到不同的缓冲区中，那么对于一个特定的缓冲区而言，也可能被不同的用户映射为不同的内容。与分散性一样，这种情况也是应当避免的，因此好的哈希算法应能够尽量降低缓冲的负荷。</p></li>
 </ol>
 
+<p>在分布式缓存系统中使用一致性哈希算法时，某个节点的添加和移除不会重新分配全部的缓存，而只会影响小部分的缓存系统，如果均衡性做的好的话，当添加一个节点时，会均匀地从其它节点移一部分缓存到新的节点上；当删除一个节点的时候，这个节点上的缓存会均匀地分配到其它活着的节点上。</p>
+
+<p>一致性哈希缓存还被扩展到分布式存储系统上。数据被分成一组Shard,每个Shard由一个节点管理，当需要扩容时，我们可以添加新的节点，然后将其它Shard的一部分数据移动到这个节点上。比如我们有10个Shard的分布式存储系统，当前存储了120个数据，每个Shard存储了12个数据。当扩容成12个Shard时，我们从每个Shard上拿走2个数据，存入到新的两个Shard上,这样每个Shard都存储了10个数据，而整个过程中我们只移动了20/120=1/6的数据。</p>
+
 <h1 id="一致性hash算法的神秘面纱">一致性Hash算法的神秘面纱</h1>
 
 <p>一致性Hash算法也是使用取模的方法，只是，刚才描述的取模法是对服务器的数量进行取模，而一致性Hash算法是对$2^{32}$取模，什么意思呢？简单来说，一致性Hash算法将整个哈希值空间组织成一个虚拟的圆环，如假设某哈希函数H的值空间为0~$2^{32}$-1（即哈希值是一个32位无符号整形），整个哈希环如下：</p>
@@ -249,11 +276,21 @@
 
 <p>此时必然造成大量数据集中到Node A上，而只有极少量会定位到Node B上。为了解决这种数据倾斜问题，一致性Hash算法引入了虚拟节点机制，即对每一个服务节点计算多个哈希，每个计算结果位置都放置一个此服务节点，称为虚拟节点。具体做法可以在服务器IP或主机名的后面增加编号来实现。</p>
 
+<h2 id="虚拟节点">虚拟节点</h2>
+
 <p>例如上面的情况，可以为每台服务器计算三个虚拟节点，于是可以分别计算 “Node A#1”、“Node A#2”、“Node A#3”、“Node B#1”、“Node B#2”、“Node B#3”的哈希值，于是形成六个虚拟节点：</p>
 
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190928154010.png" alt="" /></p>
 
 <p>同时数据定位算法不变，只是多了一步虚拟节点到实际节点的映射，例如定位到“Node A#1”、“Node A#2”、“Node A#3”三个虚拟节点的数据均定位到Node A上。这样就解决了服务节点少时数据倾斜的问题。在实际应用中，通常将虚拟节点数设置为32甚至更大，因此即使很少的服务节点也能做到相对均匀的数据分布。</p>
+
+<p>加入虚节点能够解决分布不均的问题，但是如何加入也是有技巧的。如果完全随机，就是撞大运编程。要利用搜索算法，加入节点时要检测，保证每个实节点的区间不能差异太大。必要时要回溯，剪枝，或者用启发性搜索。</p>
+
+<h2 id="均匀映射">均匀映射</h2>
+
+<p>虚节点这种靠数量取胜的策略增加了存储这些虚节点信息所需要的空间。还一种比较特殊的方法来解决分布不均的问题，改进了这些数据分布的算法，将环上的空间均匀的映射到一个线性空间，这样，就保证分布的均匀性。</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191009142009.png" alt="" /></p>
 
 <h1 id="热点问题">热点问题</h1>
 
@@ -366,18 +403,11 @@
 
 <p>答案是能够满足命中率指标的前提下（如储存下全量数据），节点数应该尽量的少。因为多余的节点不仅不能增加命中率，反而会因为扩散更严重而更消耗资源。</p>
 
-<h1 id="jump-consistent-hash">Jump consistent hash</h1>
+<h1 id="跳跃一致性哈希算法">跳跃一致性哈希算法</h1>
 
-<p>对于分布式存储系统，当一个节点失效时，我们并不期望它被移除，而是使用备份节点替换它，或者将它恢复起来，因为我们不期望丢掉它上面的数据。对于这种情况(节点可以扩容，但是不会移除节点)，Google的 John Lamping, Eric Veach提供一个高效的几乎不占用持久内存的算法： Jump Consistent Hash。</p>
+<h2 id="算法内容">算法内容</h2>
 
-<p>Jump Consistent Hash算法的特点是：</p>
-
-<ul>
-<li>代码简单： 寥寥几行代码</li>
-<li>不需要额外的内存映射：可是实时计算</li>
-<li>快速</li>
-<li>均匀：数据非常均匀地分布在各个节点</li>
-</ul>
+<p>对于分布式存储系统，当一个节点失效时，我们并不期望它被移除，而是使用备份节点替换它，或者将它恢复起来，因为我们不期望丢掉它上面的数据。对于这种情况(节点可以扩容，但是不会移除节点)，Google的 John Lamping, Eric Veach提供一个高效的几乎不占用持久内存的算法： 跳跃一致性哈希。</p>
 
 <p>golang版本实现如下:</p>
 <div class="highlight"><div class="chroma">
@@ -410,6 +440,209 @@
 <span class="p">}</span></code></pre></td></tr></table>
 </div>
 </div>
+<p>以上就是算法的全部代码，输入参数分别是64位的key，桶的数量（一般对应服务器的数量），输出是一个桶的编号（从0开始）。</p>
+
+<h2 id="算法原理">算法原理</h2>
+
+<h3 id="基础原理">基础原理</h3>
+
+<p>一致性哈希算法有两个目标：</p>
+
+<ul>
+<li>平衡性。即把数据平均的分布在所有节点中。</li>
+<li>单调性。即节点的数量变化时，只需要把一部分数据从旧节点移动到新节点，不需要做其他的移动。</li>
+</ul>
+
+<p>我们根据这个单调性可以推算出一些性质来。</p>
+
+<p>这里先令f(key, n)为一致性哈希算法，输出的为[0,n)之间的数字，代表数据在对应的节点上。</p>
+
+<ol>
+<li>n=1 时，对于任意的key，输出应该都是0。</li>
+<li>n=2 时，为了保持均匀，应该有1/2的结果保持为0，1/2的结果输出为1。</li>
+<li>n=3 时，应该有1/3的结果保持为0，1/3的结果保持为1，1/3的结果保持为2。</li>
+<li>依次递推，节点数由n变为n+1时，f(key, n)里面应该有n/(n+1)的结果不变，有1/(n+1)的结果变为n。</li>
+</ol>
+
+<p>这个使用概率公式来表示，就是这样的代码。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kt">int</span> <span class="nf">ch</span><span class="p">(</span><span class="kt">int</span> <span class="nx">key</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">num_buckets</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">random</span><span class="p">.</span><span class="nf">seed</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span> <span class="p">;</span>
+    <span class="kt">int</span> <span class="nx">b</span> <span class="p">=</span> <span class="mi">0</span><span class="p">;</span> <span class="c1">// This will track ch(key, j +1) .
+</span><span class="c1"></span>    <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="nx">j</span> <span class="p">=</span> <span class="mi">1</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">num_buckets</span><span class="p">;</span> <span class="nx">j</span> <span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="p">(</span><span class="nx">random</span><span class="p">.</span><span class="nf">next</span><span class="p">()</span> <span class="p">&lt;</span> <span class="mf">1.0</span><span class="o">/</span><span class="p">(</span><span class="nx">j</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span> <span class="p">)</span> <span class="nx">b</span> <span class="p">=</span> <span class="nx">j</span> <span class="p">;</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nx">b</span><span class="p">;</span>
+<span class="p">}</span>
+<span class="o">//</span><span class="nx">代码中的random</span><span class="p">.</span><span class="nf">next</span><span class="p">()</span><span class="nx">产生</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span><span class="mi">1</span><span class="p">)</span><span class="nx">的随机数</span><span class="err">，</span><span class="nx">随机数序列只和key有关</span><span class="err">，</span><span class="nx">key为随机种子</span><span class="err">。</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>关于这个算法直接看可能还是看不懂。</p>
+
+<p>所以需要使用实际数据模拟一下，见下图。</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191009113015.png" alt="" /></p>
+
+<p>关键在于n=2到n=3的过程，每个数字的概率从1/2转化到了1/3。</p>
+
+<p>之后，我们可以得出一个规律：增加一个节点，数据不发生变化的概率是n/(n+1) 再乘以之前每个数字的概率1/n，就可以得出每个数字最新的概率1/(n+1)</p>
+
+<p>由此，可以轻松计算出n=4各数字的概率为1/4。 自此，我们可以确定这个算法确实是有效的。</p>
+
+<p>这个算法唯一的缺点是复杂度太高，是O(n)的。所以需要进行优化。</p>
+
+<h3 id="算法优化">算法优化</h3>
+
+<p>很显然, 这个算法是O(n)的, 而且随着j越来越大, b=j需要执行的概率也越来越低. Google最终的算法叫跳跃一致性哈希, Jump指的是j是跳跃的, 那他们是怎么让j跳跃, 并保持结果正确呢?</p>
+
+<p>我们用概率的思路来想这个问题, 假设变化过程中的上一次结果是b, 下一次结果j大于等于一个大于b的数i的概率, 也就是可以跳到i的概率, 也就是从b+1到i的过程中, 桶序号都没有变的概率为:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">P(j&gt;=i) = P(ch(key, b+1)==ch(key, i))</pre></td></tr></table>
+</div>
+</div>
+<p>这个概率也就是连续多次不变事件概率的乘积:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">P(j&gt;=i) = P(ch(key, b+1)==ch(k, b+2)) * P(ch(key, b+2)==ch(key, b+3)) * ... * P(ch(key, i-1)==ch(key, i))</pre></td></tr></table>
+</div>
+</div>
+<p>由于单次不变的概率为:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">P(ch(key, i)==ch(key, i+1)) = i/(i+1)</pre></td></tr></table>
+</div>
+</div>
+<p>所以连续多次不变的概率为:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">P(j&gt;=i) = (b+1)/(b+2) * (b+2)/(b+3) * ... * (i-1)/i = (b+1)/i</pre></td></tr></table>
+</div>
+</div>
+<p>如果我们有一个均匀的随机函数r，可以确定当r&lt;(b+1)/i时，f(i)=f(b+1)。那么i的上界就是(b+1)/r向上取整。这个上限也是下一次key发生变化的节点数量。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kt">int</span> <span class="nf">ch</span><span class="p">(</span><span class="kt">int</span> <span class="nx">key</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">num_buckets</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">random</span><span class="p">.</span><span class="nf">seed</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span><span class="err">;</span>
+    <span class="kt">int</span> <span class="nx">b</span> <span class="p">=</span> <span class="o">-</span><span class="mi">1</span><span class="err">;</span> <span class="c1">// bucket number before the previous jump
+</span><span class="c1"></span>    <span class="kt">int</span> <span class="nx">j</span> <span class="p">=</span> <span class="mi">0</span><span class="err">;</span> <span class="c1">// bucket number before the current jump
+</span><span class="c1"></span>    <span class="nf">while</span> <span class="p">(</span><span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">num_buckets</span><span class="p">)</span> <span class="p">{</span>
+        <span class="nx">b</span> <span class="p">=</span> <span class="nx">j</span><span class="err">;</span>
+        <span class="nx">r</span> <span class="p">=</span> <span class="nx">random</span><span class="p">.</span><span class="nf">next</span><span class="p">()</span><span class="err">;</span>
+        <span class="nx">j</span> <span class="p">=</span> <span class="nf">floor</span><span class="p">((</span><span class="nx">b</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="nx">r</span><span class="p">)</span><span class="err">;</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="p">=</span> <span class="nx">b</span><span class="err">;</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>由于r是均匀的，所以期望是1/2。</p>
+
+<p>这样，代码中j就是按照指数级增长的，平均复杂度就是O(log(n))了。</p>
+
+<h3 id="线性同余">线性同余</h3>
+
+<p>我们再看</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">key</span> <span class="p">=</span> <span class="nx">key</span><span class="o">*</span><span class="mi">2862933555777941757</span> <span class="o">+</span> <span class="mi">1</span>
+<span class="nx">j</span> <span class="p">=</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">b</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nb">int64</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">&lt;&lt;</span><span class="mi">31</span><span class="p">)</span> <span class="o">/</span> <span class="nb">float64</span><span class="p">((</span><span class="nx">key</span><span class="o">&gt;&gt;</span><span class="mi">33</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span><span class="p">)))</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>和</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">r</span> <span class="p">=</span> <span class="nx">random</span><span class="p">.</span><span class="nf">next</span><span class="p">()</span><span class="err">;</span>
+<span class="nx">j</span> <span class="p">=</span> <span class="nf">floor</span><span class="p">((</span><span class="nx">b</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="nx">r</span><span class="p">)</span><span class="err">;</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>有什么关系。</p>
+
+<p>第一个<code>key=key*x+1</code>算是一个伪随机生成器。而<code>j=(b+1)*x/y</code>则是上面的求上界的公式，其中<code>y/x</code>通过浮点数运算来产生(0,1)内的一个随机数。</p>
+
+<p><code>(key&gt;&gt;33)+1</code>是取key值的高31位的值再加1(因为key为64位,右移33位后剩余31位)，范围为<code>(1,2^31+1)</code>,<code>int64(1)&lt;&lt;31</code>的值为<code>2^31</code>。</p>
+
+<p><code>[(key&gt;&gt;33)+1]/int64(1)&lt;&lt;31</code>的取值范围是<code>(0,1]</code>,如果<code>(key&gt;&gt;33)=2^31</code>那么会大于1，由于是c的整数运算，大于1也会取证忽略掉小数部分。</p>
+
+<p>自此，这个代码就可以看懂了。</p>
+
+<h2 id="算法分析">算法分析</h2>
+
+<h3 id="优点">优点</h3>
+
+<p>该算法通过随机种子产生随机数，减少存储；利用概率和随机数，确定key在bucket_num范围内落在的桶序号。减少了运算量，也易于实现，对于存储类路由非常适合，而且key的分散性不依赖key本身，只依赖随机生成器，对key的要求不高，不用做转换。</p>
+
+<p>适合在分布式系统中，根据key来选择被分配到的服务场景。每次新增新的服务节点，只有1/n的key会变动，不会因为扩容或缩容瞬间造成大部分缓存失效。</p>
+
+<h3 id="缺点">缺点</h3>
+
+<h4 id="无法调整节点权重">无法调整节点权重</h4>
+
+<p>我们实际使用时，节点往往是有权重的。这里只有一个节点的最大值，那意味着，节点的扩散需要在外层实现。也就是需要在外层来储存扩散后的节点列表。既然外面储存了节点列表，按照 hash 值排序，就可以二分查找出符合要求的节点了。如果使用 map 储存，也可以在 log 级别找到对应的节点。由此，可以发现 谷歌的这个算法自身不需要内存了，但是内存需要业务自己维护，实际上还是需要的。</p>
+
+<h4 id="新增丢失节点处理困难">新增丢失节点处理困难</h4>
+
+<p>和其他的一致性hash相比。如果有中间的桶失效，是不能够像割环hash一样，均匀分配到其他节点的，只能找个新替换节点来取代.</p>
+
+<p>比如说我们对于hash桶，存在这样的映射：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">0-&gt;机器A，1-&gt;机器B，2-&gt;机器C，3-&gt;机器D</pre></td></tr></table>
+</div>
+</div>
+<p>当3-&gt;机器D从映射表消失后，根据ch()的算法，原来分配到b:3桶的会被重新分配到bucket 0-2。那么问题来了， 若是1-&gt;机器B从映射表消失呢？</p>
+
+<p>根据ch()算法，返回还是会重新分配bucket 0-2。那么现在机器映射0,2,3怎么和现在的bucket 0-2对应。外部要维护动态的映射表，实时更新&hellip;</p>
+
+<h2 id="算法测试">算法测试</h2>
+
 <p>我们可以写段代码测试它，看看它的分布是否均匀，在新增加一个节点的时候，是否只移动了一部分的数据：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -463,7 +696,7 @@
 <span class="p">}</span></code></pre></td></tr></table>
 </div>
 </div>
-<p>因为Jump consistent hash算法不使用节点挂掉，如果你真的有这种需求，比如你要做一个缓存系统，你可以考虑使用ketama算法，或者对Jump consistent hash算法改造一下：节点挂掉时我们不移除节点，只是标记这个节点不可用。当选择节点时，如果选择的节点不可用，则再一次Hash，尝试选择另外一个节点，比如下面的算法将key加1再进行选择。</p>
+<p>因为跳跃一致性哈希算法不使用节点挂掉，如果你真的有这种需求，比如你要做一个缓存系统，你可以考虑使用ketama算法，或者对跳跃一致性哈希算法改造一下：节点挂掉时我们不移除节点，只是标记这个节点不可用。当选择节点时，如果选择的节点不可用，则再一次Hash，尝试选择另外一个节点，比如下面的算法将key加1再进行选择。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
@@ -505,7 +738,10 @@
 <p>参考:<br />
 <a href="https://zhuanlan.zhihu.com/p/34985026">https://zhuanlan.zhihu.com/p/34985026</a><br />
 <a href="https://mp.weixin.qq.com/s/yyqEwfEgEWYwWoalFLcuSw">https://mp.weixin.qq.com/s/yyqEwfEgEWYwWoalFLcuSw</a>
-<a href="https://colobu.com/2016/03/22/jump-consistent-hash/">https://colobu.com/2016/03/22/jump-consistent-hash/</a></p>
+<a href="https://colobu.com/2016/03/22/jump-consistent-hash/">https://colobu.com/2016/03/22/jump-consistent-hash/</a>
+<a href="https://www.owenzhang.net/blog/tag/jump-consistent-hash">https://www.owenzhang.net/blog/tag/jump-consistent-hash</a>
+<a href="https://yikun.github.io/2016/06/09/%E4%B8%80%E8%87%B4%E6%80%A7%E5%93%88%E5%B8%8C%E7%AE%97%E6%B3%95%E7%9A%84%E7%90%86%E8%A7%A3%E4%B8%8E%E5%AE%9E%E8%B7%B5/">https://yikun.github.io/2016/06/09/%E4%B8%80%E8%87%B4%E6%80%A7%E5%93%88%E5%B8%8C%E7%AE%97%E6%B3%95%E7%9A%84%E7%90%86%E8%A7%A3%E4%B8%8E%E5%AE%9E%E8%B7%B5/</a>
+<a href="https://www.lanindex.com/%E4%B8%80%E8%87%B4%E6%80%A7%E5%93%88%E5%B8%8C%E7%AE%97%E6%B3%95%EF%BC%88consistent-hash%EF%BC%89%E7%9A%84%E9%BB%91%E7%A7%91%E6%8A%80/">https://www.lanindex.com/%E4%B8%80%E8%87%B4%E6%80%A7%E5%93%88%E5%B8%8C%E7%AE%97%E6%B3%95%EF%BC%88consistent-hash%EF%BC%89%E7%9A%84%E9%BB%91%E7%A7%91%E6%8A%80/</a></p>
 
     </div>
 
@@ -560,7 +796,6 @@
 
     <footer id="footer" class="footer">
       <div class="social-links">
-      <a href="forzfuyao@email.com" class="iconfont icon-email" title="email"></a>
   <a href="http://localhost:1313/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
 </div>
 
