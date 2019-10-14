@@ -1,2 +1,0 @@
-# forz.github.io
-blog
