@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Linux内核时钟系统和定时器实现 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="Linux内核时钟系统和定时器实现 Linux 2.6.16之前，内核只支持低精度时钟，内核定时器的工作方式： 系统启动后，会读取时钟源设备(RTC, HP" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="/post/linux%E5%86%85%E6%A0%B8%E6%97%B6%E9%92%9F%E7%B3%BB%E7%BB%9F%E5%92%8C%E5%AE%9A%E6%97%B6%E5%99%A8%E5%AE%9E%E7%8E%B0/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Linux内核时钟系统和定时器实现" />
+<meta property="og:description" content="Linux内核时钟系统和定时器实现 Linux 2.6.16之前，内核只支持低精度时钟，内核定时器的工作方式： 系统启动后，会读取时钟源设备(RTC, HP" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/linux%E5%86%85%E6%A0%B8%E6%97%B6%E9%92%9F%E7%B3%BB%E7%BB%9F%E5%92%8C%E5%AE%9A%E6%97%B6%E5%99%A8%E5%AE%9E%E7%8E%B0/" />
+<meta property="article:published_time" content="2019-10-21T11:44:32&#43;00:00"/>
+<meta property="article:modified_time" content="2019-10-21T11:44:32&#43;00:00"/>
+
+<meta itemprop="name" content="Linux内核时钟系统和定时器实现">
+<meta itemprop="description" content="Linux内核时钟系统和定时器实现 Linux 2.6.16之前，内核只支持低精度时钟，内核定时器的工作方式： 系统启动后，会读取时钟源设备(RTC, HP">
+
+
+<meta itemprop="datePublished" content="2019-10-21T11:44:32&#43;00:00" />
+<meta itemprop="dateModified" content="2019-10-21T11:44:32&#43;00:00" />
+<meta itemprop="wordCount" content="6649">
+
+
+
+<meta itemprop="keywords" content="定时器," />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Linux内核时钟系统和定时器实现"/>
+<meta name="twitter:description" content="Linux内核时钟系统和定时器实现 Linux 2.6.16之前，内核只支持低精度时钟，内核定时器的工作方式： 系统启动后，会读取时钟源设备(RTC, HP"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Linux内核时钟系统和定时器实现</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2019-10-21 </span>
+        <div class="post-category">
+            <a href="/categories/linux%E5%86%85%E6%A0%B8/"> Linux内核 </a>
+            </div>
+          <span class="more-meta"> 约 6649 字 </span>
+          <span class="more-meta"> 预计阅读 14 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+<ul>
+<li><a href="#linux内核时钟系统和定时器实现">Linux内核时钟系统和定时器实现</a></li>
+<li><a href="#用户层定时器api接口">用户层定时器API接口</a>
+<ul>
+<li><a href="#常见定时功能的api-sleep系列">常见定时功能的API：sleep系列</a>
+<ul>
+<li><a href="#alarm">alarm</a></li>
+<li><a href="#sleep">sleep</a></li>
+<li><a href="#nanosleep">nanosleep</a></li>
+</ul></li>
+<li><a href="#间隔定时器itimer">间隔定时器itimer</a></li>
+<li><a href="#posix定时器">POSIX定时器</a></li>
+</ul></li>
+</ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      
+
+<h1 id="linux内核时钟系统和定时器实现">Linux内核时钟系统和定时器实现</h1>
+
+<p>Linux 2.6.16之前，内核只支持低精度时钟，内核定时器的工作方式：</p>
+
+<ol>
+<li>系统启动后，会读取时钟源设备(RTC, HPET，PIT…),初始化当前系统时间；</li>
+
+<li><p>内核会根据HZ(系统定时器频率，节拍率)参数值，设置时钟事件设备，启动tick(节拍)中断。HZ表示1秒种产生多少个时钟硬件中断，tick就表示连续两个中断的间隔时间。在我电脑上，HZ=250， 一个tick = 1/HZ, 所以默认一个tick为4ms。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-shell" data-lang="shell"><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-shell" data-lang="shell">cat /boot/config-<span class="sb">`</span>uname -r<span class="sb">`</span> <span class="p">|</span> grep <span class="s1">&#39;CONFIG_HZ=&#39;</span>
+<span class="nv">CONFIG_HZ</span><span class="o">=</span><span class="m">250</span></code></pre></td></tr></table>
+</div>
+</div>
+<ol>
+<li>设置时钟事件设备后，时钟事件设备会定时产生一个tick中断，触发时钟中断处理函数，更新系统时钟,并检测timer wheel，进行超时事件的处理。</li>
+</ol>
+
+<p>补充： 后来发现，以及wiki上说：core infrastructure support for high resolution timers has been accepted into the mainline kernel (in 2.6.21)</p>
+
+<p>在上面工作方式下，Linux 2.6.16 之前，内核软件定时器采用timer wheel多级时间轮的实现机制，维护操作系统的所有定时事件。timer wheel的触发是基于系统tick周期性中断。</p>
+
+<p>所以说这之前，linux只能支持ms级别的时钟，随着时钟源硬件设备的精度提高和软件高精度计时的需求，有了高精度时钟的内核设计。</p>
+
+<p>Linux 2.6.16 ，内核支持了高精度的时钟，内核采用新的定时器hrtimer，其实现逻辑和Linux 2.6.16 之前定时器逻辑区别：</p>
+
+<ul>
+<li>hrtimer采用红黑树进行高精度定时器的管理，而不是时间轮；</li>
+<li>高精度时钟定时器不再依赖系统的tick中断，而是基于事件触发。</li>
+</ul>
+
+<p>旧内核的定时器实现依赖于系统定时器硬件定期的tick，基于该tick，内核会扫描timer wheel处理超时事件，会更新jiffies，wall time(墙上时间，现实时间)，process的使用时间等等工作。</p>
+
+<p>新的内核不再会直接支持周期性的tick，新内核定时器框架采用了基于事件触发，而不是以前的周期性触发。新内核实现了hrtimer(high resolution timer)，hrtimer的设计目的，就是为了解决time wheel的缺点：</p>
+
+<ul>
+<li>低精度；timer wheel只能支持ms级别的精度，hrtimer可以支持ns级别；</li>
+<li>Timer wheel与内核其他模块的高耦合性；</li>
+</ul>
+
+<p>新内核的hrtimer的触发和设置不像之前在定期的tick中断中进行，而是动态调整的，即基于事件触发，hrtimer的工作原理：通过将高精度时钟硬件的下次中断触发时间设置为红黑树中最早到期的 Timer 的时间，时钟到期后从红黑树中得到下一个 Timer 的到期时间，并设置硬件，如此循环反复。</p>
+
+<p>在高精度时钟模式下，操作系统内核仍然需要周期性的tick中断，以便刷新内核的一些任务。前面可以知道，hrtimer是基于事件的，不会周期性出发tick中断，所以为了实现周期性的tick中断(dynamic tick)：系统创建了一个模拟 tick 时钟的特殊 hrtimer，将其超时时间设置为一个tick时长，在超时回来后，完成对应的工作，然后再次设置下一个tick的超时时间，以此达到周期性tick中断的需求。</p>
+
+<p>引入了dynamic tick,是为了能够在使用高精度时钟的同时节约能源,，这样会产生tickless 情况下，会跳过一些 tick。这里只是简单介绍，有兴趣可以读kernel源码。</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191021121153.png" alt="" /></p>
+
+<p>上图1是Linux 2.6.16以来内核定时器实现的结构，</p>
+
+<p>新内核对相关的时间硬件设备进行了统一的封装，定义了主要有下面两个结构：</p>
+
+<ul>
+<li><p>时钟源设备(closk source device)：抽象那些能够提供计时功能的系统硬件，比如 RTC(Real Time Clock)、TSC(Time Stamp Counter)，HPET，ACPI PM-Timer，PIT等。不同时钟源提供的精度不一样，现在pc大都是支持高精度模式(high-resolution mode)也支持低精度模式(low-resolution mode)。</p></li>
+
+<li><p>时钟事件设备(clock event device)：系统中可以触发 one-shot（单次）或者周期性中断的设备都可以作为时钟事件设备。
+当前内核同时存在新旧timer wheel 和 hrtimer两套timer的实现，内核启动后会进行从低精度模式到高精度时钟模式的切换，hrtimer模拟的tick中断将驱动传统的低精度定时器系统（基于时间轮）和内核进程调度。</p></li>
+</ul>
+
+<p>内核定时器系统增加了hrtimer之后，对于用户层开放的定时器相关接口基本都是通过hrtimer进行实现的，从内核源码可以看到:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">https</span><span class="p">:</span><span class="c1">//github.com/torvalds/linux/blob/master/kernel/time/hrtimer.c
+</span><span class="c1"></span>
+<span class="o">*</span>  <span class="nx">These</span> <span class="nx">timers</span> <span class="nx">are</span> <span class="nx">currently</span> <span class="nx">used</span> <span class="k">for</span><span class="p">:</span>
+<span class="o">*</span>   <span class="o">-</span> <span class="nx">itimers</span>
+<span class="o">*</span>   <span class="o">-</span> <span class="nx">POSIX</span> <span class="nx">timers</span>
+<span class="o">*</span>   <span class="o">-</span> <span class="nx">nanosleep</span>
+<span class="o">*</span>   <span class="o">-</span> <span class="nx">precise</span> <span class="nx">in</span><span class="o">-</span><span class="nx">kernel</span> <span class="nx">timing</span>
+<span class="o">*</span></code></pre></td></tr></table>
+</div>
+</div></li>
+</ol>
+
+<h1 id="用户层定时器api接口">用户层定时器API接口</h1>
+
+<p>上面介绍完linux内核定时器的实现后，下面简单说一下，基于内核定时器实现的，对用户层开放的定时器API：间隔定时器itimer和POSIX定时器。</p>
+
+<h2 id="常见定时功能的api-sleep系列">常见定时功能的API：sleep系列</h2>
+
+<p>在介绍itimer和POSIX定时器之前，我们先看看我们经常遇到过具有定时功能的库函数API接口：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nf">alarm</span><span class="p">()</span>
+<span class="nf">sleep</span><span class="p">()</span>
+<span class="nf">usleep</span><span class="p">()</span>
+<span class="nf">nanosleep</span><span class="p">()</span></code></pre></td></tr></table>
+</div>
+</div>
+<h3 id="alarm">alarm</h3>
+
+<p>alarm()函数可以设置一个定时器，在特定时间超时，并产生SIGALRM信号，如果不忽略或不捕捉该信号，该进程会被终止。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="err">#</span><span class="nx">include</span> <span class="p">&lt;</span><span class="nx">unistd</span><span class="p">.</span><span class="nx">h</span><span class="p">&gt;</span>
+<span class="nx">unsigned</span> <span class="kt">int</span> <span class="nf">alarm</span><span class="p">(</span><span class="nx">unsigned</span> <span class="kt">int</span> <span class="nx">seconds</span><span class="p">);</span>
+<span class="k">return</span><span class="err">：</span><span class="mi">0</span><span class="nx">或到期剩余秒数</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>那么alarm在是如何实现的？Glibc中alarm是基于间隔定时器itimer来实现的(文章后面会说到itimer是基于hrtimer实现的)。如下alarm在库函数下的实现,alarm调用了setitimer系统调用：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">https</span><span class="p">:</span><span class="c1">//github.com/lattera/glibc/blob/master/sysdeps/unix/alarm.c
+</span><span class="c1"></span>
+<span class="nx">unsigned</span> <span class="kt">int</span> 
+<span class="nf">alarm</span> <span class="p">(</span><span class="nx">seconds</span><span class="p">)</span>
+     <span class="nx">unsigned</span> <span class="kt">int</span> <span class="nx">seconds</span><span class="p">;</span>
+<span class="p">{</span>
+  <span class="o">...</span>
+  <span class="k">if</span> <span class="p">(</span><span class="nf">__setitimer</span> <span class="p">(</span><span class="nx">ITIMER_REAL</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">new</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">old</span><span class="p">)</span> <span class="p">&lt;</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="o">...</span>
+<span class="p">}</span>
+<span class="nf">libc_hidden_def</span> <span class="p">(</span><span class="nx">alarm</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<h3 id="sleep">sleep</h3>
+
+<p>sleep和alarm的功能类似，不过sleep会让进程挂起， 在定时器超时内核会产生SIGALRM信号，如果不忽略或不捕捉该信号，该进程会被终止。
+那么sleep是如何实现的？Glibc的sleep实现如下：可见其实调用alarm实现的，在alarm的基础上注册了SIGALRM信号处理函数，用于在定时器到期时，捕获到信号，回到睡眠的地方。所以其实可以看出sleep就是对alarm的特化。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">https</span><span class="p">:</span><span class="c1">//github.com/lattera/glibc/blob/master/sysdeps/posix/sleep.c
+</span><span class="c1"></span>
+<span class="nx">unsigned</span> <span class="kt">int</span>
+<span class="nf">__sleep</span> <span class="p">(</span><span class="nx">unsigned</span> <span class="kt">int</span> <span class="nx">seconds</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="o">...</span>
+    <span class="kd">struct</span> <span class="nx">sigaction</span> <span class="nx">act</span><span class="p">,</span> <span class="nx">oact</span><span class="p">;</span>
+    <span class="o">...</span>
+    <span class="c1">//注册信号回调函数
+</span><span class="c1"></span>    <span class="nx">act</span><span class="p">.</span><span class="nx">sa_handler</span> <span class="p">=</span> <span class="nx">sleep_handler</span><span class="p">;</span>
+    <span class="nx">act</span><span class="p">.</span><span class="nx">sa_flags</span> <span class="p">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="nx">act</span><span class="p">.</span><span class="nx">sa_mask</span> <span class="p">=</span> <span class="nx">oset</span><span class="p">;</span>
+    <span class="k">if</span> <span class="p">(</span><span class="nf">sigaction</span> <span class="p">(</span><span class="nx">SIGALRM</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">act</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">oact</span><span class="p">)</span> <span class="p">&lt;</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nx">seconds</span><span class="p">;</span>
+    <span class="o">...</span>
+    <span class="c1">//调用alarm API进行操作
+</span><span class="c1"></span>    <span class="nx">remaining</span> <span class="p">=</span> <span class="nf">alarm</span> <span class="p">(</span><span class="nx">seconds</span><span class="p">);</span>
+ 
+<span class="p">}</span>
+<span class="nf">weak_alias</span> <span class="p">(</span><span class="nx">__sleep</span><span class="p">,</span> <span class="nx">sleep</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>usleep:
+usleep支持精度更高的微妙级别的定时操作，</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">https</span><span class="p">:</span><span class="c1">//github.com/lattera/glibc/blob/master/sysdeps/unix/sysv/linux/usleep.c
+</span><span class="c1"></span>
+<span class="kt">int</span> <span class="nf">usleep</span> <span class="p">(</span><span class="nx">useconds_t</span> <span class="nx">useconds</span><span class="p">)</span>
+<span class="p">{</span>
+  <span class="kd">struct</span> <span class="nx">timespec</span> <span class="nx">ts</span> <span class="p">=</span> <span class="p">{</span> <span class="p">.</span><span class="nx">tv_sec</span> <span class="p">=</span> <span class="p">(</span><span class="nx">long</span> <span class="kt">int</span><span class="p">)</span> <span class="p">(</span><span class="nx">useconds</span> <span class="o">/</span> <span class="mi">1000000</span><span class="p">),</span>
+             <span class="p">.</span><span class="nx">tv_nsec</span> <span class="p">=</span> <span class="p">(</span><span class="nx">long</span> <span class="kt">int</span><span class="p">)</span> <span class="p">(</span><span class="nx">useconds</span> <span class="o">%</span> <span class="mi">1000000</span><span class="p">)</span> <span class="o">*</span> <span class="mi">1000</span><span class="nx">ul</span> <span class="p">};</span>
+
+  <span class="cm">/* Note the usleep() is a cancellation point.  But since we call
+</span><span class="cm">     nanosleep() which itself is a cancellation point we do not have
+</span><span class="cm">     to do anything here.  */</span>
+  <span class="k">return</span> <span class="nf">__nanosleep</span> <span class="p">(</span><span class="o">&amp;</span><span class="nx">ts</span><span class="p">,</span> <span class="nx">NULL</span><span class="p">);</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>Bsd的usleep实现如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">https</span><span class="p">:</span><span class="c1">//github.com/anonymalias/glibc/blob/master/sysdeps/unix/bsd/usleep.c
+</span><span class="c1"></span>
+
+<span class="kt">int</span> <span class="nf">usleep</span> <span class="p">(</span><span class="nx">useconds</span><span class="p">)</span>
+     <span class="nx">useconds_t</span> <span class="nx">useconds</span><span class="p">;</span>
+<span class="p">{</span>
+  <span class="kd">struct</span> <span class="nx">timeval</span> <span class="nx">delay</span><span class="p">;</span>
+
+  <span class="nx">delay</span><span class="p">.</span><span class="nx">tv_sec</span> <span class="p">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="nx">delay</span><span class="p">.</span><span class="nx">tv_usec</span> <span class="p">=</span> <span class="nx">useconds</span><span class="p">;</span>
+
+  <span class="k">return</span> <span class="nf">__select</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="p">(</span><span class="nx">fd_set</span> <span class="o">*</span><span class="p">)</span> <span class="nx">NULL</span><span class="p">,</span> <span class="p">(</span><span class="nx">fd_set</span> <span class="o">*</span><span class="p">)</span> <span class="nx">NULL</span><span class="p">,</span> <span class="p">(</span><span class="nx">fd_set</span> <span class="o">*</span><span class="p">)</span> <span class="nx">NULL</span><span class="p">,</span>
+           <span class="o">&amp;</span><span class="nx">delay</span><span class="p">);</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<h3 id="nanosleep">nanosleep</h3>
+
+<p>nanosleep()glibc的API是直接调用linux内核的nanosleep，内核的nanosleep采用了hrtimer进行实现。</p>
+
+<p>alarm(), sleep()系列，以及后面的间隔定时器itimer都是基于SIGALRM信号进行触发的。所以它们是不能同时使用的。</p>
+
+<h2 id="间隔定时器itimer">间隔定时器itimer</h2>
+
+<p>间隔定时器的接口如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="err">#</span><span class="nx">include</span> <span class="p">&lt;</span><span class="nx">sys</span><span class="o">/</span><span class="nx">time</span><span class="p">.</span><span class="nx">h</span><span class="p">&gt;</span>
+
+<span class="kt">int</span> <span class="nf">getitimer</span><span class="p">(</span><span class="kt">int</span> <span class="nx">which</span><span class="p">,</span> <span class="kd">struct</span> <span class="nx">itimerval</span> <span class="o">*</span><span class="nx">curr_value</span><span class="p">);</span>
+<span class="kt">int</span> <span class="nf">setitimer</span><span class="p">(</span><span class="kt">int</span> <span class="nx">which</span><span class="p">,</span> <span class="kd">const</span> <span class="kd">struct</span> <span class="nx">itimerval</span> <span class="o">*</span><span class="nx">new_value</span><span class="p">,</span>
+        <span class="kd">struct</span> <span class="nx">itimerval</span> <span class="o">*</span><span class="nx">old_value</span><span class="p">);</span>
+<span class="nx">结构定义</span><span class="err">：</span>
+<span class="kd">struct</span> <span class="nx">itimerval</span> <span class="p">{</span>
+    <span class="kd">struct</span> <span class="nx">timeval</span> <span class="nx">it_interval</span><span class="p">;</span> <span class="cm">/* next value ：间隔时间*/</span>
+    <span class="kd">struct</span> <span class="nx">timeval</span> <span class="nx">it_value</span><span class="p">;</span>    <span class="cm">/* current value：到期时间*/</span>
+<span class="p">};</span>
+<span class="kd">struct</span> <span class="nx">timeval</span> <span class="p">{</span>
+    <span class="nx">time_t</span>      <span class="nx">tv_sec</span><span class="p">;</span>         <span class="cm">/* seconds */</span>
+    <span class="nx">suseconds_t</span> <span class="nx">tv_usec</span><span class="p">;</span>        <span class="cm">/* microseconds */</span>
+<span class="p">};</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>可以通过调用上面两个API接口来设置和获取间隔定时器信息。系统为每个进程提供了3种itimer，每种定时器在不同时间域递减，当定时器超时，就会向进程发送一个信号，并且重置定时器。3种定时器的类型，如下表所示：</p>
+
+<table>
+<thead>
+<tr>
+<th>取值</th>
+<th>含义</th>
+<th>信号发送</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>ITIMER_REAL</td>
+<td>定时真实时间，与alarm类型相同。</td>
+<td>SIGALRM</td>
+</tr>
+
+<tr>
+<td>ITIMER_VIRT</td>
+<td>定时进程在用户态下的实际执行时间。</td>
+<td>SIGVTALRM</td>
+</tr>
+
+<tr>
+<td>ITIMER_PROF</td>
+<td>定时进程在用户态和核心态下的实际执行时间。</td>
+<td>SIGPROF</td>
+</tr>
+</tbody>
+</table>
+
+<p>在Linux 2.6.16 之前，itimer的实现是基于内核定时器timer wheel封装成的定时器接口。内核封装的定时器接口是提供给其他内核模块使用，也是其他定时器的基础。itimer通过内核定时器的封装，生成提供给用户层使用的接口setitimer和getitimer。内核定时器timer wheel提供的内核态调用接口为:可参考</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">https</span><span class="p">:</span><span class="c1">//github.com/torvalds/linux/blob/master/kernel/time/timer.c
+</span><span class="c1"></span>
+<span class="nf">add_timer</span><span class="p">()</span> 
+<span class="nf">del_timer</span><span class="p">()</span> 
+<span class="nf">init_timer</span><span class="p">()</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>在Linux 2.6.16 以来，itimer不再采用基于timer wheel的内核定时器进行实现。而是换成了高精度的内核定时器hrtimer进行实现。具体实现可参考：<a href="https://github.com/torvalds/linux/blob/master/kernel/time/itimer.c">https://github.com/torvalds/linux/blob/master/kernel/time/itimer.c</a></p>
+
+<p>如果定时器超时时，进程是处于运行状态，那么超时的信号会被立刻传送给该进程，否则信号会被延迟传送，延迟时间要根据系统的负载情况。所以这里有一个BUG：当系统负载很重的情况下，对于ITIMER_REAL定时器有可能在上一次超时信号传递完成前再次超时，这样就会导致第二次超时的信号丢失。</p>
+
+<p>每个进程中同一种定时器只能使用一次。</p>
+
+<p>该系统调用在POSIX.1-2001中定义了，但在POSIX.1-2008中已被废弃。所以建议使用POSIX定时器API（timer_gettime, timer_settime）代替。</p>
+
+<p>函数alarm本质上设置的是低精确、非重载的ITIMER_REAL类定时器，它只能精确到秒，并且每次设置只能产生一次定时。函数setitimer 设置的定时器则不同，它们不但可以计时到微妙（理论上），还能自动循环定时。在一个Unix进程中，不能同时使用alarm和ITIMER_REAL类定时器。
+下面是测试代码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="cp">#include</span> <span class="cpf">&lt;unistd.h&gt;</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;signal.h&gt;</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;sys/time.h&gt;</span><span class="cp">
+</span><span class="cp"></span>
+<span class="cp">#include</span> <span class="cpf">&lt;iostream&gt;</span><span class="cp">
+</span><span class="cp"></span>
+<span class="kt">void</span> <span class="nf">sig_handler</span><span class="p">(</span><span class="kt">int</span> <span class="n">signo</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="o">&lt;&lt;</span><span class="s">&#34;recieve sigal: &#34;</span><span class="o">&lt;&lt;</span><span class="n">signo</span><span class="o">&lt;&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">int</span> <span class="nf">main</span><span class="p">()</span>
+<span class="p">{</span>
+    <span class="n">signal</span><span class="p">(</span><span class="n">SIGALRM</span><span class="p">,</span> <span class="n">sig_handler</span><span class="p">);</span>
+    
+    <span class="k">struct</span> <span class="n">itimerval</span> <span class="n">timer_set</span><span class="p">;</span>
+    
+    <span class="c1">//启动时间（5s后启动）
+</span><span class="c1"></span>    <span class="n">timer_set</span><span class="p">.</span><span class="n">it_value</span><span class="p">.</span><span class="n">tv_sec</span> <span class="o">=</span> <span class="mi">5</span><span class="p">;</span>
+    <span class="n">timer_set</span><span class="p">.</span><span class="n">it_value</span><span class="p">.</span><span class="n">tv_usec</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    
+    <span class="c1">//间隔定时器间隔：2s
+</span><span class="c1"></span>    <span class="n">timer_set</span><span class="p">.</span><span class="n">it_interval</span><span class="p">.</span><span class="n">tv_sec</span> <span class="o">=</span> <span class="mi">2</span><span class="p">;</span>
+    <span class="n">timer_set</span><span class="p">.</span><span class="n">it_interval</span><span class="p">.</span><span class="n">tv_usec</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    
+    <span class="k">if</span><span class="p">(</span><span class="n">setitimer</span><span class="p">(</span><span class="n">ITIMER_REAL</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">timer_set</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="p">{</span>
+        <span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="o">&lt;&lt;</span><span class="s">&#34;start timer failed...&#34;</span><span class="o">&lt;&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">endl</span><span class="p">;</span>
+        <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="p">}</span>
+    
+    <span class="kt">int</span> <span class="n">temp</span><span class="p">;</span>
+    <span class="n">std</span><span class="o">::</span><span class="n">cin</span><span class="o">&gt;&gt;</span><span class="n">temp</span><span class="p">;</span>
+    
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<h2 id="posix定时器">POSIX定时器</h2>
+
+<p>POSIX定时器的是为了解决间隔定时器itimer的以下问题：</p>
+
+<ul>
+<li>一个进程同一时刻只能有一个同一种类型(ITIMER_REAL, ITIMER_PROF, ITIMER_VIRT)的itimer。POSIX定时器在一个进程中可以创建任意多个timer。</li>
+<li>itimer定时器到期后，只能通过信号(SIGALRM,SIGVTALRM,SIGPROF)的方式通知进程，POSIX定时器到期后不仅可以通过信号进行通知，还可以使用自定义信号，还可以通过启动一个线程来进行通知。</li>
+<li>itimer支持us级别，POSIX定时器支持ns级别。</li>
+</ul>
+
+<p>POSIX定时器提供的定时器API如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kt">int</span> <span class="nf">timer_create</span><span class="p">(</span><span class="nx">clockid_t</span> <span class="nx">clock_id</span><span class="p">,</span> <span class="kd">struct</span> <span class="nx">sigevent</span> <span class="o">*</span><span class="nx">evp</span><span class="p">,</span> <span class="nx">timer_t</span> <span class="o">*</span><span class="nx">timerid</span><span class="p">)</span><span class="err">；</span>
+<span class="kt">int</span> <span class="nf">timer_settime</span><span class="p">(</span><span class="nx">timer_t</span> <span class="nx">timerid</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">flags</span><span class="p">,</span> <span class="kd">const</span> <span class="kd">struct</span> <span class="nx">itimerspec</span> <span class="o">*</span><span class="nx">value</span><span class="p">,</span> <span class="kd">struct</span> <span class="nx">itimerspect</span> <span class="o">*</span><span class="nx">ovalue</span><span class="p">);</span>
+<span class="kt">int</span> <span class="nf">timer_gettime</span><span class="p">(</span><span class="nx">timer_t</span> <span class="nx">timerid</span><span class="p">,</span><span class="kd">struct</span> <span class="nx">itimerspec</span> <span class="o">*</span><span class="nx">value</span><span class="p">);</span>
+<span class="kt">int</span> <span class="nf">timer_getoverrun</span><span class="p">(</span><span class="nx">timer_t</span> <span class="nx">timerid</span><span class="p">);</span>
+<span class="kt">int</span> <span class="nf">timer_delete</span> <span class="p">(</span><span class="nx">timer_t</span> <span class="nx">timerid</span><span class="p">);</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>其中时间结构itimerspec定义如下：该结构和itimer的itimerval结构用处和含义类似，只是提供了ns级别的精度</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="k">struct</span> <span class="n">itimerspec</span>
+<span class="p">{</span>
+    <span class="k">struct</span> <span class="n">timespec</span> <span class="n">it_interval</span><span class="p">;</span>    <span class="c1">// 时间间隔
+</span><span class="c1"></span>    <span class="k">struct</span> <span class="n">timespec</span> <span class="n">it_value</span><span class="p">;</span>       <span class="c1">// 首次到期时间
+</span><span class="c1"></span><span class="p">};</span>
+
+<span class="k">struct</span> <span class="n">timespec</span>
+<span class="p">{</span>
+    <span class="n">time_t</span>  <span class="n">tv_sec</span>    <span class="c1">//Seconds.
+</span><span class="c1"></span>    <span class="kt">long</span>    <span class="n">tv_nsec</span>   <span class="c1">//Nanoseconds.
+</span><span class="c1"></span><span class="p">};</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>it_value表示定时器经过这么长时间到时，当定时器到时候，就会将it_interval的值赋给it_value。如果it_interval等于0，那么表示该定时器不是一个时间间隔定时器，一旦it_value到期后定时器就回到未启动状态。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nf">timer_create</span><span class="p">(</span><span class="nx">clockid_t</span> <span class="nx">clock_id</span><span class="p">,</span> <span class="kd">struct</span> <span class="nx">sigevent</span> <span class="nx">evp</span><span class="p">,</span> <span class="nx">timer_t</span> <span class="nx">timerid</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>创建一个POSIX timer,在创建的时候，需要指出定时器的类型，定时器超时通知机制。创建成功后通过参数返回创建的定时器的ID。</p>
+
+<p>参数clock_id用来指定定时器时钟的类型，时钟类型有以下6种：</p>
+
+<ul>
+<li>CLOCK_REALTIME：系统实时时间，即日历时间；</li>
+<li>CLOCK_MONOTONIC：从系统启动开始到现在为止的时间；</li>
+<li>CLOCK_PROCESS_CPUTIME_ID：本进程启动到执行到当前代码，系统CPU花费的时间；</li>
+<li>CLOCK_THREAD_CPUTIME_ID：本线程启动到执行到当前代码，系统CPU花费的时间；</li>
+<li>CLOCK_REALTIME_HR：CLOCK_REALTIME的细粒度（高精度）版本；</li>
+<li>CLOCK_MONOTONIC_HR：CLOCK_MONOTONIC的细粒度版本；</li>
+</ul>
+
+<p>struct sigevent设置了定时器到期时的通知方式和处理方式等，结构的定义如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="k">struct</span> <span class="n">sigevent</span>
+<span class="p">{</span>
+    <span class="kt">int</span> <span class="n">sigev_notify</span><span class="p">;</span>   <span class="c1">//设置定时器到期后的行为
+</span><span class="c1"></span>    <span class="kt">int</span> <span class="n">sigev_signo</span><span class="p">;</span>    <span class="c1">//设置产生信号的信号码
+</span><span class="c1"></span>    <span class="k">union</span> <span class="n">sigval</span>   <span class="n">sigev_value</span><span class="p">;</span> <span class="c1">//设置产生信号的值
+</span><span class="c1"></span>    <span class="kt">void</span> <span class="p">(</span><span class="o">*</span><span class="n">sigev_notify_function</span><span class="p">)(</span><span class="k">union</span> <span class="n">sigval</span><span class="p">);</span><span class="c1">//定时器到期，从该地址启动一个线程
+</span><span class="c1"></span>    <span class="n">pthread_attr_t</span> <span class="o">*</span><span class="n">sigev_notify_attributes</span><span class="p">;</span>    <span class="c1">//创建线程的属性
+</span><span class="c1"></span><span class="p">}</span>
+
+<span class="k">union</span> <span class="n">sigval</span>
+<span class="p">{</span>
+    <span class="kt">int</span> <span class="n">sival_int</span><span class="p">;</span>  <span class="c1">//integer value
+</span><span class="c1"></span>    <span class="kt">void</span> <span class="o">*</span><span class="n">sival_ptr</span><span class="p">;</span> <span class="c1">//pointer value
+</span><span class="c1"></span><span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>如果sigevent传入NULL，那么定时器到期会产生默认的信号，对CLOCK_REALTIMER来说，默认信号就是SIGALRM，如果要产生除默认信号之外的其他信号，程序必须将evp-&gt;sigev_signo设置为期望的信号码。</p>
+
+<p>如果几个定时器产生了同一个信号，处理程序可以用 sigev_value来区分是哪个定时器产生了信号。要实现这种功能，程序必须在为信号安装处理程序时，使用struct sigaction的成员sa_flags中的标志符SA_SIGINFO。</p>
+
+<p>sigev_notify的值可取以下几种：</p>
+
+<ul>
+<li>SIGEV_NONE：定时器到期后什么都不做，只提供通过timer_gettime和timer_getoverrun查询超时信息。</li>
+<li>SIGEV_SIGNAL：定时器到期后，内核会将sigev_signo所指定的信号，传送给进程，在信号处理程序中，si_value会被设定为sigev_value的值。</li>
+<li>SIGEV_THREAD：定时器到期后，内核会以sigev_notification_attributes为线程属性创建一个线程，线程的入口地址为sigev_notify_function，传入sigev_value作为一个参数。</li>
+</ul>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nf">timer_settime</span><span class="p">(</span><span class="nx">timer_t</span> <span class="nx">timerid</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">flags</span><span class="p">,</span> <span class="kd">const</span> <span class="kd">struct</span> <span class="nx">itimerspec</span> <span class="nx">value</span><span class="p">,</span> <span class="kd">struct</span> <span class="nx">itimerspect</span> <span class="nx">ovalue</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>创建POSIX定时器后，该定时器并没有启动，需要通过timer_settime()接口设置定时器的到期时间和周期触发时间。
+flags字段标识到期时间是一个绝对时间还是一个相对时间。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">https</span><span class="p">:</span><span class="c1">//github.com/lattera/glibc/blob/master/bits/time.h
+</span><span class="c1"></span>
+<span class="cm">/* Flag to indicate time is absolute.  */</span>
+<span class="err">#</span>   <span class="nx">define</span> <span class="nx">TIMER_ABSTIME</span>        <span class="mi">1</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>如果flags的值为TIMER_ABSTIME，则value的值为一个绝对时间。否则，value为一个相对时间。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nf">timer_getoverrun</span><span class="p">(</span><span class="nx">timer_t</span> <span class="nx">timerid</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>取得一个定时器的超限运行次数：有可能一个定时器到期了，而同一定时器上一次到期时产生的信号还处于挂起状态。在这种情况下，其中的一个信号可能会丢失。这就是定时器超限。程序可以通过调 用timer_getoverrun来确定一个特定的定时器出现这种超限的次数。定时器超限只能发生在同一个定时器产生的信号上。由多个定时器，甚至是那 些使用相同的时钟和信号的定时器，所产生的信号都会排队而不会丢失。</p>
+
+<p>执行成功时，timer_getoverrun()会返回定时器初次到期与通知进程(例如通过信号)定时器已到期之间额外发生的定时器到期次数。举例来说，在我们之前的例子中，一个1ms的定时器运行了10ms，则此调用会返回9。如果超限运行的次数等于或大于DELAYTIMER_MAX，则此调用会返回DELAYTIMER_MAX。
+执行失败时，此函数会返回-1并将errno设定会EINVAL，这个唯一的错误情况代表timerid指定了无效的定时器。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nf">timer_delete</span> <span class="p">(</span><span class="nx">timer_t</span> <span class="nx">timerid</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>删除一个定时器：一次成功的timer_delete()调用会销毁关联到timerid的定时器并且返回0。执行失败时，此调用会返回-1并将errno设定会 EINVAL，这个唯一的错误情况代表timerid不是一个有效的定时器。</p>
+
+<p>POSIX定时器通过调用内核的posix_timer进行实现，但glibc对POSIX timer进行了一定的封装，例如如果POSIX timer到期通知方式被设置为 SIGEV_THREAD 时，glibc 需要自己完成一些辅助工作，因为内核无法在 Timer 到期时启动一个新的线程。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-c" data-lang="c"><span class="nl">https</span><span class="p">:</span><span class="c1">//github.com/lattera/glibc/blob/master/nptl/sysdeps/unix/sysv/linux/timer_create.c
+</span><span class="c1"></span>
+<span class="kt">int</span>
+<span class="n">timer_create</span> <span class="p">(</span><span class="n">clock_id</span><span class="p">,</span> <span class="n">evp</span><span class="p">,</span> <span class="n">timerid</span><span class="p">)</span>
+     <span class="n">clockid_t</span> <span class="n">clock_id</span><span class="p">;</span>
+     <span class="k">struct</span> <span class="n">sigevent</span> <span class="o">*</span><span class="n">evp</span><span class="p">;</span>
+     <span class="n">timer_t</span> <span class="o">*</span><span class="n">timerid</span><span class="p">;</span>
+<span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">evp</span> <span class="o">==</span> <span class="nb">NULL</span> <span class="o">||</span> <span class="n">__builtin_expect</span> <span class="p">(</span><span class="n">evp</span><span class="o">-&gt;</span><span class="n">sigev_notify</span> <span class="o">!=</span> <span class="n">SIGEV_THREAD</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+    <span class="p">{</span>
+        <span class="p">...</span>
+    <span class="p">}</span>
+    <span class="k">else</span>
+    <span class="p">{</span>
+          <span class="p">...</span>
+          <span class="cm">/* Create the helper thread.  */</span>
+          <span class="n">pthread_once</span> <span class="p">(</span><span class="o">&amp;</span><span class="n">__helper_once</span><span class="p">,</span> <span class="n">__start_helper_thread</span><span class="p">);</span>
+          <span class="p">...</span>
+    <span class="p">}</span>
+    <span class="p">...</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>可以看到 GLibc 发现用户需要启动新线程通知时，会自动调用 pthread_once 启动一个辅助线程（__start_helper_thread），用 sigev_notify_attributes 中指定的属性设置该辅助线程。</p>
+
+<p>然后 glibc 启动一个普通的 POSIX Timer，将其通知方式设置为：SIGEV_SIGNAL | SIGEV_THREAD_ID。这样就可以保证内核在 timer 到期时通知辅助线程。通知的 Signal 号为 SIGTIMER，并且携带一个包含了到期函数指针的数据。这样，当该辅助 Timer 到期时，内核会通过 SIGTIMER 通知辅助线程，辅助线程可以在信号携带的数据中得到用户设定的到期处理函数指针，利用该指针，辅助线程调用 pthread_create() 创建一个新的线程来调用该处理函数。这样就实现了 POSIX 的定义。</p>
+
+<p>转载:<a href="http://walkerdu.com/2016/07/25/linux-kernel-timer/">http://walkerdu.com/2016/07/25/linux-kernel-timer/</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2019-10-21
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/%E5%AE%9A%E6%97%B6%E5%99%A8/">定时器</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/%E5%AE%9A%E6%97%B6%E5%99%A8%E7%9A%84%E5%AE%9E%E7%8E%B0%E6%96%B9%E6%A1%88/">
+            <span class="next-text nav-default">定时器的实现方案</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
