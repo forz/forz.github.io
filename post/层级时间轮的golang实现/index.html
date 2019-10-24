@@ -56,7 +56,7 @@
 
 <meta itemprop="datePublished" content="2019-10-23T17:21:10&#43;00:00" />
 <meta itemprop="dateModified" content="2019-10-23T17:21:10&#43;00:00" />
-<meta itemprop="wordCount" content="6813">
+<meta itemprop="wordCount" content="7745">
 
 
 
@@ -171,8 +171,8 @@
         <div class="post-category">
             <a href="/categories/go/"> Go </a>
             </div>
-          <span class="more-meta"> 约 6813 字 </span>
-          <span class="more-meta"> 预计阅读 14 分钟 </span>
+          <span class="more-meta"> 约 7745 字 </span>
+          <span class="more-meta"> 预计阅读 16 分钟 </span>
         
       </div>
     </header>
@@ -308,8 +308,12 @@
 
 <ul>
 <li>使用大小为 wheelSize 的数组来表示一层时间轮，其中每一格是一个 bucket，每个 bucket 的时间单位为 tick。</li>
-<li>这个时间轮数组并没有模拟循环列表的行为（如图左所示），而是模拟了哈希表的行为。具体而言（如图右所示），这个时间轮数组会随着 currentTime 的流逝而移动，也就是说 currentTime 永远是指向第一个 bucket 的，每个落到该时间轮的定时任务，都会根据哈希函数 (expiration/tick)%wheelSize 散列到对应的 bucket 中。</li>
+<li>这个时间轮数组并没有模拟循环列表的行为（如图左所示），而是模拟了哈希表的行为。</li>
 </ul>
+
+<p>我们用数组模拟时间轮（数组的每个元素是一个列表头，添加任务就是往列表头后面挂任务而已），数组的大小代表时间的格子数，添加过程中我们会通过 过期时间/时间轮格子代表时间 % 时间轮格子总数 算出的格子位置，然后通过挂链的方法添加到时间轮格子当中。</p>
+
+<p>在这个过程中我们需要注意的是任务首先需要判断当前时间轮是否放的下，判断放得下的标准就是时间轮当前时间 + 一圈时间轮时间是否大于任务过期时间，如果大于就代表放的下，如果小于就代表无法放置那么就需要往上一层时间轮放置。</p>
 
 <h3 id="时钟驱动方式">时钟驱动方式</h3>
 
@@ -335,6 +339,8 @@
 <p>timingwheel中的 Golang 实现，基本上都是参考 Kafka 的层级时间轮的原理来实现的。</p>
 
 <h2 id="utils">utils</h2>
+
+<p>基础工具方法:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
@@ -735,6 +741,7 @@
 </span><span class="lnt">109
 </span><span class="lnt">110
 </span><span class="lnt">111
+</span><span class="lnt">112
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">delayqueue</span>
@@ -789,7 +796,8 @@
 <span class="c1">// Poll starts an infinite loop, in which it continually waits for an element to
 </span><span class="c1">// expire and then send the expired element to the timing wheel via the channel C.
 </span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">dq</span> <span class="o">*</span><span class="nx">DelayQueue</span><span class="p">)</span> <span class="nf">Poll</span><span class="p">(</span><span class="nx">exitC</span> <span class="kd">chan</span> <span class="kd">struct</span><span class="p">{},</span> <span class="nx">nowF</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">{</span>
-	<span class="k">for</span> <span class="p">{</span>
+    <span class="c1">//轮询,进行延迟队列的运行
+</span><span class="c1"></span>	<span class="k">for</span> <span class="p">{</span>
 		<span class="nx">now</span> <span class="o">:=</span> <span class="nf">nowF</span><span class="p">()</span>
 
 		<span class="nx">dq</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
@@ -851,6 +859,12 @@
 </div>
 </div>
 <h2 id="bucket">bucket</h2>
+
+<p>时间轮我们是用数组也就是buckets来实现的，也就是说一个数组代表时间轮。</p>
+
+<p>时间轮中每个格子用来保存任务的数据结构是TimeTaskList的数据结构，其实就是一个双向链表，然后每次在往某个时间轮格子里面放置任务也就是timerTaskEntry的时候就会挂置到TimeTaskList的这个对象当中去。</p>
+
+<p>所以说我们放置到DelayedQueue当中其实是TimeTaskList对象，这个对象包含了同一过期时间的所有任务而已。减少了DelayedQueue的大小。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">  1
@@ -980,6 +994,11 @@
 </span><span class="lnt">125
 </span><span class="lnt">126
 </span><span class="lnt">127
+</span><span class="lnt">128
+</span><span class="lnt">129
+</span><span class="lnt">130
+</span><span class="lnt">131
+</span><span class="lnt">132
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">timingwheel</span>
@@ -991,7 +1010,8 @@
 	<span class="s">&#34;unsafe&#34;</span>
 <span class="p">)</span>
 
-<span class="c1">// Timer represents a single event. When the Timer expires, the given
+<span class="c1">//Timer是定时任务实体
+</span><span class="c1">// Timer represents a single event. When the Timer expires, the given
 </span><span class="c1">// task will be executed.
 </span><span class="c1"></span><span class="kd">type</span> <span class="nx">Timer</span> <span class="kd">struct</span> <span class="p">{</span>
 	<span class="nx">expiration</span> <span class="kt">int64</span> <span class="c1">// in milliseconds
@@ -1000,7 +1020,8 @@
 	<span class="c1">// The bucket that holds the list to which this timer&#39;s element belongs.
 </span><span class="c1"></span>	<span class="c1">//
 </span><span class="c1"></span>	<span class="c1">// NOTE: This field may be updated and read concurrently,
-</span><span class="c1"></span>	<span class="c1">// through Timer.Stop() and Bucket.Flush().
+</span><span class="c1"></span>    <span class="c1">// through Timer.Stop() and Bucket.Flush().
+</span><span class="c1"></span>    <span class="c1">//定时任务所在的时间槽
 </span><span class="c1"></span>	<span class="nx">b</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// type: *bucket
 </span><span class="c1"></span>
 	<span class="c1">// The timer&#39;s element.
@@ -1064,11 +1085,13 @@
 	<span class="k">return</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">SwapInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">b</span><span class="p">.</span><span class="nx">expiration</span><span class="p">,</span> <span class="nx">expiration</span><span class="p">)</span> <span class="o">!=</span> <span class="nx">expiration</span>
 <span class="p">}</span>
 
-<span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">bucket</span><span class="p">)</span> <span class="nf">Add</span><span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">Timer</span><span class="p">)</span> <span class="p">{</span>
+<span class="c1">//时间槽内添加任务
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">bucket</span><span class="p">)</span> <span class="nf">Add</span><span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">Timer</span><span class="p">)</span> <span class="p">{</span>
 	<span class="nx">b</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-
-	<span class="nx">e</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">timers</span><span class="p">.</span><span class="nf">PushBack</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span>
-	<span class="nx">t</span><span class="p">.</span><span class="nf">setBucket</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span>
+    <span class="c1">//添加新Timer到当前时间槽的List中
+</span><span class="c1"></span>    <span class="nx">e</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">timers</span><span class="p">.</span><span class="nf">PushBack</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span>
+    <span class="c1">//在Timer中记录所在的时间槽和List中的element
+</span><span class="c1"></span>	<span class="nx">t</span><span class="p">.</span><span class="nf">setBucket</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span>
 	<span class="nx">t</span><span class="p">.</span><span class="nx">element</span> <span class="p">=</span> <span class="nx">e</span>
 
 	<span class="nx">b</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
@@ -1095,7 +1118,8 @@
 	<span class="k">return</span> <span class="nx">b</span><span class="p">.</span><span class="nf">remove</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span>
 <span class="p">}</span>
 
-<span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">bucket</span><span class="p">)</span> <span class="nf">Flush</span><span class="p">(</span><span class="nx">reinsert</span> <span class="kd">func</span><span class="p">(</span><span class="o">*</span><span class="nx">Timer</span><span class="p">))</span> <span class="p">{</span>
+<span class="c1">//遍历bucket的链表,将bucket的所有任务删除并执行.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">bucket</span><span class="p">)</span> <span class="nf">Flush</span><span class="p">(</span><span class="nx">reinsert</span> <span class="kd">func</span><span class="p">(</span><span class="o">*</span><span class="nx">Timer</span><span class="p">))</span> <span class="p">{</span>
 	<span class="nx">b</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
 	<span class="nx">e</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">timers</span><span class="p">.</span><span class="nf">Front</span><span class="p">()</span>
 	<span class="k">for</span> <span class="nx">e</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
@@ -1340,6 +1364,23 @@
 </span><span class="lnt">224
 </span><span class="lnt">225
 </span><span class="lnt">226
+</span><span class="lnt">227
+</span><span class="lnt">228
+</span><span class="lnt">229
+</span><span class="lnt">230
+</span><span class="lnt">231
+</span><span class="lnt">232
+</span><span class="lnt">233
+</span><span class="lnt">234
+</span><span class="lnt">235
+</span><span class="lnt">236
+</span><span class="lnt">237
+</span><span class="lnt">238
+</span><span class="lnt">239
+</span><span class="lnt">240
+</span><span class="lnt">241
+</span><span class="lnt">242
+</span><span class="lnt">243
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">timingwheel</span>
@@ -1355,27 +1396,28 @@
 
 <span class="c1">// TimingWheel is an implementation of Hierarchical Timing Wheels.
 </span><span class="c1"></span><span class="kd">type</span> <span class="nx">TimingWheel</span> <span class="kd">struct</span> <span class="p">{</span>
-	<span class="nx">tick</span>      <span class="kt">int64</span> <span class="c1">// in milliseconds
-</span><span class="c1"></span>	<span class="nx">wheelSize</span> <span class="kt">int64</span>
-
-	<span class="nx">interval</span>    <span class="kt">int64</span> <span class="c1">// in milliseconds
-</span><span class="c1"></span>	<span class="nx">currentTime</span> <span class="kt">int64</span> <span class="c1">// in milliseconds
-</span><span class="c1"></span>	<span class="nx">buckets</span>     <span class="p">[]</span><span class="o">*</span><span class="nx">bucket</span>
+	<span class="nx">tick</span>      <span class="kt">int64</span> <span class="c1">// in milliseconds 时间槽的刻度
+</span><span class="c1"></span>	<span class="nx">wheelSize</span> <span class="kt">int64</span> <span class="c1">//一圈有多少刻度
+</span><span class="c1"></span>
+	<span class="nx">interval</span>    <span class="kt">int64</span> <span class="c1">// in milliseconds  一圈能表示多长时间
+</span><span class="c1"></span>	<span class="nx">currentTime</span> <span class="kt">int64</span> <span class="c1">// in milliseconds /** 时间轮指针 */
+</span><span class="c1"></span>	<span class="nx">buckets</span>     <span class="p">[]</span><span class="o">*</span><span class="nx">bucket</span>   <span class="cm">/** 槽 */</span>
 	<span class="nx">queue</span>       <span class="o">*</span><span class="nx">delayqueue</span><span class="p">.</span><span class="nx">DelayQueue</span>
 
 	<span class="c1">// The higher-level overflow wheel.
-</span><span class="c1"></span>	<span class="c1">//
-</span><span class="c1"></span>	<span class="c1">// NOTE: This field may be updated and read concurrently, through Add().
-</span><span class="c1"></span>	<span class="nx">overflowWheel</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// type: *TimingWheel
+</span><span class="c1"></span>    <span class="c1">//
+</span><span class="c1"></span>    <span class="c1">// NOTE: This field may be updated and read concurrently, through Add().
+</span><span class="c1"></span>    <span class="cm">/** 上层时间轮 */</span>
+	<span class="nx">overflowWheel</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// type: *TimingWheel 
 </span><span class="c1"></span>
-	<span class="nx">exitC</span>     <span class="kd">chan</span> <span class="kd">struct</span><span class="p">{}</span>
-	<span class="nx">waitGroup</span> <span class="nx">waitGroupWrapper</span>
-<span class="p">}</span>
+	<span class="nx">exitC</span>     <span class="kd">chan</span> <span class="kd">struct</span><span class="p">{}</span> <span class="c1">//退出用channel,全程select监控
+</span><span class="c1"></span>	<span class="nx">waitGroup</span> <span class="nx">waitGroupWrapper</span> <span class="c1">//waitGroup里记录时间轮正在执行的并发任务,只有当waitGroup中没有了任务,时间轮的Stop才是安全的
+</span><span class="c1"></span><span class="p">}</span>
 
 <span class="c1">// NewTimingWheel creates an instance of TimingWheel with the given tick and wheelSize.
 </span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewTimingWheel</span><span class="p">(</span><span class="nx">tick</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">,</span> <span class="nx">wheelSize</span> <span class="kt">int64</span><span class="p">)</span> <span class="o">*</span><span class="nx">TimingWheel</span> <span class="p">{</span>
-	<span class="nx">tickMs</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">tick</span> <span class="o">/</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span><span class="p">)</span>
-	<span class="k">if</span> <span class="nx">tickMs</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
+	<span class="nx">tickMs</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">tick</span> <span class="o">/</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span><span class="p">)</span><span class="c1">//每格代表的时间
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">tickMs</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
 		<span class="nb">panic</span><span class="p">(</span><span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="s">&#34;tick must be greater than or equal to 1ms&#34;</span><span class="p">))</span>
 	<span class="p">}</span>
 
@@ -1391,7 +1433,8 @@
 
 <span class="c1">// newTimingWheel is an internal helper function that really creates an instance of TimingWheel.
 </span><span class="c1"></span><span class="kd">func</span> <span class="nf">newTimingWheel</span><span class="p">(</span><span class="nx">tickMs</span> <span class="kt">int64</span><span class="p">,</span> <span class="nx">wheelSize</span> <span class="kt">int64</span><span class="p">,</span> <span class="nx">startMs</span> <span class="kt">int64</span><span class="p">,</span> <span class="nx">queue</span> <span class="o">*</span><span class="nx">delayqueue</span><span class="p">.</span><span class="nx">DelayQueue</span><span class="p">)</span> <span class="o">*</span><span class="nx">TimingWheel</span> <span class="p">{</span>
-	<span class="nx">buckets</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="o">*</span><span class="nx">bucket</span><span class="p">,</span> <span class="nx">wheelSize</span><span class="p">)</span>
+    <span class="c1">//按照时间轮一圈的刻度数创建时间槽
+</span><span class="c1"></span>	<span class="nx">buckets</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="o">*</span><span class="nx">bucket</span><span class="p">,</span> <span class="nx">wheelSize</span><span class="p">)</span>
 	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">buckets</span> <span class="p">{</span>
 		<span class="nx">buckets</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nf">newBucket</span><span class="p">()</span>
 	<span class="p">}</span>
@@ -1410,15 +1453,23 @@
 </span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">tw</span> <span class="o">*</span><span class="nx">TimingWheel</span><span class="p">)</span> <span class="nf">add</span><span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">Timer</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
 	<span class="nx">currentTime</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">tw</span><span class="p">.</span><span class="nx">currentTime</span><span class="p">)</span>
 	<span class="k">if</span> <span class="nx">t</span><span class="p">.</span><span class="nx">expiration</span> <span class="p">&lt;</span> <span class="nx">currentTime</span><span class="o">+</span><span class="nx">tw</span><span class="p">.</span><span class="nx">tick</span> <span class="p">{</span>
-		<span class="c1">// Already expired
+        <span class="c1">//该Timer已经过期
+</span><span class="c1"></span>		<span class="c1">// Already expired
 </span><span class="c1"></span>		<span class="k">return</span> <span class="kc">false</span>
 	<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">t</span><span class="p">.</span><span class="nx">expiration</span> <span class="p">&lt;</span> <span class="nx">currentTime</span><span class="o">+</span><span class="nx">tw</span><span class="p">.</span><span class="nx">interval</span> <span class="p">{</span>
-		<span class="c1">// Put it into its own bucket
+        <span class="c1">//该Timer应该放在本时间轮中,
+</span><span class="c1"></span>        <span class="c1">// Put it into its own bucket
+</span><span class="c1"></span>        
+        <span class="c1">//前提先保证当前时间轮能够保存这个过期任务
+</span><span class="c1"></span>        <span class="c1">//1. 拿过期时间/过期格子时间大小确认位置
+</span><span class="c1"></span>        <span class="c1">//2. 由于转了多轮,所以需要通过hash确认位置
+</span><span class="c1"></span>        <span class="c1">//3. 以时间格子代表的时间确认过期时间
 </span><span class="c1"></span>		<span class="nx">virtualID</span> <span class="o">:=</span> <span class="nx">t</span><span class="p">.</span><span class="nx">expiration</span> <span class="o">/</span> <span class="nx">tw</span><span class="p">.</span><span class="nx">tick</span>
-		<span class="nx">b</span> <span class="o">:=</span> <span class="nx">tw</span><span class="p">.</span><span class="nx">buckets</span><span class="p">[</span><span class="nx">virtualID</span><span class="o">%</span><span class="nx">tw</span><span class="p">.</span><span class="nx">wheelSize</span><span class="p">]</span>
+        <span class="nx">b</span> <span class="o">:=</span> <span class="nx">tw</span><span class="p">.</span><span class="nx">buckets</span><span class="p">[</span><span class="nx">virtualID</span><span class="o">%</span><span class="nx">tw</span><span class="p">.</span><span class="nx">wheelSize</span><span class="p">]</span>
 		<span class="nx">b</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span>
 
-		<span class="c1">// Set the bucket expiration time
+        <span class="c1">// Set the bucket expiration time
+</span><span class="c1"></span>        <span class="c1">//除非该bucekt被重用，否则一个bucket只会有1个过期时间
 </span><span class="c1"></span>		<span class="k">if</span> <span class="nx">b</span><span class="p">.</span><span class="nf">SetExpiration</span><span class="p">(</span><span class="nx">virtualID</span> <span class="o">*</span> <span class="nx">tw</span><span class="p">.</span><span class="nx">tick</span><span class="p">)</span> <span class="p">{</span>
 			<span class="c1">// The bucket needs to be enqueued since it was an expired bucket.
 </span><span class="c1"></span>			<span class="c1">// We only need to enqueue the bucket when its expiration time has changed,
@@ -1431,15 +1482,17 @@
 
 		<span class="k">return</span> <span class="kc">true</span>
 	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
-		<span class="c1">// Out of the interval. Put it into the overflow wheel
-</span><span class="c1"></span>		<span class="nx">overflowWheel</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">tw</span><span class="p">.</span><span class="nx">overflowWheel</span><span class="p">)</span>
-		<span class="k">if</span> <span class="nx">overflowWheel</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="c1">// Out of the interval. Put it into the overflow wheel
+</span><span class="c1"></span>        <span class="c1">//该Timer应该放在上层时间轮中
+</span><span class="c1"></span>        <span class="nx">overflowWheel</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">tw</span><span class="p">.</span><span class="nx">overflowWheel</span><span class="p">)</span>
+        <span class="c1">//如果上层时间轮不存在,创建一个新时间轮
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">overflowWheel</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
 			<span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapPointer</span><span class="p">(</span>
 				<span class="o">&amp;</span><span class="nx">tw</span><span class="p">.</span><span class="nx">overflowWheel</span><span class="p">,</span>
 				<span class="kc">nil</span><span class="p">,</span>
 				<span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nf">newTimingWheel</span><span class="p">(</span>
-					<span class="nx">tw</span><span class="p">.</span><span class="nx">interval</span><span class="p">,</span>
-					<span class="nx">tw</span><span class="p">.</span><span class="nx">wheelSize</span><span class="p">,</span>
+					<span class="nx">tw</span><span class="p">.</span><span class="nx">interval</span><span class="p">,</span> <span class="c1">//上层时间轮的时间刻度是当前时间轮一整圈的时间
+</span><span class="c1"></span>					<span class="nx">tw</span><span class="p">.</span><span class="nx">wheelSize</span><span class="p">,</span>
 					<span class="nx">currentTime</span><span class="p">,</span>
 					<span class="nx">tw</span><span class="p">.</span><span class="nx">queue</span><span class="p">,</span>
 				<span class="p">)),</span>
@@ -1462,7 +1515,8 @@
 	<span class="p">}</span>
 <span class="p">}</span>
 
-<span class="kd">func</span> <span class="p">(</span><span class="nx">tw</span> <span class="o">*</span><span class="nx">TimingWheel</span><span class="p">)</span> <span class="nf">advanceClock</span><span class="p">(</span><span class="nx">expiration</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">{</span>
+<span class="c1">//向前移动时间格:expiration
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">tw</span> <span class="o">*</span><span class="nx">TimingWheel</span><span class="p">)</span> <span class="nf">advanceClock</span><span class="p">(</span><span class="nx">expiration</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">{</span>
 	<span class="nx">currentTime</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">tw</span><span class="p">.</span><span class="nx">currentTime</span><span class="p">)</span>
 	<span class="k">if</span> <span class="nx">expiration</span> <span class="o">&gt;=</span> <span class="nx">currentTime</span><span class="o">+</span><span class="nx">tw</span><span class="p">.</span><span class="nx">tick</span> <span class="p">{</span>
 		<span class="nx">currentTime</span> <span class="p">=</span> <span class="nf">truncate</span><span class="p">(</span><span class="nx">expiration</span><span class="p">,</span> <span class="nx">tw</span><span class="p">.</span><span class="nx">tick</span><span class="p">)</span>
@@ -1485,12 +1539,16 @@
 	<span class="p">})</span>
 
 	<span class="nx">tw</span><span class="p">.</span><span class="nx">waitGroup</span><span class="p">.</span><span class="nf">Wrap</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
-		<span class="k">for</span> <span class="p">{</span>
+        <span class="c1">//轮询,对延迟队列的弹出bucket进行处理,并移动当前时间
+</span><span class="c1"></span>		<span class="k">for</span> <span class="p">{</span>
 			<span class="k">select</span> <span class="p">{</span>
-			<span class="k">case</span> <span class="nx">elem</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">tw</span><span class="p">.</span><span class="nx">queue</span><span class="p">.</span><span class="nx">C</span><span class="p">:</span>
-				<span class="nx">b</span> <span class="o">:=</span> <span class="nx">elem</span><span class="p">.(</span><span class="o">*</span><span class="nx">bucket</span><span class="p">)</span>
-				<span class="nx">tw</span><span class="p">.</span><span class="nf">advanceClock</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nf">Expiration</span><span class="p">())</span>
-				<span class="nx">b</span><span class="p">.</span><span class="nf">Flush</span><span class="p">(</span><span class="nx">tw</span><span class="p">.</span><span class="nx">addOrRun</span><span class="p">)</span>
+            <span class="k">case</span> <span class="nx">elem</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">tw</span><span class="p">.</span><span class="nx">queue</span><span class="p">.</span><span class="nx">C</span><span class="p">:</span>
+                <span class="c1">//实际延迟队列弹出的是一个bucket
+</span><span class="c1"></span>                <span class="nx">b</span> <span class="o">:=</span> <span class="nx">elem</span><span class="p">.(</span><span class="o">*</span><span class="nx">bucket</span><span class="p">)</span>
+                <span class="c1">//向前移动时间格
+</span><span class="c1"></span>                <span class="nx">tw</span><span class="p">.</span><span class="nf">advanceClock</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nf">Expiration</span><span class="p">())</span>
+                <span class="c1">//执行Timer任务,并删除Timer
+</span><span class="c1"></span>				<span class="nx">b</span><span class="p">.</span><span class="nf">Flush</span><span class="p">(</span><span class="nx">tw</span><span class="p">.</span><span class="nx">addOrRun</span><span class="p">)</span>
 			<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">tw</span><span class="p">.</span><span class="nx">exitC</span><span class="p">:</span>
 				<span class="k">return</span>
 			<span class="p">}</span>
@@ -1504,7 +1562,7 @@
 </span><span class="c1">// not wait for the task to complete before returning. If the caller needs to
 </span><span class="c1">// know whether the task is completed, it must coordinate with the task explicitly.
 </span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">tw</span> <span class="o">*</span><span class="nx">TimingWheel</span><span class="p">)</span> <span class="nf">Stop</span><span class="p">()</span> <span class="p">{</span>
-	<span class="nb">close</span><span class="p">(</span><span class="nx">tw</span><span class="p">.</span><span class="nx">exitC</span><span class="p">)</span>
+    <span class="nb">close</span><span class="p">(</span><span class="nx">tw</span><span class="p">.</span><span class="nx">exitC</span><span class="p">)</span>
 	<span class="nx">tw</span><span class="p">.</span><span class="nx">waitGroup</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
 <span class="p">}</span>
 
@@ -1727,7 +1785,9 @@
 </span><span class="c1"></span><span class="p">}</span></code></pre></td></tr></table>
 </div>
 </div>
-<p>转载:<a href="http://russellluo.com/2018/10/golang-implementation-of-hierarchical-timing-wheels.html">http://russellluo.com/2018/10/golang-implementation-of-hierarchical-timing-wheels.html</a></p>
+<p>参考:<br />
+<a href="http://russellluo.com/2018/10/golang-implementation-of-hierarchical-timing-wheels.html">http://russellluo.com/2018/10/golang-implementation-of-hierarchical-timing-wheels.html</a><br />
+<a href="https://www.jianshu.com/p/87240220097b">https://www.jianshu.com/p/87240220097b</a></p>
 
     </div>
 
