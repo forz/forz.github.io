@@ -56,7 +56,7 @@
 
 <meta itemprop="datePublished" content="2019-07-12T13:29:52&#43;00:00" />
 <meta itemprop="dateModified" content="2019-07-12T13:29:52&#43;00:00" />
-<meta itemprop="wordCount" content="27219">
+<meta itemprop="wordCount" content="27852">
 
 
 
@@ -171,8 +171,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 27219 字 </span>
-          <span class="more-meta"> 预计阅读 55 分钟 </span>
+          <span class="more-meta"> 约 27852 字 </span>
+          <span class="more-meta"> 预计阅读 56 分钟 </span>
         
       </div>
     </header>
@@ -234,12 +234,13 @@
 <li><a href="#runqsteal">runqsteal</a></li>
 </ul></li>
 </ul></li>
-<li><a href="#g的锁定">G的锁定</a></li>
-<li><a href="#g的暂停">G的暂停</a>
+<li><a href="#g的锁定-锁定gm">G的锁定(锁定GM)</a></li>
+<li><a href="#g的暂停-锁定g">G的暂停(锁定G))</a>
 <ul>
 <li><a href="#gosched">Gosched</a></li>
 <li><a href="#gopark">gopark</a></li>
 <li><a href="#notesleep">notesleep</a></li>
+<li><a href="#notesleepg">notesleepg</a></li>
 <li><a href="#goexit-1">Goexit</a></li>
 <li><a href="#stw">STW</a></li>
 </ul></li>
@@ -4882,7 +4883,7 @@
 <span class="p">}</span></code></pre></td></tr></table>
 </div>
 </div>
-<h2 id="g的锁定">G的锁定</h2>
+<h2 id="g的锁定-锁定gm">G的锁定(锁定GM)</h2>
 
 <p>在执行cgo和syscall调用回调时,会用lockOSThread将G锁定在当前线程</p>
 <div class="highlight"><div class="chroma">
@@ -5197,11 +5198,13 @@
 <span class="p">}</span></code></pre></td></tr></table>
 </div>
 </div>
-<h2 id="g的暂停">G的暂停</h2>
+<h2 id="g的暂停-锁定g">G的暂停(锁定G))</h2>
 
 <h3 id="gosched">Gosched</h3>
 
 <p>可被用户调用的runtime.Gosched将当前G任务暂停,重新放回全局队列,让出当前M去执行其他任务.我们无须对G做唤醒操作,因为它总归被某个M重新拿到,并从&rdquo;断点&rdquo;恢复.</p>
+
+<p>抢占调度即使用该方式。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
@@ -5337,6 +5340,8 @@
 <h3 id="gopark">gopark</h3>
 
 <p>与Gosched最大的区别在于,gopark并没将G放回待运行队列.也就是说,必须主动恢复,否则该任务会遗失.</p>
+
+<p>应用层阻塞通常使用这种方式。</p>
 
 <p>gopark函数在协程的实现上扮演着非常重要的角色，用于协程的切换，协程切换的原因一般有以下几种情况：</p>
 
@@ -5693,6 +5698,41 @@
 	<span class="p">}</span>
 	<span class="c1">//唤醒后n.key==1
 </span><span class="c1"></span>	<span class="nf">futexwakeup</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">n</span><span class="p">.</span><span class="nx">key</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<h3 id="notesleepg">notesleepg</h3>
+
+<p>阻塞G和M，放飞P，P可以和其它M绑定继续执行，比如可能阻塞的系统调用会主动调用entersyscallblock，则会触发 notesleepg</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// same as runtime·notetsleep, but called on user g (not g0)
+</span><span class="c1">// calls only nosplit functions between entersyscallblock/exitsyscall
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">notetsleepg</span><span class="p">(</span><span class="nx">n</span> <span class="o">*</span><span class="nx">note</span><span class="p">,</span> <span class="nx">ns</span> <span class="kt">int64</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">gp</span> <span class="o">==</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">g0</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;notetsleepg on g0&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="nf">entersyscallblock</span><span class="p">()</span>
+	<span class="nx">ok</span> <span class="o">:=</span> <span class="nf">notetsleep_internal</span><span class="p">(</span><span class="nx">n</span><span class="p">,</span> <span class="nx">ns</span><span class="p">)</span>
+	<span class="nf">exitsyscall</span><span class="p">()</span>
+	<span class="k">return</span> <span class="nx">ok</span>
 <span class="p">}</span></code></pre></td></tr></table>
 </div>
 </div>
@@ -6253,9 +6293,8 @@
 </div>
 <h2 id="系统调用">系统调用</h2>
 
-<p>为支持并发调度,Go专门对syscall,cgo进行了包装,以便在长时间阻塞时能切换执行其他任务.在标准库syscall包里,将系统调用函数分为Syscall和RawSyscall两类.</p>
-
-<p>最大的不同在于Syscall增加了entrysyscall/exitsyscall,这就是允许调度的关键所在.</p>
+<p>为支持并发调度,Go专门对syscall,cgo进行了包装,以便在长时间阻塞时能切换执行其他任务.在标准库syscall包里,将系统调用函数分为Syscall和RawSyscall两类.
+前者和后者的区别是前者会在系统调用前后分别调用entersyscall和exitsyscall(位于src/runtime/proc.go)，做一些现场保存和恢复操作，这样才能使P安全地与M解绑，并在其它M上继续执行其它G。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">  1
@@ -6490,7 +6529,7 @@
 <span class="p">}</span></code></pre></td></tr></table>
 </div>
 </div>
-<p>监控线程sysmon对syscall非常重要,因为它负责将因系统调用而长时间阻塞的P抢回,用于执行其他任务.否则,整体性能会严重下降,甚至整个进程都会被冻结.</p>
+<p>监控线程sysmon对syscall非常重要,因为它负责将因系统调用而长时间阻塞的P抢回,判断是否需要handoffp,用于执行其他任务.否则,整体性能会严重下降,甚至整个进程都会被冻结.</p>
 
 <p>某些系统调用本身就可以确定长时间阻塞(比如锁),那么它会选择执行entersyscallblock主动交出所关联的P</p>
 <div class="highlight"><div class="chroma">
@@ -7259,12 +7298,23 @@
 </div>
 <h2 id="监控">监控</h2>
 
-<p>监控线程作用:
-1. 将长时间未处理的netpoll结果添加到任务队列.
-2. 向长时间运行的G任务发出抢占调度
-3. 收回因syscall而长时间阻塞的P</p>
+<p>前面说过，除非极端的无限循环或死循环，否则只要G调用函数，Go runtime就有抢占G的机会。Go程序启动时，runtime会去启动一个名为sysmon的m(一般称为监控线程)，该m无需绑定p即可运行，该m在整个Go程序的运行过程中至关重要.</p>
+
+<p>sysmon每20us~10ms启动一次，按照《Go语言学习笔记》中的总结，sysmon主要完成如下工作：</p>
+
+<ul>
+<li>释放闲置超过5分钟的span物理内存；</li>
+<li>如果超过2分钟没有垃圾回收，强制执行；</li>
+<li>将长时间未处理的netpoll结果添加到任务队列；</li>
+<li>向长时间运行的G任务发出抢占调度；</li>
+<li>收回因syscall长时间阻塞的P；</li>
+</ul>
+
+<p>我们看到sysmon将“向长时间运行的G任务发出抢占调度”，这个事情由retake实施：</p>
 
 <p>在进入垃圾回收状态时,sysmon会自动进入休眠,所以我们才会在syscall里看到很多唤醒指令.另外startTheWorld也会做唤醒处理.保证监控线程正常运行,对内存分配,垃圾回收和并发调度都非常重要.</p>
+
+<p>可以看出，如果一个G任务运行10ms，sysmon就会认为其运行时间太久而发出抢占式调度的请求。一旦G的抢占标志位被设为true，那么待这个G下一次调用函数或方法时，runtime便可以将G抢占，并移出运行状态，放入P的local runq中，等待下一次被调度。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">  1
@@ -8115,6 +8165,11 @@
 <span class="p">}</span></code></pre></td></tr></table>
 </div>
 </div>
+<p>参考:<br />
+<a href="https://tonybai.com/2017/06/23/an-intro-about-goroutine-scheduler/">https://tonybai.com/2017/06/23/an-intro-about-goroutine-scheduler/</a><br />
+<a href="https://wudaijun.com/2018/01/go-scheduler/">https://wudaijun.com/2018/01/go-scheduler/</a><br />
+<a href="https://github.com/qyuhen/book/blob/master/Go%201.5%20%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90%20%EF%BC%88%E4%B9%A6%E7%AD%BE%E7%89%88%EF%BC%89.pdf">https://github.com/qyuhen/book/blob/master/Go%201.5%20%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90%20%EF%BC%88%E4%B9%A6%E7%AD%BE%E7%89%88%EF%BC%89.pdf</a></p>
+
     </div>
 
     <div class="post-copyright">

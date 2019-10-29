@@ -56,7 +56,7 @@
 
 <meta itemprop="datePublished" content="2019-07-05T16:46:28&#43;00:00" />
 <meta itemprop="dateModified" content="2019-07-05T16:46:28&#43;00:00" />
-<meta itemprop="wordCount" content="5712">
+<meta itemprop="wordCount" content="8986">
 
 
 
@@ -171,8 +171,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 5712 字 </span>
-          <span class="more-meta"> 预计阅读 12 分钟 </span>
+          <span class="more-meta"> 约 8986 字 </span>
+          <span class="more-meta"> 预计阅读 18 分钟 </span>
         
       </div>
     </header>
@@ -188,13 +188,18 @@
 <li><a href="#线程时代">线程时代</a></li>
 <li><a href="#协程时代">协程时代</a></li>
 </ul></li>
+<li><a href="#goroutine">Goroutine</a></li>
 <li><a href="#g-p-m模型">G-P-M模型</a></li>
-<li><a href="#调度器的策略">调度器的策略</a>
+<li><a href="#调度思想">调度思想</a>
 <ul>
 <li><a href="#复用线程">复用线程</a></li>
 <li><a href="#利用并行">利用并行</a></li>
+</ul></li>
+<li><a href="#调度策略">调度策略</a>
+<ul>
 <li><a href="#抢占">抢占</a></li>
 <li><a href="#全局g队列">全局G队列</a></li>
+<li><a href="#poller">Poller</a></li>
 </ul></li>
 <li><a href="#调度器的生命周期">调度器的生命周期</a></li>
 <li><a href="#调度器的基本原理">调度器的基本原理</a>
@@ -209,11 +214,15 @@
 <ul>
 <li><a href="#work-stealing-m如何去偷g">work stealing，M如何去偷G</a></li>
 <li><a href="#为何需要自旋线程">为何需要自旋线程</a></li>
-<li><a href="#g进行系统调用-如何保证p的其他g-可以被执行-而不是饿死">G进行系统调用，如何保证P的其他G’可以被执行，而不是饿死</a></li>
-<li><a href="#go调度器的抢占">Go调度器的抢占</a></li>
+<li><a href="#阻塞调度">阻塞调度</a>
+<ul>
+<li><a href="#channel阻塞或network-i-o情况下的调度">channel阻塞或network I/O情况下的调度</a></li>
+<li><a href="#system-call阻塞情况下的调度">system call阻塞情况下的调度</a></li>
+</ul></li>
 </ul></li>
 <li><a href="#场景融合">场景融合</a></li>
 </ul></li>
+<li><a href="#调度器状态的查看方法">调度器状态的查看方法</a></li>
 </ul>
 </nav>
   </div>
@@ -241,7 +250,22 @@
 
 <p>一个进程可以有多个线程，CPU在执行调度的时候切换的是线程，如果下一个线程也是当前进程的，就只有线程切换，“很快”就能完成，如果下一个线程不是当前的进程，就需要切换进程，这就得费点时间了。</p>
 
-<p>这个时代，CPU的调度切换的是进程和线程。多线程看起来很美好，但实际多线程编程却像一坨屎，一是由于线程的设计本身有点复杂，而是由于需要考虑很多底层细节，比如锁和冲突检测。</p>
+<p>传统的编程语言比如C、C++等的并发实现实际上就是基于操作系统调度的，即程序负责创建线程(一般通过pthread等lib调用实现)，操作系统负责调度。这种传统支持并发的方式有诸多不足：</p>
+
+<p>复杂:</p>
+
+<ul>
+<li>创建容易，退出难：做过C/C++ Programming的童鞋都知道，创建一个thread(比如利用pthread)虽然参数也不少，但好歹可以接受。但一旦涉及到thread的退出，就要考虑thread是detached，还是需要parent thread去join？是否需要在thread中设置cancel point，以保证join时能顺利退出？</li>
+<li>并发单元间通信困难，易错：多个thread之间的通信虽然有多种机制可选，但用起来是相当复杂；并且一旦涉及到shared memory，就会用到各种lock，死锁便成为家常便饭；</li>
+<li>thread stack size的设定：是使用默认的，还是设置的大一些，或者小一些呢？</li>
+</ul>
+
+<p>难于scaling:</p>
+
+<ul>
+<li>一个thread的代价已经比进程小了很多了，但我们依然不能大量创建thread，因为除了每个thread占用的资源不小之外，操作系统调度切换thread的代价也不小；</li>
+<li>对于很多网络服务程序，由于不能大量创建thread，就要在少量thread里做网络多路复用，即：使用epoll/kqueue/IoCompletionPort这套机制，即便有libevent/libev这样的第三方库帮忙，写起这样的程序也是很不易的，存在大量callback，给程序员带来不小的心智负担。</li>
+</ul>
 
 <h2 id="协程时代">协程时代</h2>
 
@@ -265,13 +289,25 @@
 
 <p>M:N模型:每个协程对应多个线程，同时也可以一个线程对应多个协程。Go打算采用这种模型，使用任意个内核模型管理任意个goroutine。这样结合了以上两种模型的优点，但缺点就是调度的复杂性。</p>
 
+<h1 id="goroutine">Goroutine</h1>
+
+<p>Go采用了用户层轻量级thread或者说是类coroutine的概念来解决这些问题，Go将之称为”goroutine“。goroutine占用的资源非常小(Go 1.4将每个goroutine stack的size默认设置为2k)，goroutine调度的切换也不用陷入(trap)操作系统内核层完成，代价很低。因此，一个Go程序中可以创建成千上万个并发的goroutine。所有的Go代码都在goroutine中执行，哪怕是go的runtime也不例外。将这些goroutines按照一定算法放到“CPU”上执行的程序就称为goroutine调度器或goroutine scheduler。</p>
+
+<p>不过，一个Go程序对于操作系统来说只是一个用户层程序，对于操作系统而言，它的眼中只有thread，它甚至不知道有什么叫Goroutine的东西的存在。goroutine的调度全要靠Go自己完成，实现Go程序内goroutine之间“公平”的竞争“CPU”资源，这个任务就落到了Go runtime头上，要知道在一个Go程序中，除了用户代码，剩下的就是go runtime了。</p>
+
+<p>于是Goroutine的调度问题就演变为go runtime如何将程序内的众多goroutine按照一定算法调度到“CPU”资源上运行了。在操作系统层面，Thread竞争的“CPU”资源是真实的物理CPU，但在Go程序层面，各个Goroutine要竞争的”CPU”资源是什么呢？Go程序是用户层程序，它本身整体是运行在一个或多个操作系统线程上的，因此goroutine们要竞争的所谓“CPU”资源就是操作系统线程。这样Go scheduler的任务就明确了：将goroutines按照一定算法放到不同的操作系统线程中去执行。这种在语言层面自带调度器的，我们称之为原生支持并发。</p>
+
 <h1 id="g-p-m模型">G-P-M模型</h1>
 
-<p>G: Gourtines, 每个Goroutine对应一个G结构体，G保存Goroutine的运行堆栈，即并发任务状态。G并非执行体，每个G需要绑定到P才能被调度执行。</p>
+<ul>
+<li><p>G: 表示goroutine，存储了goroutine的执行stack信息、goroutine状态以及goroutine的任务函数等；另外G对象是可以重用的。</p></li>
 
-<p>P: Processors, 对G来说，P相当于CPU核，G只有绑定到P(在P的local runq中)才能被调度。对M来说，P提供了相关的执行环境(Context)，如内存分配状态(mcache)，任务队列(G)等.</p>
+<li><p>P: 表示逻辑processor，P的数量决定了系统内最大可并行的G的数量（前提：系统的物理cpu核数&gt;=P的数量）；P的最大作用还是其拥有的各种G对象队列、链表、一些cache和状态。</p></li>
 
-<p>M: Machine, 系统线程抽象，由操作系统管理.负责调度任务，和某个P绑定，从P的runq中不断取出G，切换堆栈并执行，M本身不具备执行状态，在需要任务切换时，M将堆栈状态写回G，任何其它M都能据此恢复执行。</p>
+<li><p>M: M代表着真正的执行计算资源。在绑定有效的p后，进入schedule循环；而schedule循环的机制大致是从各种队列、p的本地队列中获取G，切换到G的执行栈上并执行G的函数，调用goexit做清理工作并回到m，如此反复。M并不保留G状态，这是G可以跨M调度的基础。</p></li>
+</ul>
+
+<p>P是一个“逻辑Proccessor”，每个G要想真正运行起来，首先需要被分配一个P（进入到P的local runq中，这里暂忽略global runq那个环节）。对于G来说，P就是运行它的“CPU”，可以说：G的眼里只有P。但从Go scheduler视角来看，真正的“CPU”是M，只有将P和M绑定才能让P的runq中G得以真实运行起来。这样的P与M的关系，就好比Linux操作系统调度层面用户线程(user thread)与核心线程(kernel thread)的对应关系那样(N x M)。</p>
 
 <p>P必须和M组合起来执行G，但是两者也并不是完全1:1对应，通常情况下P的数量固定和CPU的核数一样(GOMAXPROCS参数)，M则是按需创建，比如当M因为陷入系统调用而长时间阻塞的时候，P就会被监控线程抢回，去新建或者唤醒另一个M去执行，因此M的数量会增加，系统中可能存在一些阻塞的M。</p>
 
@@ -290,7 +326,7 @@
 <li>M线程想运行任务就得获取P，从P的本地队列获取G，P队列为空时，M也会尝试从全局队列拿一批G放到P的本地队列，或从其他P的本地队列偷一半放到自己P的本地队列。M运行G，G执行之后，M会从P获取下一个G，不断重复下去。</li>
 </ol>
 
-<h1 id="调度器的策略">调度器的策略</h1>
+<h1 id="调度思想">调度思想</h1>
 
 <h2 id="复用线程">复用线程</h2>
 
@@ -313,13 +349,25 @@
 
 <p>并行依赖多核技术，每个核上在某个时间只能执行一个线程，当我们的CPU有8个核时，我们能同时执行8个线程，这就是并行。</p>
 
+<h1 id="调度策略">调度策略</h1>
+
 <h2 id="抢占">抢占</h2>
+
+<p>G-P-M模型的实现算是Go scheduler的一大进步，但Scheduler仍然有一个头疼的问题，那就是不支持抢占式调度，导致一旦某个G中出现死循环或永久循环的代码逻辑，那么G将永久占用分配给它的P和M，位于同一个P中的其他G将得不到调度，出现“饿死”的情况。更为严重的是，当只有一个P时(GOMAXPROCS=1)时，整个Go程序中的其他G都将“饿死”。于是Dmitry Vyukov又提出了《Go Preemptive Scheduler Design》并在Go 1.2中实现了“抢占式”调度。</p>
+
+<p>这个抢占式调度的原理则是在每个函数或方法的入口，加上一段额外的代码，让runtime有机会检查是否需要执行抢占调度。这种解决方案只能说局部解决了“饿死”问题，对于没有函数调用，纯算法循环计算的G，scheduler依然无法抢占。</p>
 
 <p>在coroutine中要等待一个协程主动让出CPU才执行下一个协程，在Go中，一个goroutine最多占用CPU 10ms，防止其他goroutine被饿死，这就是goroutine不同于coroutine的一个地方。</p>
 
 <h2 id="全局g队列">全局G队列</h2>
 
 <p>在新的调度器中依然有全局G队列，但功能已经被弱化了，当M执行work stealing从其他P偷不到G时，它可以从全局G队列获取G。</p>
+
+<h2 id="poller">Poller</h2>
+
+<p>Go runtime已经实现了netpoller，这使得即便G发起网络I/O操作也不会导致M被阻塞（仅阻塞G），从而不会导致大量M被创建出来。但是对于regular file的I/O操作一旦阻塞，那么M将进入sleep状态，等待I/O返回后被唤醒；这种情况下P将与sleep的M分离，再选择一个idle的M。如果此时没有idle的M，则会新创建一个M，这就是为何大量I/O操作导致大量Thread被创建的原因。</p>
+
+<p>Ian Lance Taylor在Go 1.9 dev周期中增加了一个Poller for os package的功能，这个功能可以像netpoller那样，在G操作支持pollable的fd时，仅阻塞G，而不阻塞M。不过该功能依然不能对regular file有效，regular file不是pollable的。不过，对于scheduler而言，这也算是一个进步了。</p>
 
 <h1 id="调度器的生命周期">调度器的生命周期</h1>
 
@@ -448,26 +496,17 @@
 
 <p>当然也考虑了过多的自旋线程是浪费CPU，所以系统中最多有GOMAXPROCS个自旋的线程，多余的没事做线程会让他们休眠（见函数：notesleep()）。</p>
 
-<h3 id="g进行系统调用-如何保证p的其他g-可以被执行-而不是饿死">G进行系统调用，如何保证P的其他G’可以被执行，而不是饿死</h3>
+<h3 id="阻塞调度">阻塞调度</h3>
 
-<p>假定当前除了m3和m4为自旋线程，还有m5和m6为自旋线程，g8创建了g9，g8进行了阻塞的系统调用，m2和p2立即解绑，p2会执行以下判断：如果p2本地队列有g、全局队列有g或有空闲的m，p2都会立马唤醒1个m和它绑定，否则p2则会加入到空闲P列表，等待m来获取可用的p。本场景中，p2本地队列有g，可以和其他自旋线程m5绑定。</p>
+<h4 id="channel阻塞或network-i-o情况下的调度">channel阻塞或network I/O情况下的调度</h4>
 
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190706214322.png" alt="" /></p>
+<p>如果G被阻塞在某个channel操作或network I/O操作上时，G会被放置到某个wait队列中，而M会尝试运行下一个runnable的G；如果此时没有runnable的G供m运行，那么m将解绑P，并进入sleep状态。当I/O available或channel操作完成，在wait队列中的G会被唤醒，标记为runnable，放入到某P的队列中，绑定一个M继续执行。</p>
 
-<p>g8创建了g9，假如g8进行了非阻塞系统调用（CGO会是这种方式，见cgocall()），m2和p2会解绑，但m2会记住p，然后g8和m2进入系统调用状态。当g8和m2退出系统调用时，会尝试获取p2，如果无法获取，则获取空闲的p，如果依然没有，g8会被记为可运行状态，并加入到全局队列。</p>
+<h4 id="system-call阻塞情况下的调度">system call阻塞情况下的调度</h4>
 
-<h3 id="go调度器的抢占">Go调度器的抢占</h3>
+<p>如果G被阻塞在某个system call或cgo操作上，那么不光G会阻塞，执行该G的M也会解绑P(实质是被sysmon抢走了)，与G一起进入sleep状态。如果此时有idle的M，则P与其绑定继续执行其他G；如果没有idle M，但仍然有其他G要去执行，那么就会创建一个新M。</p>
 
-<p>Go调度在go1.12实现了抢占，应该更精确的称为请求式抢占，那是因为go调度器的抢占和OS的线程抢占比起来很柔和，不暴力，不会说线程时间片到了，或者更高优先级的任务到了，执行抢占调度。go的抢占调度柔和到只给goroutine发送1个抢占请求，至于goroutine何时停下来，那就管不到了。</p>
-
-<p>抢占请求需要满足2个条件中的1个：</p>
-
-<ol>
-<li>G进行系统调用超过20us</li>
-<li>G运行超过10ms。</li>
-</ol>
-
-<p>调度器在启动的时候会启动一个单独的线程sysmon，它负责所有的监控工作，其中1项就是抢占，发现满足抢占条件的G时，就发出抢占请求。</p>
+<p>当阻塞在syscall上的G完成syscall调用后，G会去尝试获取一个可用的P，如果没有可用的P，那么G会被标记为runnable，之前的那个sleep的M将再次进入sleep。</p>
 
 <h2 id="场景融合">场景融合</h2>
 
@@ -475,8 +514,140 @@
 
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190706221840.png" alt="" /></p>
 
+<h1 id="调度器状态的查看方法">调度器状态的查看方法</h1>
+
+<p>Go提供了调度器当前状态的查看方法：使用Go运行时环境变量GODEBUG。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">$GODEBUG=schedtrace=1000 godoc -http=:6060
+SCHED 0ms: gomaxprocs=4 idleprocs=3 threads=3 spinningthreads=0 idlethreads=0 runqueue=0 [0 0 0 0]
+SCHED 1001ms: gomaxprocs=4 idleprocs=0 threads=9 spinningthreads=0 idlethreads=3 runqueue=2 [8 14 5 2]
+SCHED 2006ms: gomaxprocs=4 idleprocs=0 threads=25 spinningthreads=0 idlethreads=19 runqueue=12 [0 0 4 0]
+SCHED 3006ms: gomaxprocs=4 idleprocs=0 threads=26 spinningthreads=0 idlethreads=8 runqueue=2 [0 1 1 0]
+SCHED 4010ms: gomaxprocs=4 idleprocs=0 threads=26 spinningthreads=0 idlethreads=20 runqueue=12 [6 3 1 0]
+SCHED 5010ms: gomaxprocs=4 idleprocs=0 threads=26 spinningthreads=1 idlethreads=20 runqueue=17 [0 0 0 0]
+SCHED 6016ms: gomaxprocs=4 idleprocs=0 threads=26 spinningthreads=0 idlethreads=20 runqueue=1 [3 4 0 10]
+... ...</pre></td></tr></table>
+</div>
+</div>
+<p>GODEBUG这个Go运行时环境变量很是强大，通过给其传入不同的key1=value1,key2=value2… 组合，Go的runtime会输出不同的调试信息，比如在这里我们给GODEBUG传入了”schedtrace=1000″，其含义就是每1000ms，打印输出一次goroutine scheduler的状态，每次一行。每一行各字段含义如下：</p>
+
+<p>以上面例子中最后一行为例：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">SCHED 6016ms: gomaxprocs=4 idleprocs=0 threads=26 spinningthreads=0 idlethreads=20 runqueue=1 [3 4 0 10]
+
+SCHED：调试信息输出标志字符串，代表本行是goroutine scheduler的输出；
+6016ms：即从程序启动到输出这行日志的时间；
+gomaxprocs: P的数量；
+idleprocs: 处于idle状态的P的数量；通过gomaxprocs和idleprocs的差值，我们就可知道执行go代码的P的数量；
+threads: os threads的数量，包含scheduler使用的m数量，加上runtime自用的类似sysmon这样的thread的数量；
+spinningthreads: 处于自旋状态的os thread数量；
+idlethread: 处于idle状态的os thread的数量；
+runqueue=1： go scheduler全局队列中G的数量；
+[3 4 0 10]: 分别为4个P的local queue中的G的数量。</pre></td></tr></table>
+</div>
+</div>
+<p>我们还可以输出每个goroutine、m和p的详细调度信息，但对于Go user来说，绝大多数时间这是不必要的：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">$ GODEBUG=schedtrace=1000,scheddetail=1 godoc -http=:6060
+
+SCHED 0ms: gomaxprocs=4 idleprocs=3 threads=3 spinningthreads=0 idlethreads=0 runqueue=0 gcwaiting=0 nmidlelocked=0 stopwait=0 sysmonwait=0
+  P0: status=1 schedtick=0 syscalltick=0 m=0 runqsize=0 gfreecnt=0
+  P1: status=0 schedtick=0 syscalltick=0 m=-1 runqsize=0 gfreecnt=0
+  P2: status=0 schedtick=0 syscalltick=0 m=-1 runqsize=0 gfreecnt=0
+  P3: status=0 schedtick=0 syscalltick=0 m=-1 runqsize=0 gfreecnt=0
+  M2: p=-1 curg=-1 mallocing=0 throwing=0 preemptoff= locks=1 dying=0 helpgc=0 spinning=false blocked=false lockedg=-1
+  M1: p=-1 curg=17 mallocing=0 throwing=0 preemptoff= locks=0 dying=0 helpgc=0 spinning=false blocked=false lockedg=17
+  M0: p=0 curg=1 mallocing=0 throwing=0 preemptoff= locks=1 dying=0 helpgc=0 spinning=false blocked=false lockedg=1
+  G1: status=8() m=0 lockedm=0
+  G17: status=3() m=1 lockedm=1
+
+SCHED 1002ms: gomaxprocs=4 idleprocs=0 threads=13 spinningthreads=0 idlethreads=7 runqueue=6 gcwaiting=0 nmidlelocked=0 stopwait=0 sysmonwait=0
+
+ P0: status=2 schedtick=2293 syscalltick=18928 m=-1 runqsize=12 gfreecnt=2
+  P1: status=1 schedtick=2356 syscalltick=19060 m=11 runqsize=11 gfreecnt=0
+  P2: status=2 schedtick=2482 syscalltick=18316 m=-1 runqsize=37 gfreecnt=1
+  P3: status=2 schedtick=2816 syscalltick=18907 m=-1 runqsize=2 gfreecnt=4
+  M12: p=-1 curg=-1 mallocing=0 throwing=0 preemptoff= locks=0 dying=0 helpgc=0 spinning=false blocked=true lockedg=-1
+  M11: p=1 curg=6160 mallocing=0 throwing=0 preemptoff= locks=2 dying=0 helpgc=0 spinning=false blocked=false lockedg=-1
+  M10: p=-1 curg=-1 mallocing=0 throwing=0 preemptoff= locks=0 dying=0 helpgc=0 spinning=false blocked=true lockedg=-1
+ ... ...
+
+SCHED 2002ms: gomaxprocs=4 idleprocs=0 threads=23 spinningthreads=0 idlethreads=5 runqueue=4 gcwaiting=0 nmidlelocked=0 stopwait=0 sysmonwait=0
+  P0: status=0 schedtick=2972 syscalltick=29458 m=-1 runqsize=0 gfreecnt=6
+  P1: status=2 schedtick=2964 syscalltick=33464 m=-1 runqsize=0 gfreecnt=39
+  P2: status=1 schedtick=3415 syscalltick=33283 m=18 runqsize=0 gfreecnt=12
+  P3: status=2 schedtick=3736 syscalltick=33701 m=-1 runqsize=1 gfreecnt=6
+  M22: p=-1 curg=-1 mallocing=0 throwing=0 preemptoff= locks=0 dying=0 helpgc=0 spinning=false blocked=true lockedg=-1
+  M21: p=-1 curg=-1 mallocing=0 throwing=0 preemptoff= locks=0 dying=0 helpgc=0 spinning=false blocked=true lockedg=-1
+... ...</pre></td></tr></table>
+</div>
+</div>
+<p>关于go scheduler调试信息输出的详细信息，可以参考Dmitry Vyukov的大作：《Debugging performance issues in Go programs》。这也应该是每个gopher必读的经典文章。当然更详尽的代码可参考$GOROOT/src/runtime/proc.go中的schedtrace函数。</p>
+
 <p>参考:<br />
-<a href="http://lessisbetter.site/2019/03/26/golang-scheduler-2-macro-view/">http://lessisbetter.site/2019/03/26/golang-scheduler-2-macro-view/</a></p>
+<a href="http://lessisbetter.site/2019/03/26/golang-scheduler-2-macro-view/">http://lessisbetter.site/2019/03/26/golang-scheduler-2-macro-view/</a><br />
+<a href="https://tonybai.com/2017/06/23/an-intro-about-goroutine-scheduler/">https://tonybai.com/2017/06/23/an-intro-about-goroutine-scheduler/</a></p>
 
     </div>
 

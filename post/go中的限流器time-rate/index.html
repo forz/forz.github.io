@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Go中的限流器time-rate - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="Constants 1 const Inf = Limit(math.MaxFloat64) Inf是无限速率限制；它允许所有事件（即使burst为零）。 1 const InfDuration = time.Duration(1&amp;lt;&amp;lt;63 - 1) InfDuration是预留不正确时由Delay返回的" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="/post/go%E4%B8%AD%E7%9A%84%E9%99%90%E6%B5%81%E5%99%A8time-rate/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Go中的限流器time-rate" />
+<meta property="og:description" content="Constants 1 const Inf = Limit(math.MaxFloat64) Inf是无限速率限制；它允许所有事件（即使burst为零）。 1 const InfDuration = time.Duration(1&lt;&lt;63 - 1) InfDuration是预留不正确时由Delay返回的" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/go%E4%B8%AD%E7%9A%84%E9%99%90%E6%B5%81%E5%99%A8time-rate/" />
+<meta property="article:published_time" content="2019-10-29T11:04:24&#43;00:00"/>
+<meta property="article:modified_time" content="2019-10-29T11:04:24&#43;00:00"/>
+
+<meta itemprop="name" content="Go中的限流器time-rate">
+<meta itemprop="description" content="Constants 1 const Inf = Limit(math.MaxFloat64) Inf是无限速率限制；它允许所有事件（即使burst为零）。 1 const InfDuration = time.Duration(1&lt;&lt;63 - 1) InfDuration是预留不正确时由Delay返回的">
+
+
+<meta itemprop="datePublished" content="2019-10-29T11:04:24&#43;00:00" />
+<meta itemprop="dateModified" content="2019-10-29T11:04:24&#43;00:00" />
+<meta itemprop="wordCount" content="3115">
+
+
+
+<meta itemprop="keywords" content="Go," />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Go中的限流器time-rate"/>
+<meta name="twitter:description" content="Constants 1 const Inf = Limit(math.MaxFloat64) Inf是无限速率限制；它允许所有事件（即使burst为零）。 1 const InfDuration = time.Duration(1&lt;&lt;63 - 1) InfDuration是预留不正确时由Delay返回的"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Go中的限流器time-rate</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2019-10-29 </span>
+        <div class="post-category">
+            <a href="/categories/go/"> Go </a>
+            </div>
+          <span class="more-meta"> 约 3115 字 </span>
+          <span class="more-meta"> 预计阅读 7 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+<ul>
+<li><a href="#constants">Constants</a></li>
+<li><a href="#type-limit">type Limit</a>
+<ul>
+<li><a href="#func-every">func Every</a></li>
+</ul></li>
+<li><a href="#type-limiter">type Limiter</a>
+<ul>
+<li><a href="#func-newlimiter">func NewLimiter</a></li>
+<li><a href="#func-limiter-allow">func (*Limiter) Allow</a></li>
+<li><a href="#func-limiter-allown">func (*Limiter) AllowN</a></li>
+<li><a href="#func-limiter-burst">func (*Limiter) Burst</a></li>
+<li><a href="#func-limiter-limit">func (*Limiter) Limit</a></li>
+<li><a href="#func-limiter-reserve">func (*Limiter) Reserve</a></li>
+<li><a href="#func-limiter-reserven">func (*Limiter) ReserveN</a></li>
+<li><a href="#func-limiter-setburst">func (*Limiter) SetBurst</a></li>
+<li><a href="#func-limiter-setburstat">func (*Limiter) SetBurstAt</a></li>
+<li><a href="#func-limiter-setlimit">func (*Limiter) SetLimit</a></li>
+<li><a href="#func-limiter-setlimitat">func (*Limiter) SetLimitAt</a></li>
+<li><a href="#func-limiter-wait">func (*Limiter) Wait</a></li>
+<li><a href="#func-limiter-waitn">func (*Limiter) WaitN</a></li>
+</ul></li>
+<li><a href="#type-reservation">type Reservation</a>
+<ul>
+<li><a href="#func-reservation-cancel">func (*Reservation) Cancel</a></li>
+<li><a href="#func-reservation-cancelat">func (*Reservation) CancelAt</a></li>
+<li><a href="#func-reservation-delay">func (*Reservation) Delay</a></li>
+<li><a href="#func-reservation-delayfrom">func (*Reservation) DelayFrom</a></li>
+<li><a href="#func-reservation-ok">func (*Reservation) OK</a></li>
+</ul></li>
+<li><a href="#样例">样例</a>
+<ul>
+<li><a href="#基本用法">基本用法</a>
+<ul>
+<li><a href="#wait">Wait</a></li>
+<li><a href="#allow">Allow</a></li>
+<li><a href="#reserve">Reserve</a></li>
+</ul></li>
+<li><a href="#reserven-的高级用法">ReserveN 的高级用法</a></li>
+</ul></li>
+</ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      
+
+<h1 id="constants">Constants</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="nx">Inf</span> <span class="p">=</span> <span class="nf">Limit</span><span class="p">(</span><span class="nx">math</span><span class="p">.</span><span class="nx">MaxFloat64</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>Inf是无限速率限制；它允许所有事件（即使burst为零）。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="nx">InfDuration</span> <span class="p">=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">63</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>InfDuration是预留不正确时由Delay返回的持续时间。</p>
+
+<h1 id="type-limit">type Limit</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Limit</span> <span class="kt">float64</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>Limit定义了某些事件的最大频率。限制表示为每秒的事件数。zero Limit 不允许发生任何事件。</p>
+
+<h2 id="func-every">func Every</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Every</span><span class="p">(</span><span class="nx">interval</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">)</span> <span class="nx">Limit</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>Every将事件之间的最小时间间隔转换为一个Limit。</p>
+
+<h1 id="type-limiter">type Limiter</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Limiter</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="c1">// contains filtered or unexported fields
+</span><span class="c1"></span><span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>Limiter控制事件发生的频率。它实现了一个大小为b的“令牌桶”，最初是满的，并以每秒r个令牌的速率重新填充。非正式地，在足够大的时间间隔内，Limiter将速率限制为每秒r个令牌，最大突发大小为b个事件。作为一种特殊情况，如果r == Inf（无限速率），则b被忽略。</p>
+
+<p>零值是有效的Limiter，但它将拒绝所有事件。使用NewLimiter创建非零限制器。</p>
+
+<p>Limiter有三种主要方法，Allow, Reserve, Wait。大多数情况应使用“Wait”。</p>
+
+<p>三种方法中的每一种都消耗一个令牌。当没有令牌可用时，它们的行为不同。</p>
+
+<ul>
+<li>如果没有可用的令牌，则Allow返回false。</li>
+<li>如果没有可用的令牌，Reserve将返回 Reservation,包括以及调用者在使用它之前必须等待的时间。</li>
+<li>如果没有可用的令牌，则Wait阻塞，直到获得一个令牌或其关联的context被取消为止。</li>
+</ul>
+
+<p>方法AllowN，ReserveN和WaitN消耗n个令牌。</p>
+
+<h2 id="func-newlimiter">func NewLimiter</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">NewLimiter</span><span class="p">(</span><span class="nx">r</span> <span class="nx">Limit</span><span class="p">,</span> <span class="nx">b</span> <span class="kt">int</span><span class="p">)</span> <span class="o">*</span><span class="nx">Limiter</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>NewLimiter返回一个新的限制器，该限制器允许事件的发生率达到r，并允许突发最多b个令牌。</p>
+
+<p>Limter限制时间的发生频率，采用令牌池的算法实现。这个池子一开始容量为b，装满b个令牌，然后每秒往里面填充r个令牌。</p>
+
+<p>由于令牌池中最多有b个令牌，所以一次最多只能允许b个事件发生，一个事件花费掉一个令牌。</p>
+
+<h2 id="func-limiter-allow">func (*Limiter) Allow</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">Limiter</span><span class="p">)</span> <span class="nf">Allow</span><span class="p">()</span> <span class="kt">bool</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>Allow是AllowN（time.Now()，1）的简写。</p>
+
+<h2 id="func-limiter-allown">func (*Limiter) AllowN</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">Limiter</span><span class="p">)</span> <span class="nf">AllowN</span><span class="p">(</span><span class="nx">now</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">,</span> <span class="nx">n</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">bool</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>AllowN标识在时间now的时候，n个事件是否可以同时发生(也意思就是now的时候是否可以从令牌池中取n个令牌)</p>
+
+<p>。如果你需要在事件超出频率的时候丢弃或跳过事件，就使用AllowN,否则使用Reserve或Wait.</p>
+
+<h2 id="func-limiter-burst">func (*Limiter) Burst</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">Limiter</span><span class="p">)</span> <span class="nf">Burst</span><span class="p">()</span> <span class="kt">int</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>Burst返回最大突发大小。突发是一次调用Allow, Reserve, Wait时可以消耗的最大令牌数，因此较高的Burst值允许一次发生更多事件。零Burst不带任何事件，除非limit == Inf。</p>
+
+<h2 id="func-limiter-limit">func (*Limiter) Limit</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">Limiter</span><span class="p">)</span> <span class="nf">Limit</span><span class="p">()</span> <span class="nx">Limit</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>限制返回最大总事件发生率。</p>
+
+<h2 id="func-limiter-reserve">func (*Limiter) Reserve</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">Limiter</span><span class="p">)</span> <span class="nf">Reserve</span><span class="p">()</span> <span class="o">*</span><span class="nx">Reservation</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>Reserve是ReserveN（time.Now()，1）的简写。</p>
+
+<h2 id="func-limiter-reserven">func (*Limiter) ReserveN</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">Limiter</span><span class="p">)</span> <span class="nf">ReserveN</span><span class="p">(</span><span class="nx">now</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">,</span> <span class="nx">n</span> <span class="kt">int</span><span class="p">)</span> <span class="o">*</span><span class="nx">Reservation</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>ReserveN返回一个Reservation，该Reservation指示调用者在n个事件发生之前必须等待多长时间。</p>
+
+<p>当允许将来发生事件时，限制器会将此Reservation考虑在内。</p>
+
+<p>如果n超过Limiter的burst大小，ReserveN返回false。用法示例：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">r</span> <span class="o">:=</span> <span class="nx">lim</span><span class="p">.</span><span class="nf">ReserveN</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">(),</span> <span class="mi">1</span><span class="p">)</span>
+<span class="k">if</span> <span class="p">!</span><span class="nx">r</span><span class="p">.</span><span class="nf">OK</span><span class="p">()</span> <span class="p">{</span>
+  <span class="c1">// Not allowed to act! Did you remember to set lim.burst to be &gt; 0 ?
+</span><span class="c1"></span>  <span class="k">return</span>
+<span class="p">}</span>
+<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nf">Delay</span><span class="p">())</span>
+<span class="nf">Act</span><span class="p">()</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>如果您希望根据速率限制等待并放慢速度而不丢失事件，请使用此方法。如果您需要遵守最后期限或取消延迟，请使用wait。要丢弃或跳过超出速率限制的事件，请改用allow。</p>
+
+<p>我认为这里要表达的意思就是如果事件发生的频率是可以由调用者控制的话，可以用ReserveN 来控制事件发生的速度而不丢掉事件。如果要使用context的截止日期或cancel方法的话，使用WaitN。</p>
+
+<h2 id="func-limiter-setburst">func (*Limiter) SetBurst</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">Limiter</span><span class="p">)</span> <span class="nf">SetBurst</span><span class="p">(</span><span class="nx">newBurst</span> <span class="kt">int</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>SetBurst是SetBurstAt（time.Now()，newBurst）的简写。</p>
+
+<h2 id="func-limiter-setburstat">func (*Limiter) SetBurstAt</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">Limiter</span><span class="p">)</span> <span class="nf">SetBurstAt</span><span class="p">(</span><span class="nx">now</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">,</span> <span class="nx">newBurst</span> <span class="kt">int</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>SetBurstAt为限制器设置新的突发大小。</p>
+
+<h2 id="func-limiter-setlimit">func (*Limiter) SetLimit</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">Limiter</span><span class="p">)</span> <span class="nf">SetLimit</span><span class="p">(</span><span class="nx">newLimit</span> <span class="nx">Limit</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>SetLimit是SetLimitAt（time.Now（），newLimit）的简写。</p>
+
+<h2 id="func-limiter-setlimitat">func (*Limiter) SetLimitAt</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">Limiter</span><span class="p">)</span> <span class="nf">SetLimitAt</span><span class="p">(</span><span class="nx">now</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">,</span> <span class="nx">newLimit</span> <span class="nx">Limit</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>SetLimitAt为限制器设置新的限制。保留（使用Reserve或Wait）但在调用SetLimitAt之前尚未执行的操作可能会违反或未充分利用新的Limit和Burst。</p>
+
+<h2 id="func-limiter-wait">func (*Limiter) Wait</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">Limiter</span><span class="p">)</span> <span class="nf">Wait</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>Wait是WaitN（ctx，1）的简写。</p>
+
+<h2 id="func-limiter-waitn">func (*Limiter) WaitN</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">Limiter</span><span class="p">)</span> <span class="nf">WaitN</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">n</span> <span class="kt">int</span><span class="p">)</span> <span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>WaitN阻塞，直到lim允许n个事件发生。</p>
+
+<p>如WaitN 阻塞当前直到Limiter允许n个事件的发生。</p>
+
+<ul>
+<li>如果n超过了令牌池的容量大小则报错。</li>
+<li>如果Context被取消了则报错。</li>
+<li>如果lim的等待时间超过了Context的超时时间则报错。</li>
+</ul>
+
+<p>如果速率限制为Inf，则忽略突发限制。</p>
+
+<h1 id="type-reservation">type Reservation</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Reservation</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="c1">// contains filtered or unexported fields
+</span><span class="c1"></span><span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>Reserve保留有关限制器允许在延迟后发生的事件的信息。Reserve可以被取消，这可以使限制器允许其他事件。</p>
+
+<h2 id="func-reservation-cancel">func (*Reservation) Cancel</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">Reservation</span><span class="p">)</span> <span class="nf">Cancel</span><span class="p">()</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>Cancel是CancelAt（time.Now()）的简写。</p>
+
+<h2 id="func-reservation-cancelat">func (*Reservation) CancelAt</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">Reservation</span><span class="p">)</span> <span class="nf">CancelAt</span><span class="p">(</span><span class="nx">now</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">)</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>CancelAt表示预订持有者将不执行Reserve操作，并考虑可能已经进行了其他Reserve，因此尽可能地降低此Reserve对速率限制的影响。</p>
+
+<h2 id="func-reservation-delay">func (*Reservation) Delay</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">Reservation</span><span class="p">)</span> <span class="nf">Delay</span><span class="p">()</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>Delay是DelayFrom(time.Now())的简写。</p>
+
+<h2 id="func-reservation-delayfrom">func (*Reservation) DelayFrom</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">Reservation</span><span class="p">)</span> <span class="nf">DelayFrom</span><span class="p">(</span><span class="nx">now</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">)</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>DelayFrom返回Reservation所有者在执行Reservation操作之前必须等待的持续时间。持续时间为零意味着立即采取行动。</p>
+
+<p>InfDuration表示限制器无法在最大等待时间内授予此Reservation中请求的令牌。</p>
+
+<h2 id="func-reservation-ok">func (*Reservation) OK</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">Reservation</span><span class="p">)</span> <span class="nf">OK</span><span class="p">()</span> <span class="kt">bool</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>确定返回限制器是否可以在最大等待时间内提供请求数量的令牌。如果OK为false，则Delay返回InfDuration，而Cancel不执行任何操作。</p>
+
+<h1 id="样例">样例</h1>
+
+<h2 id="基本用法">基本用法</h2>
+
+<p>Limter提供三中主要的函数 Allow, Reserve, Wait. 大部分时候使用Wait</p>
+
+<h3 id="wait">Wait</h3>
+
+<p>Wait/WaitN 当没有可用事件时，将阻塞等待</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;context&#34;</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;golang.org/x/time/rate&#34;</span>
+	<span class="s">&#34;time&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">l</span> <span class="o">:=</span> <span class="nx">rate</span><span class="p">.</span><span class="nf">NewLimiter</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span> <span class="c1">// 一个参数为每秒发生多少次事件，第二个参数是最大可运行多少个事件(burst)
+</span><span class="c1"></span>	<span class="nx">c</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">WithCancel</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">())</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">l</span><span class="p">.</span><span class="nf">Wait</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">().</span><span class="nf">Format</span><span class="p">(</span><span class="s">&#34;04:05.000&#34;</span><span class="p">))</span>
+	<span class="p">}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>输出</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">25:08.243
+25:08.243
+25:08.243
+25:09.248
+25:10.248
+25:11.248</pre></td></tr></table>
+</div>
+</div>
+<h3 id="allow">Allow</h3>
+
+<p>Allow/AllowN 当没有可用事件时，返回false</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;golang.org/x/time/rate&#34;</span>
+	<span class="s">&#34;time&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">l</span> <span class="o">:=</span> <span class="nx">rate</span><span class="p">.</span><span class="nf">NewLimiter</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span> <span class="c1">// 一个参数为每秒发生多少次事件，第二个参数是最大可运行多少个事件(burst)
+</span><span class="c1"></span>	<span class="k">for</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">l</span><span class="p">.</span><span class="nf">AllowN</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">(),</span> <span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">().</span><span class="nf">Format</span><span class="p">(</span><span class="s">&#34;04:05.000&#34;</span><span class="p">))</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="mi">1</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span> <span class="o">/</span> <span class="mi">10</span><span class="p">)</span>
+			<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">().</span><span class="nf">Format</span><span class="p">(</span><span class="s">&#34;Second 04:05.000&#34;</span><span class="p">))</span>
+		<span class="p">}</span>
+
+	<span class="p">}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<h3 id="reserve">Reserve</h3>
+
+<p>Reserve/ReserveN 当没有可用事件时，返回 Reservation，和要等待多久才能获得足够的事件</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;golang.org/x/time/rate&#34;</span>
+	<span class="s">&#34;time&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">l</span> <span class="o">:=</span> <span class="nx">rate</span><span class="p">.</span><span class="nf">NewLimiter</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span> <span class="c1">// 一个参数为每秒发生多少次事件，第二个参数是最大可运行多少个事件(burst)
+</span><span class="c1"></span>	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">r</span> <span class="o">:=</span> <span class="nx">l</span><span class="p">.</span><span class="nf">ReserveN</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">(),</span> <span class="mi">1</span><span class="p">)</span>
+		<span class="nx">s</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.</span><span class="nf">Delay</span><span class="p">()</span>
+		<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">s</span><span class="p">,</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">().</span><span class="nf">Format</span><span class="p">(</span><span class="s">&#34;04:05.000&#34;</span><span class="p">))</span>
+
+	<span class="p">}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<h2 id="reserven-的高级用法">ReserveN 的高级用法</h2>
+
+<p>使用Reserve可以根据Delay的时间自行控制程序是否执行.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;bytes&#34;</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;io&#34;</span>
+	<span class="s">&#34;time&#34;</span>
+
+	<span class="s">&#34;golang.org/x/time/rate&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">type</span> <span class="nx">reader</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">r</span>       <span class="nx">io</span><span class="p">.</span><span class="nx">Reader</span>
+	<span class="nx">limiter</span> <span class="o">*</span><span class="nx">rate</span><span class="p">.</span><span class="nx">Limiter</span>
+<span class="p">}</span>
+
+<span class="c1">// Reader returns a reader that is rate limited by
+</span><span class="c1">// the given token bucket. Each token in the bucket
+</span><span class="c1">// represents one byte.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewReader</span><span class="p">(</span><span class="nx">r</span> <span class="nx">io</span><span class="p">.</span><span class="nx">Reader</span><span class="p">,</span> <span class="nx">l</span> <span class="o">*</span><span class="nx">rate</span><span class="p">.</span><span class="nx">Limiter</span><span class="p">)</span> <span class="nx">io</span><span class="p">.</span><span class="nx">Reader</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">reader</span><span class="p">{</span>
+		<span class="nx">r</span><span class="p">:</span>       <span class="nx">r</span><span class="p">,</span>
+		<span class="nx">limiter</span><span class="p">:</span> <span class="nx">l</span><span class="p">,</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">reader</span><span class="p">)</span> <span class="nf">Read</span><span class="p">(</span><span class="nx">buf</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">(</span><span class="kt">int</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">n</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">r</span><span class="p">.</span><span class="nf">Read</span><span class="p">(</span><span class="nx">buf</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">n</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="nx">now</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">()</span>
+	<span class="nx">rv</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">limiter</span><span class="p">.</span><span class="nf">ReserveN</span><span class="p">(</span><span class="nx">now</span><span class="p">,</span> <span class="nx">n</span><span class="p">)</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">rv</span><span class="p">.</span><span class="nf">OK</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;Exceeds limiter&#39;s burst&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">delay</span> <span class="o">:=</span> <span class="nx">rv</span><span class="p">.</span><span class="nf">DelayFrom</span><span class="p">(</span><span class="nx">now</span><span class="p">)</span>
+	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;Read %d bytes, delay %f\n&#34;</span><span class="p">,</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">delay</span><span class="p">.</span><span class="nf">Seconds</span><span class="p">())</span>
+	<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">delay</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">err</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="c1">// Source holding 1MB
+</span><span class="c1"></span>	<span class="nx">src</span> <span class="o">:=</span> <span class="nx">bytes</span><span class="p">.</span><span class="nf">NewReader</span><span class="p">(</span><span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="mi">1024</span><span class="o">*</span><span class="mi">1024</span><span class="p">))</span>
+	<span class="c1">// Destination
+</span><span class="c1"></span>	<span class="nx">dst</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">bytes</span><span class="p">.</span><span class="nx">Buffer</span><span class="p">{}</span>
+
+	<span class="c1">// Bucket adding 100KB every second, holding max 100KB
+</span><span class="c1"></span>	<span class="nx">limit</span> <span class="o">:=</span> <span class="nx">rate</span><span class="p">.</span><span class="nf">NewLimiter</span><span class="p">(</span><span class="mi">100</span><span class="o">*</span><span class="mi">1024</span><span class="p">,</span> <span class="mi">100</span><span class="o">*</span><span class="mi">1024</span><span class="p">)</span>
+
+	<span class="nx">start</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">()</span>
+
+	<span class="nx">buf</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="mi">10</span><span class="o">*</span><span class="mi">1024</span><span class="p">)</span>
+	<span class="c1">// Copy source to destination, but wrap our reader with rate limited one
+</span><span class="c1"></span>	<span class="c1">//io.CopyBuffer(dst, NewReader(src, limit), buf)
+</span><span class="c1"></span>	<span class="nx">r</span> <span class="o">:=</span> <span class="nf">NewReader</span><span class="p">(</span><span class="nx">src</span><span class="p">,</span> <span class="nx">limit</span><span class="p">)</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.</span><span class="nf">Read</span><span class="p">(</span><span class="nx">buf</span><span class="p">);</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">dst</span><span class="p">.</span><span class="nf">Write</span><span class="p">(</span><span class="nx">buf</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="nx">n</span><span class="p">])</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;Copied %d bytes in %s\n&#34;</span><span class="p">,</span> <span class="nx">dst</span><span class="p">.</span><span class="nf">Len</span><span class="p">(),</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Since</span><span class="p">(</span><span class="nx">start</span><span class="p">))</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>值得注意的是，这里不能直接用io.Copy，bytes.Buffer实现了ReaderFrom，每次Read的时候，buf的长度是变化的，会导致len(buf)超过rate.Limiter.burst。对于这种情况，rv.DelayFrom(now)会返回InfDuration。</p>
+
+<p>参考:<br />
+<a href="https://www.jianshu.com/p/4ce68a31a71d">https://www.jianshu.com/p/4ce68a31a71d</a><br />
+<a href="https://www.jianshu.com/p/1ecb513f7632">https://www.jianshu.com/p/1ecb513f7632</a><br />
+<a href="https://blog.csdn.net/u010066807/article/details/79961957">https://blog.csdn.net/u010066807/article/details/79961957</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2019-10-29
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go/">Go</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/gokit%E4%BD%BF%E7%94%A8%E9%99%90%E6%B5%81%E5%8A%9F%E8%83%BD/">
+            <span class="next-text nav-default">GoKit使用:限流功能</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
