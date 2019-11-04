@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>hystrix-go源码剖析 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="简单使用 hystrix的使用是非常简单的，同步执行，直接调用Do方法。 1 2 3 4 5 6 7 err := hystrix.Do(&amp;#34;my_command&amp;#34;, func() error { // talk to other services return nil }, func(err error) error { // do this when services are down return nil })" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="/post/hystrix-go%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="hystrix-go源码剖析" />
+<meta property="og:description" content="简单使用 hystrix的使用是非常简单的，同步执行，直接调用Do方法。 1 2 3 4 5 6 7 err := hystrix.Do(&#34;my_command&#34;, func() error { // talk to other services return nil }, func(err error) error { // do this when services are down return nil })" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/hystrix-go%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
+<meta property="article:published_time" content="2019-11-04T16:07:01&#43;00:00"/>
+<meta property="article:modified_time" content="2019-11-04T16:07:01&#43;00:00"/>
+
+<meta itemprop="name" content="hystrix-go源码剖析">
+<meta itemprop="description" content="简单使用 hystrix的使用是非常简单的，同步执行，直接调用Do方法。 1 2 3 4 5 6 7 err := hystrix.Do(&#34;my_command&#34;, func() error { // talk to other services return nil }, func(err error) error { // do this when services are down return nil })">
+
+
+<meta itemprop="datePublished" content="2019-11-04T16:07:01&#43;00:00" />
+<meta itemprop="dateModified" content="2019-11-04T16:07:01&#43;00:00" />
+<meta itemprop="wordCount" content="3203">
+
+
+
+<meta itemprop="keywords" content="hystrix," />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="hystrix-go源码剖析"/>
+<meta name="twitter:description" content="简单使用 hystrix的使用是非常简单的，同步执行，直接调用Do方法。 1 2 3 4 5 6 7 err := hystrix.Do(&#34;my_command&#34;, func() error { // talk to other services return nil }, func(err error) error { // do this when services are down return nil })"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">hystrix-go源码剖析</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2019-11-04 </span>
+        <div class="post-category">
+            <a href="/categories/go/"> Go </a>
+            </div>
+          <span class="more-meta"> 约 3203 字 </span>
+          <span class="more-meta"> 预计阅读 7 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+<ul>
+<li><a href="#简单使用">简单使用</a></li>
+</ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191104160951.png" alt="" /></p>
+
+<h1 id="简单使用">简单使用</h1>
+
+<p>hystrix的使用是非常简单的，同步执行，直接调用Do方法。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">err</span> <span class="o">:=</span> <span class="nx">hystrix</span><span class="p">.</span><span class="nf">Do</span><span class="p">(</span><span class="s">&#34;my_command&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+   <span class="c1">// talk to other services
+</span><span class="c1"></span>   <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">},</span> <span class="kd">func</span><span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+   <span class="c1">// do this when services are down
+</span><span class="c1"></span>   <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">})</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>异步执行Go方法,内部实现是启动了一个gorouting，如果想得到自定义方法的数据，需要你传channel来处理数据，或者输出。返回的error也是一个channel</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">output</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">bool</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<span class="nx">errors</span> <span class="o">:=</span> <span class="nx">hystrix</span><span class="p">.</span><span class="nf">Go</span><span class="p">(</span><span class="s">&#34;my_command&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="c1">// talk to other services
+</span><span class="c1"></span>    <span class="nx">output</span> <span class="o">&lt;-</span> <span class="kc">true</span>
+    <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">},</span> <span class="kc">nil</span><span class="p">)</span>
+
+<span class="k">select</span> <span class="p">{</span>
+<span class="k">case</span> <span class="nx">out</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">output</span><span class="p">:</span>
+    <span class="c1">// success
+</span><span class="c1"></span><span class="k">case</span> <span class="nx">err</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">errors</span><span class="p">:</span>
+    <span class="o">//</span> <span class="nx">failure</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>大概的执行流程图</p>
+
+<p>其实方法Do和Go方法内部都是调用了hystrix.GoC方法，只是Do方法处理了异步的过程</p>
+
+<p>func DoC(ctx context.Context, name string, run runFuncC, fallback fallbackFuncC) error {
+    done := make(chan struct{}, 1)
+    r := func(ctx context.Context) error {
+        err := run(ctx)
+        if err != nil {
+            return err
+        }
+        done &lt;- struct{}{}
+        return nil
+    }
+    f := func(ctx context.Context, e error) error {
+        err := fallback(ctx, e)
+        if err != nil {
+            return err
+        }
+        done &lt;- struct{}{}
+        return nil
+    }
+    var errChan chan error
+    if fallback == nil {
+        errChan = GoC(ctx, name, r, nil)
+    } else {
+        errChan = GoC(ctx, name, r, f)
+    }</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">select {
+case &lt;-done:
+    return nil
+case err := &lt;-errChan:
+    return err
+}</pre></td></tr></table>
+</div>
+</div>
+<p>}
+自定义Command配置
+在调用Do Go等方法之前我们可以先自定义一些配置</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">hystrix.ConfigureCommand(&#34;mycommand&#34;, hystrix.CommandConfig{
+    Timeout:                int(time.Second * 3),
+    MaxConcurrentRequests:  100,
+    SleepWindow:            int(time.Second * 5),
+    RequestVolumeThreshold: 30,
+    ErrorPercentThreshold: 50,
+})
+
+err := hystrix.DoC(context.Background(), &#34;mycommand&#34;, func(ctx context.Context) error {
+    // ...
+    return nil
+}, func(i context.Context, e error) error {
+    // ...
+    return e
+})</pre></td></tr></table>
+</div>
+</div>
+<p>我大要说了一下CommandConfig第个字段的意义：</p>
+
+<p>Timeout: 执行command的超时时间。默认时间是1000毫秒
+MaxConcurrentRequests：command的最大并发量 默认值是10
+SleepWindow：当熔断器被打开后，SleepWindow的时间就是控制过多久后去尝试服务是否可用了。默认值是5000毫秒
+RequestVolumeThreshold： 一个统计窗口10秒内请求数量。达到这个请求数量后才去判断是否要开启熔断。默认值是20
+ErrorPercentThreshold：错误百分比，请求数量大于等于RequestVolumeThreshold并且错误率到达这个百分比后就会启动熔断 默认值是50
+当然如果不配置他们，会使用默认值</p>
+
+<p>讲完了怎么用，接下来就是分析源码了。我是从下层到上层的顺序分析代码和执行流程</p>
+
+<p>统计控制器
+每一个Command都会有一个默认统计控制器，当然也可以添加多个自定义的控制器。
+默认的统计控制器DefaultMetricCollector保存着熔断器的所有状态，调用次数，失败次数，被拒绝次数等等</p>
+
+<p>type DefaultMetricCollector struct {
+    mutex *sync.RWMutex</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">numRequests *rolling.Number
+errors      *rolling.Number
+
+successes               *rolling.Number
+failures                *rolling.Number
+rejects                 *rolling.Number
+shortCircuits           *rolling.Number
+timeouts                *rolling.Number
+contextCanceled         *rolling.Number
+contextDeadlineExceeded *rolling.Number
+
+fallbackSuccesses *rolling.Number
+fallbackFailures  *rolling.Number
+totalDuration     *rolling.Timing
+runDuration       *rolling.Timing</pre></td></tr></table>
+</div>
+</div>
+<p>}
+最主要的还是要看一下rolling.Number，rolling.Number才是状态最终保存的地方
+Number保存了10秒内的Buckets数据信息，每一个Bucket的统计时长为1秒</p>
+
+<p>type Number struct {
+    Buckets map[int64]*numberBucket
+    Mutex   *sync.RWMutex
+}</p>
+
+<p>type numberBucket struct {
+    Value float64
+}
+字典字段Buckets map[int64]*numberBucket 中的Key保存的是当前时间
+可能你会好奇Number是如何保证只保存10秒内的数据的。每一次对熔断器的状态进行修改时，Number都要先得到当前的时间(秒级)的Bucket不存在则创建。</p>
+
+<p>func (r *Number) getCurrentBucket() *numberBucket {
+    now := time.Now().Unix()
+    var bucket *numberBucket
+    var ok bool</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">if bucket, ok = r.Buckets[now]; !ok {
+    bucket = &amp;numberBucket{}
+    r.Buckets[now] = bucket
+}
+
+return bucket</pre></td></tr></table>
+</div>
+</div>
+<p>}
+修改完后去掉10秒外的数据</p>
+
+<p>func (r *Number) removeOldBuckets() {
+    now := time.Now().Unix() - 10</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">for timestamp := range r.Buckets {
+    // TODO: configurable rolling window
+    if timestamp &lt;= now {
+        delete(r.Buckets, timestamp)
+    }
+}</pre></td></tr></table>
+</div>
+</div>
+<p>}
+比如Increment方法，先得到Bucket再删除旧的数据</p>
+
+<p>func (r *Number) Increment(i float64) {
+    if i == 0 {
+        return
+    }</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">r.Mutex.Lock()
+defer r.Mutex.Unlock()
+
+b := r.getCurrentBucket()
+b.Value += i
+r.removeOldBuckets()</pre></td></tr></table>
+</div>
+</div>
+<p>}
+统计控制器是最基层和最重要的一个实现，上层所有的执行判断都是基于他的数据进行逻辑处理的</p>
+
+<p>上报执行状态信息
+断路器&ndash;&gt;执行&ndash;&gt;上报执行状态信息&ndash;&gt;保存到相应的Buckets</p>
+
+<p>每一次断路器逻辑的执行都会上报执行过程中的状态，</p>
+
+<p>// ReportEvent records command metrics for tracking recent error rates and exposing data to the dashboard.
+func (circuit *CircuitBreaker) ReportEvent(eventTypes []string, start time.Time, runDuration time.Duration) error {
+    // &hellip;
+    circuit.mutex.RLock()
+    o := circuit.open
+    circuit.mutex.RUnlock()
+    if eventTypes[0] == &ldquo;success&rdquo; &amp;&amp; o {
+        circuit.setClose()
+    }
+    var concurrencyInUse float64
+    if circuit.executorPool.Max &gt; 0 {
+        concurrencyInUse = float64(circuit.executorPool.ActiveCount()) / float64(circuit.executorPool.Max)
+    }
+    select {
+    case circuit.metrics.Updates &lt;- &amp;commandExecution{
+        Types:            eventTypes,
+        Start:            start,
+        RunDuration:      runDuration,
+        ConcurrencyInUse: concurrencyInUse,
+    }:
+    default:
+        return CircuitError{Message: fmt.Sprintf(&ldquo;metrics channel (%v) is at capacity&rdquo;, circuit.Name)}
+    }</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">return nil</pre></td></tr></table>
+</div>
+</div>
+<p>}
+circuit.metrics.Updates 这个信道就是处理上报信息的，上报执行状态自信的结构是metricExchange，结构体很简单只有4个字段。要的就是</p>
+
+<p>channel字段Updates 他是一个有buffer的channel默认的数量是2000个,所有的状态信息都在他里面
+metricCollectors字段，就是保存的具体的这个command执行过程中的各种信息
+type metricExchange struct {
+    Name    string
+    Updates chan *commandExecution
+    Mutex   *sync.RWMutex</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">metricCollectors []metricCollector.MetricCollector</pre></td></tr></table>
+</div>
+</div>
+<p>}</p>
+
+<p>type commandExecution struct {
+    Types            []string      <code>json:&quot;types&quot;</code>
+    Start            time.Time     <code>json:&quot;start_time&quot;</code>
+    RunDuration      time.Duration <code>json:&quot;run_duration&quot;</code>
+    ConcurrencyInUse float64       <code>json:&quot;concurrency_inuse&quot;</code>
+}</p>
+
+<p>func newMetricExchange(name string) *metricExchange {
+    m := &amp;metricExchange{}
+    m.Name = name</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">m.Updates = make(chan *commandExecution, 2000)
+m.Mutex = &amp;sync.RWMutex{}
+m.metricCollectors = metricCollector.Registry.InitializeMetricCollectors(name)
+m.Reset()
+
+go m.Monitor()
+
+return m</pre></td></tr></table>
+</div>
+</div>
+<p>}
+在执行newMetricExchange的时候会启动一个协程 go m.Monitor()去监控Updates的数据，然后上报给metricCollectors 保存执行的信息数据比如前面提到的调用次数，失败次数，被拒绝次数等等</p>
+
+<p>func (m *metricExchange) Monitor() {
+    for update := range m.Updates {
+        // we only grab a read lock to make sure Reset() isn&rsquo;t changing the numbers.
+        m.Mutex.RLock()</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">    totalDuration := time.Since(update.Start)
+    wg := &amp;sync.WaitGroup{}
+    for _, collector := range m.metricCollectors {
+        wg.Add(1)
+        go m.IncrementMetrics(wg, collector, update, totalDuration)
+    }
+    wg.Wait()
+
+    m.Mutex.RUnlock()
+}</pre></td></tr></table>
+</div>
+</div>
+<p>}
+更新调用的是go m.IncrementMetrics(wg, collector, update, totalDuration)，里面判断了他的状态</p>
+
+<p>func (m *metricExchange) IncrementMetrics(wg *sync.WaitGroup, collector metricCollector.MetricCollector, update *commandExecution, totalDuration time.Duration) {
+    // granular metrics
+    r := metricCollector.MetricResult{
+        Attempts:         1,
+        TotalDuration:    totalDuration,
+        RunDuration:      update.RunDuration,
+        ConcurrencyInUse: update.ConcurrencyInUse,
+    }
+    switch update.Types[0] {
+    case &ldquo;success&rdquo;:
+        r.Successes = 1
+    case &ldquo;failure&rdquo;:
+        r.Failures = 1
+        r.Errors = 1
+    case &ldquo;rejected&rdquo;:
+        r.Rejects = 1
+        r.Errors = 1
+    // &hellip;
+    }
+    // &hellip;
+    collector.Update&reg;
+    wg.Done()
+}
+流量控制
+hystrix-go对流量控制的代码是很简单的。用了一个简单的令牌算法，能得到令牌的就可以执行后继的工作，执行完后要返还令牌。得不到令牌就拒绝，拒绝后调用用户设置的callback方法，如果没有设置就不执行。
+结构体executorPool就是hystrix-go 流量控制的具体实现。字段Max就是每秒最大的并发值。</p>
+
+<p>type executorPool struct {
+    Name    string
+    Metrics *poolMetrics
+    Max     int
+    Tickets chan *struct{}
+}
+在创建executorPool的时候，会根据Max值来创建令牌。Max值如果没有设置会使用默认值10</p>
+
+<p>func newExecutorPool(name string) *executorPool {
+    p := &amp;executorPool{}
+    p.Name = name
+    p.Metrics = newPoolMetrics(name)
+    p.Max = getSettings(name).MaxConcurrentRequests</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">p.Tickets = make(chan *struct{}, p.Max)
+for i := 0; i &lt; p.Max; i++ {
+    p.Tickets &lt;- &amp;struct{}{}
+}
+
+return p</pre></td></tr></table>
+</div>
+</div>
+<p>}
+流量控制上报状态
+注意一下字段 Metrics 他用于统计执行数量，比如：执行的总数量,最大的并发数 具体的代码就不贴上来了。这个数量也可以显露出，供可视化程序直观的表现出来。</p>
+
+<p>令牌使用完后是需要返还的，返回的时候才会做上面所说的统计工作。</p>
+
+<p>func (p *executorPool) Return(ticket *struct{}) {
+    if ticket == nil {
+        return
+    }</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">p.Metrics.Updates &lt;- poolMetricsUpdate{
+    activeCount: p.ActiveCount(),
+}
+p.Tickets &lt;- ticket</pre></td></tr></table>
+</div>
+</div>
+<p>}</p>
+
+<p>func (p *executorPool) ActiveCount() int {
+    return p.Max - len(p.Tickets)
+}
+一次Command的执行的流程
+上面把 统计控制器、流量控制、上报执行状态讲完了，主要的实现也就讲的差不多了。最后就是串一次command的执行都经历了啥：</p>
+
+<p>err := hystrix.Do(&ldquo;my_command&rdquo;, func() error {
+    // talk to other services
+    return nil
+}, func(err error) error {
+    // do this when services are down
+    return nil
+})
+hystrix在执行一次command的前面也有提到过会调用GoC方法，下面我把代码贴出来来，篇幅问题去掉了一些代码，主要逻辑都在。就是在判断断路器是否已打开，得到Ticket得不到就限流，执行我们自己的的方法，判断context是否Done或者执行是否超时
+当然，每次执行结果都要上报执行状态,最后要返还Ticket</p>
+
+<p>func GoC(ctx context.Context, name string, run runFuncC, fallback fallbackFuncC) chan error {
+    cmd := &amp;command{
+        run:      run,
+        fallback: fallback,
+        start:    time.Now(),
+        errChan:  make(chan error, 1),
+        finished: make(chan bool, 1),
+    }
+    //得到断路器，不存在则创建
+    circuit, _, err := GetCircuit(name)
+    if err != nil {
+        cmd.errChan &lt;- err
+        return cmd.errChan
+    }
+    //&hellip;
+    // 返还ticket
+    returnTicket := func() {
+        // &hellip;
+        cmd.circuit.executorPool.Return(cmd.ticket)
+    }
+    // 上报执行状态
+    reportAllEvent := func() {
+        err := cmd.circuit.ReportEvent(cmd.events, cmd.start, cmd.runDuration)
+        // &hellip;
+    }
+    go func() {
+        defer func() { cmd.finished &lt;- true }()
+        // 查看断路器是否已打开
+        if !cmd.circuit.AllowRequest() {
+            // &hellip;
+            returnOnce.Do(func() {
+                returnTicket()
+                cmd.errorWithFallback(ctx, ErrCircuitOpen)
+                reportAllEvent()
+            })
+            return
+        }
+        // &hellip;
+        // 获取ticket 如果得不到就限流
+        select {
+        case cmd.ticket = &lt;-circuit.executorPool.Tickets:
+            ticketChecked = true
+            ticketCond.Signal()
+            cmd.Unlock()
+        default:
+            // &hellip;
+            returnOnce.Do(func() {
+                returnTicket()
+                cmd.errorWithFallback(ctx, ErrMaxConcurrency)
+                reportAllEvent()
+            })
+            return
+        }
+        // 执行我们自已的方法，并上报执行信息
+        returnOnce.Do(func() {
+            defer reportAllEvent()
+            cmd.runDuration = time.Since(runStart)
+            returnTicket()
+            if runErr != nil {
+                cmd.errorWithFallback(ctx, runErr)
+                return
+            }
+            cmd.reportEvent(&ldquo;success&rdquo;)
+        })
+    }()
+    // 等待context是否被结束，或执行者超时，并上报
+    go func() {
+        timer := time.NewTimer(getSettings(name).Timeout)
+        defer timer.Stop()</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">    select {
+    case &lt;-cmd.finished:
+        // returnOnce has been executed in another goroutine
+    case &lt;-ctx.Done():
+        // ...
+        return
+    case &lt;-timer.C:
+        // ...
+    }
+}()
+
+return cmd.errChan</pre></td></tr></table>
+</div>
+</div>
+<p>}
+dashboard 可视化hystrix的上报信息
+代码中StreamHandler就是把所有断路器的状态以流的方式不断的推送到dashboard. 这部分代码我就不用说了，很简单。
+需要在你的服务端加3行代码，启动我们的流服务</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">hystrixStreamHandler := hystrix.NewStreamHandler()
+hystrixStreamHandler.Start()
+go http.ListenAndServe(net.JoinHostPort(&#34;&#34;, &#34;81&#34;), hystrixStreamHandler)</pre></td></tr></table>
+</div>
+</div>
+<p>dashboard我使用的是docker版。</p>
+
+<p>docker run -d -p 8888:9002 &ndash;name hystrix-dashboard mlabouardy/hystrix-dashboard:latest</p>
+
+<p>在下面输入你服务的地址，我是
+<a href="http://192.168.1.67:81/hystrix.stream">http://192.168.1.67:81/hystrix.stream</a></p>
+
+<p>如果是集群可以使用Turbine进行监控，有时间大家自己来看吧</p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2019-11-04
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/hystrix/">hystrix</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/time-rate%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <span class="next-text nav-default">time-rate源码剖析</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
