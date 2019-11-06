@@ -1,0 +1,2044 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>sync.Map源码剖析 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="在Go 1.6之前， 内置的map类型是部分goroutine安全的，并发的读没有问题，并发的写可能有问题。自go 1.6之后， 并发地读写map会" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="/post/sync-map%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="sync.Map源码剖析" />
+<meta property="og:description" content="在Go 1.6之前， 内置的map类型是部分goroutine安全的，并发的读没有问题，并发的写可能有问题。自go 1.6之后， 并发地读写map会" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/sync-map%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
+<meta property="article:published_time" content="2019-01-19T21:11:24&#43;00:00"/>
+<meta property="article:modified_time" content="2019-01-19T21:11:24&#43;00:00"/>
+
+<meta itemprop="name" content="sync.Map源码剖析">
+<meta itemprop="description" content="在Go 1.6之前， 内置的map类型是部分goroutine安全的，并发的读没有问题，并发的写可能有问题。自go 1.6之后， 并发地读写map会">
+
+
+<meta itemprop="datePublished" content="2019-01-19T21:11:24&#43;00:00" />
+<meta itemprop="dateModified" content="2019-01-19T21:11:24&#43;00:00" />
+<meta itemprop="wordCount" content="13699">
+
+
+
+<meta itemprop="keywords" content="sync," />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="sync.Map源码剖析"/>
+<meta name="twitter:description" content="在Go 1.6之前， 内置的map类型是部分goroutine安全的，并发的读没有问题，并发的写可能有问题。自go 1.6之后， 并发地读写map会"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">sync.Map源码剖析</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2019-01-19 </span>
+        <div class="post-category">
+            <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
+            </div>
+          <span class="more-meta"> 约 13699 字 </span>
+          <span class="more-meta"> 预计阅读 28 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+<ul>
+<li><a href="#有并发问题的map">有并发问题的map</a></li>
+<li><a href="#go-1-9之前的解决方案">Go 1.9之前的解决方案</a></li>
+<li><a href="#sync-map">sync.Map</a>
+<ul>
+<li><a href="#read和dirty">read和dirty</a></li>
+<li><a href="#amended">amended</a></li>
+<li><a href="#entry-p">entry.p</a></li>
+<li><a href="#misses">misses</a></li>
+</ul></li>
+<li><a href="#优化点">优化点</a></li>
+<li><a href="#原理解析">原理解析</a></li>
+<li><a href="#源码分析">源码分析</a>
+<ul>
+<li><a href="#load">Load</a></li>
+<li><a href="#store">Store</a></li>
+<li><a href="#delete">Delete</a></li>
+<li><a href="#loadorstore">LoadOrStore</a></li>
+<li><a href="#range">Range</a></li>
+</ul></li>
+<li><a href="#sync-map的适用场景">sync.Map的适用场景</a></li>
+<li><a href="#补全len">补全Len</a></li>
+<li><a href="#警告-切记拷贝sync-map">警告:切记拷贝sync.Map</a></li>
+</ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      
+
+<p>在Go 1.6之前， 内置的map类型是部分goroutine安全的，并发的读没有问题，并发的写可能有问题。自go 1.6之后， 并发地读写map会报错，这在一些知名的开源库中都存在这个问题，所以go 1.9之前的解决方案是额外绑定一个锁，封装成一个新的struct或者单独使用锁都可以。</p>
+
+<p>本文带你深入到sync.Map的具体实现中，看看为了增加一个功能，代码是如何变的复杂的,以及作者在实现sync.Map的一些思想。</p>
+
+<h1 id="有并发问题的map">有并发问题的map</h1>
+
+<p>官方的faq已经提到内建的map不是线程(goroutine)安全的。</p>
+
+<p>首先，让我们看一段并发读写的代码,下列程序中一个goroutine一直读，一个goroutine一只写同一个键值，即即使读写的键不相同，而且map也没有&rdquo;扩容&rdquo;等操作，代码还是会报错。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">m</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">int</span><span class="p">]</span><span class="kt">int</span><span class="p">)</span>
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="p">{</span>
+			<span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="p">{</span>
+			<span class="nx">m</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="p">=</span> <span class="mi">2</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+	<span class="k">select</span> <span class="p">{}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>错误信息是: fatal error: concurrent map read and map write。</p>
+
+<p>如果你查看Go的源代码: hashmap_fast.go#L118,会看到读的时候会检查hashWriting标志， 如果有这个标志，就会报并发错误。</p>
+
+<p>写的时候会设置这个标志: hashmap.go#L542</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">h</span><span class="p">.</span><span class="nx">flags</span> <span class="o">|=</span> <span class="nx">hashWriting</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>hashmap.go#L628设置完之后会取消这个标记。</p>
+
+<p>当然，代码中还有好几处并发读写的检查， 比如写的时候也会检查是不是有并发的写，删除键的时候类似写，遍历的时候并发读写问题等。</p>
+
+<p>有时候，map的并发问题不是那么容易被发现, 你可以利用-race参数来检查。</p>
+
+<h1 id="go-1-9之前的解决方案">Go 1.9之前的解决方案</h1>
+
+<p>但是，很多时候，我们会并发地使用map对象，尤其是在一定规模的项目中，map总会保存goroutine共享的数据。在Go官方blog的Go maps in action一文中，提供了一种简便的解决方案。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">counter</span> <span class="p">=</span> <span class="kd">struct</span><span class="p">{</span>
+    <span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>
+    <span class="nx">m</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">int</span>
+<span class="p">}{</span><span class="nx">m</span><span class="p">:</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">int</span><span class="p">)}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>它使用嵌入struct为map增加一个读写锁,把读写操作变成单线程操作来实现。</p>
+
+<p>下面是我们使用sync.RWMutex实现的一个简单的线程安全Map。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">RegularIntMap</span>
+
+<span class="kd">type</span> <span class="nx">RegularIntMap</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>
+    <span class="nx">internal</span> <span class="kd">map</span><span class="p">[</span><span class="kt">int</span><span class="p">]</span><span class="kt">int</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">NewRegularIntMap</span><span class="p">()</span> <span class="o">*</span><span class="nx">RegularIntMap</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">RegularIntMap</span><span class="p">{</span>
+        <span class="nx">internal</span><span class="p">:</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">int</span><span class="p">]</span><span class="kt">int</span><span class="p">),</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">rm</span> <span class="o">*</span><span class="nx">RegularIntMap</span><span class="p">)</span> <span class="nf">Load</span><span class="p">(</span><span class="nx">key</span> <span class="kt">int</span><span class="p">)</span> <span class="p">(</span><span class="nx">value</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">ok</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">rm</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span><span class="c1">//读锁，可并发
+</span><span class="c1"></span>    <span class="nx">result</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">rm</span><span class="p">.</span><span class="nx">internal</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+    <span class="nx">rm</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+    <span class="k">return</span> <span class="nx">result</span><span class="p">,</span> <span class="nx">ok</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">rm</span> <span class="o">*</span><span class="nx">RegularIntMap</span><span class="p">)</span> <span class="nf">Delete</span><span class="p">(</span><span class="nx">key</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">rm</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="nb">delete</span><span class="p">(</span><span class="nx">rm</span><span class="p">.</span><span class="nx">internal</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
+    <span class="nx">rm</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">rm</span> <span class="o">*</span><span class="nx">RegularIntMap</span><span class="p">)</span> <span class="nf">Store</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">rm</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="nx">rm</span><span class="p">.</span><span class="nx">internal</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">value</span>
+    <span class="nx">rm</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>但是，在对标准库做了额外的审查和性能分析之后，很多Go团队成员发现当使用sync.RWMutex的代码被部署在有很多、很多核的CPU上的时候，它的性能远低于理想值。对于这里提到的“很多”，我并不是在说你的典型的8核或者16核的系统，重要的是那些系统配置可能远超这个。在这些地方CPU的核数能够呈现出代码的高度竞争性，就像使用sync.RWMutex一样。</p>
+
+<p>现在我们已经基本明了为什么会创建一个新的Sync.Map了。Go团队确认了一个标准库的性能不佳的情况。在部署在一个有很多CPU核的系统上的高读取场景下，从使用sync.RWMutex封装的数据结构中读取数据的性能会受到很大影响。</p>
+
+<p>但哪怕使用了读写分离锁，当代码运行在多核CPU下(通常情况下是超过8/16核以上的服务器)性能依然堪忧。因为以下几个原因：
+1. reflect.New很慢(map类型安全的底层是通过反射机制来实现的)
+2. sync.RWMutex很慢
+3. atomic.AddUint32很慢
+4. 所有的cpu都在读写同一个内存地址</p>
+
+<h1 id="sync-map">sync.Map</h1>
+
+<p>并发hashmap的方案有很多，下面简单提一下几种，然后再讨论golang实现时的考虑。</p>
+
+<p>第一种是最简单的，直接在不支持并发的hashmap上，使用一个读写锁的保护，这也是golang sync map还没出来前，大家常用的方法。这种方法的缺点是写会堵塞读。</p>
+
+<p>第二种是数据库常用的方法，分段锁，内部使用多个锁，每个区间共享一把锁，这样减少了数据共享一把锁带来的性能影响，orcaman提供了这个思路的一个实现： concurrent-map。java的ConcurrentHashMap也是这么实现的。平均情况下这样的性能还挺好的，但是极端情况下，如果某个区间有热点写，那么那个区间的读请求也会受到影响。</p>
+
+<p>第三种方法是我们C++自己造轮子时经常用的，使用使用链表法解决冲突，然后链表使用CAS去解决并发下冲突，这样读写都是无锁，我觉得这种挺好的，性能非常高，不知为啥其他语言不这么实现。</p>
+
+<p>然后在《An overview of sync.Map》中有提到，在cpu核数很多的情况下，因为cache contention，reflect.New、sync.RWMutex、atomic.AddUint32都会很慢，golang团队为了适应cpu核很多的情况，没有采用上面的几种常见的方案。</p>
+
+<p>golang sync map的目标是实现适合读多写少的场景、并且要求稳定性很好，不能出现像分段锁那样读经常被阻塞的情况。golang sync map基于map做了一层封装，在大部分情况下，不过写入性能比较差。下面来详细说说实现。</p>
+
+<p>通过引入两个map将读写分离到不同的map，其中read map提供并发读和已存元素原子写，而dirty map则负责读写。 这样read map就可以在不加锁的情况下进行并发读取,当read map中没有读取到值时,再加锁进行后续读取,并累加未命中数,当未命中数大于等于dirty map长度,将dirty map上升为read map。从之前的结构体的定义可以发现，虽然引入了两个map，但是底层数据存储的是指针，指向的是同一份值。</p>
+
+<p>下面我们介绍sync.Map的重点代码，以便理解它的实现思想。</p>
+
+<p>首先，我们看一下sync.Map的数据结构：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Map</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="c1">// 当涉及到dirty数据的操作的时候，需要使用这个锁
+</span><span class="c1"></span>	<span class="nx">mu</span> <span class="nx">Mutex</span>
+	<span class="c1">// 一个只读的数据结构，因为只读，所以不会有读写冲突。
+</span><span class="c1"></span>	<span class="c1">// 所以从这个数据中读取总是安全的。
+</span><span class="c1"></span>	<span class="c1">// 实际也会更新这个数据的entries,如果entry是未删除的(unexpunged), 并不需要加锁。如果entry已经被删除了，需要加锁，以便更新dirty数据。
+</span><span class="c1"></span>	<span class="nx">read</span> <span class="nx">atomic</span><span class="p">.</span><span class="nx">Value</span> <span class="c1">// readOnly
+</span><span class="c1"></span>	<span class="c1">// dirty数据包含当前的map包含的entries,它包含最新的entries(包括read中未删除的数据,虽有冗余，但是提升dirty字段为read的时候非常快，不用一个一个的复制，而是直接将这个数据结构作为read字段的一部分),有些数据还可能没有移动到read字段中。
+</span><span class="c1"></span>	<span class="c1">// 对于dirty的操作需要加锁，因为对它的操作可能会有读写竞争。
+</span><span class="c1"></span>	<span class="c1">// 当dirty为空的时候， 比如初始化或者刚提升完，下一次的写操作会复制read字段中未删除的数据到这个数据中。
+</span><span class="c1"></span>	<span class="nx">dirty</span> <span class="kd">map</span><span class="p">[</span><span class="kd">interface</span><span class="p">{}]</span><span class="o">*</span><span class="nx">entry</span>
+	<span class="c1">// 当从Map中读取entry的时候，如果read中不包含这个entry,会尝试从dirty中读取，这个时候会将misses加1，
+</span><span class="c1"></span>	<span class="c1">// 当misses累积到 dirty的长度的时候， 就会将dirty提升为read,避免从dirty中miss太多次。因为操作dirty需要加锁。
+</span><span class="c1"></span>	<span class="nx">misses</span> <span class="kt">int</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>它的数据结构很简单，值包含四个字段：read、mu、dirty、misses。
+read的数据结构是：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">readOnly</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">m</span>       <span class="kd">map</span><span class="p">[</span><span class="kd">interface</span><span class="p">{}]</span><span class="o">*</span><span class="nx">entry</span>
+	<span class="nx">amended</span> <span class="kt">bool</span> <span class="c1">// 如果Map.dirty有些数据不在Read中的时候，这个值为true
+</span><span class="c1"></span><span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>使用了两个map，一个叫read，一个叫dirty，两个map存储的都是指针，指向value数据本身，所以两个map是共享value数据的，更新value对两个map同时可见。</p>
+
+<p>dirty可以进行增删查，当时都要进行加互斥锁。</p>
+
+<p>read中存在的key，可以无锁的读，借助CAS进行无锁的更新、删除操作，但是不能新增key，相当于dirty的一个cache，由于value共享，所以能通过read对已存在的value进行更新。</p>
+
+<p>read不能新增key，那么数据怎么来的呢？sync map中会记录miss cache的次数，当miss次数大于等于dirty元素个数时，就会把dirty变成read，原来的dirty清空。</p>
+
+<p>为了方便dirty直接变成read，那么得保证read中存在的数据dirty必须有，所以在dirty是空的时候，如果要新增一个key，那么会把read中的元素复制到dirty中，然后写入新key。</p>
+
+<p>然后删除操作也很有意思，使用的是延迟删除，优先看read中有没有，read中有，就把read中的对应entry指针中的p置为nil，作为一个标记。在read中标记为nil的，只有在dirty提升为read时才会被实际删除。</p>
+
+<h2 id="read和dirty">read和dirty</h2>
+
+<p>readOnly.m和Map.dirty存储的值类型是*entry,它包含一个指针p, 指向用户存储的value值。read和dirty中存的实际是key=&gt;值的指针的结构,会存在存了两份值的指针,但不是存了两份值.这样,在用空间换时间的情况下,如果map存的key很多,也不会消耗大量内存,会增加消耗的是指针定义读内存的占用,这比值的占用要小很多.</p>
+
+<ul>
+<li>read中的key是readOnly的（key的集合不会变，删除也只是打标记），value的操作全都可以原子完成，所以这个结构不用锁</li>
+<li>dirty是一个read的拷贝，用锁的操作在这做，如增加元素、删除元素等（dirty上删除是真删除）</li>
+</ul>
+
+<p>read并不是只是读操作,也有原子写操作.在读操作的时候,是使用了atomic.Value的Load(),没有用锁,达到了在线程安全的情况下读性能的大大提高,同时也会把dirty中的对应的值给修改了，因为相同key的entry，在read和dirty中存的是entry的指针，两个指针没有变，指针的值改了，所以read和dirty 对应的entry同时改变。 为什么呢？因为当key不在map中，会进行map新建记录操作，相同的key既会在read中新建，也会在dirty中新建，新建的就是相应entry的指针： key=&gt;*(entry)。这样，当进行update操作时，就直接修改read，而不需要再加锁操作dirty，性能好多了。</p>
+
+<p>而将read中的值同步到dirty或对dirty进行读或写操作时,使用了互斥量锁Mutex. 写操作分为新增和更新.新增的时候,需要把这个值指针存到dirty.更新的时候,更新一个没有被标记过expunged的key,直接对read进行atomic.CompareAndSwapPointer操作就可以,如果之前expunged过,将key同步到dirty. 而在Store、Delete操作的时候,都要进行m.read.Load().(readOnly)操作.根据上文中推荐的文章进行的benchmark的结果,sync.Map的写、删除性能不尽如意,这个结果可以预料到.</p>
+
+<ul>
+<li>当dirty不存在的时候，read就是全部map的数据</li>
+<li>当dirty存在的时候，dirty才是正确的map数据</li>
+</ul>
+
+<p>可以把read看成是一个cache，当cache miss到一定数量的时候，dirty中的数据会被提升到read中去。但是决定哪些数据应该过去实在太费时了，倒不如时间换空间，read中的数据我在dirty中也存一份，提升的时候直接整个赋值就好了~</p>
+
+<p>read相当于cache层，dirty是更底层的数据层，当read多次没有命中数据时，达到条件，这个cache层命中率太低了，直接将整个read用dirty替换，然后dirty又重新为nil，不需要马上将read同步到dirty，而是下一次Store一个新的key的时候，再触发进行一次dirty的初始同步,并且初始同步在dirty的一个生存周期内,只会进行一次.</p>
+
+<p>在进行Store和Load的时候,其实都是先操作read,如果read中存在并且对应值没有被expunged过,就执行返回了,如果read中不存在,或者对应值被expunged,就需要对dirty进行操作,将这个key同步到dirty中.</p>
+
+<h2 id="amended">amended</h2>
+
+<p>amended指明Map.dirty中有readOnly.m未包含的数据，所以如果从Map.read找不到数据的话，还要进一步到Map.dirty中查找。</p>
+
+<h2 id="entry-p">entry.p</h2>
+
+<p>read和dirty中的map存的元素值是entry,entry的field是p unsafe.Pointer,是指向具体存储值的指针,这个具体值是以interface{}值存在的,所以在Load取出值的时候,要自行做.(type)的转换.</p>
+
+<p>假设read和dirty中的map存在name这个key,当read进行了atomic.CompareAndSwapPointer(&amp;e.p, p, unsafe.Pointer(i))操作后,改的是p这个指针所指的值的地址,而entry这个指针没有改变,read和dirty中的map存在name指的是同一个entry.所以,read中对p的写原子操作,如果dirty中有相同的key,也会同样被更改,因为他们的entry是同一个.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">entry</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="c1">// nil: 表示为被删除，调用Delete()可以将read map中的元素置为nil
+</span><span class="c1"></span>    <span class="c1">// expunged: 也是表示被删除，但是该键只在read而没有在dirty中，这种情况出现在将read复制到dirty中，即复制的过程会先将nil标记为expunged，然后不将其复制到dirty
+</span><span class="c1"></span>    <span class="c1">//  其他: 表示存着真正的数据
+</span><span class="c1"></span>	<span class="nx">p</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// *interface{}
+</span><span class="c1"></span><span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>p有三种值：</p>
+
+<ul>
+<li>nil: 数据在read中被删除了，但是dirty中还在，所以能直接更新值(如果dirty==nill的特殊情况,下次写入新值时会复制)；</li>
+<li>expunged:数据在ditry中已经被删除了，更新值的时候要先把这个entry复制到dirty。</li>
+<li>其它： entry是一个正常的值</li>
+</ul>
+
+<h2 id="misses">misses</h2>
+
+<p>misses 的作用就是，当从read读取值没有读取到，从dirty中读取到了，自增加1. 当这种情况达到 m.misses &lt; len(m.dirty)的时候，dirty的值就代替为read.m(read是readOnly),然后misses重置为0，dirty置为nil，重新开始计算值.</p>
+
+<h1 id="优化点">优化点</h1>
+
+<p>sync.Map的实现有几个优化点:</p>
+
+<ol>
+<li>空间换时间。 通过冗余的两个数据结构(read、dirty),降低加锁对性能的影响。</li>
+<li>使用只读数据(read)，避免读写冲突。</li>
+<li>动态调整，miss次数多了之后，将dirty数据提升为read。</li>
+<li>double-checking。</li>
+<li>延迟删除。 删除一个键值只是打标记，只有在提升dirty的时候才清理删除的数据。</li>
+<li>优先从read读取、更新、删除，因为对read的读取不需要锁。</li>
+</ol>
+
+<h1 id="原理解析">原理解析</h1>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190125125938.png" alt="" /></p>
+
+<h1 id="源码分析">源码分析</h1>
+
+<h2 id="load">Load</h2>
+
+<p>读取时，先去read读取；如果没有，就加锁，然后去dirty读取，同时调用missLocked()，再解锁。在missLocked中，会递增misses变量，如果misses&gt;len(dirty)，那么把dirty提升为read，清空原来的dirty。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">Load</span><span class="p">(</span><span class="nx">key</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">(</span><span class="nx">value</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">ok</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="c1">// 1.首先从m.read中得到只读readOnly,从它的map中查找，不需要加锁
+</span><span class="c1"></span>	<span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
+	<span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+	<span class="c1">// 2. 如果没找到，并且m.dirty中有新数据，需要从m.dirty查找，这个时候需要加锁
+</span><span class="c1"></span>	<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
+		<span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+		<span class="c1">// 双检查，避免加锁的时候m.dirty提升为m.read,这个时候m.read可能被替换了。
+</span><span class="c1"></span>		<span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
+		<span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="p">=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+		<span class="c1">// 如果m.read中还是不存在，并且m.dirty中有新数据
+</span><span class="c1"></span>		<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
+			<span class="c1">// 从m.dirty查找
+</span><span class="c1"></span>			<span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+			<span class="c1">// 不管m.dirty中存不存在，都将misses计数加一
+</span><span class="c1"></span>			<span class="c1">// missLocked()中满足条件后就会提升m.dirty
+</span><span class="c1"></span>			<span class="nx">m</span><span class="p">.</span><span class="nf">missLocked</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">e</span><span class="p">.</span><span class="nf">load</span><span class="p">()</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>在代码中，我们可以看到一个double check，检查read没有，上锁，再检查read中有没有，是因为有可能在第一次检查之后，上锁之前的间隙，dirty提升为read了，这时如果不double check，可能会导致一个存在的key却返回给调用方说不存在。 在下面的其他操作中，我们经常会看到这个double check。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
+        <span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>可以看到，如果我们查询的键值正好存在于m.read中，无须加锁，直接返回，理论上性能优异。即使不存在于m.read中，经过miss几次之后，m.dirty会被提升为m.read，又会从m.read中查找。所以对于更新／增加较少，加载存在的key很多的case,性能基本和无锁的map类似。</p>
+
+<p>下面看看m.dirty是如何被提升的。 missLocked方法中可能会将m.dirty提升。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">missLocked</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">m</span><span class="p">.</span><span class="nx">misses</span><span class="o">++</span>
+	<span class="k">if</span> <span class="nx">m</span><span class="p">.</span><span class="nx">misses</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">readOnly</span><span class="p">{</span><span class="nx">m</span><span class="p">:</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">})</span>
+	<span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span> <span class="p">=</span> <span class="kc">nil</span>
+	<span class="nx">m</span><span class="p">.</span><span class="nx">misses</span> <span class="p">=</span> <span class="mi">0</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>上面的最后三行代码就是提升m.dirty的，很简单的将m.dirty作为readOnly的m字段，原子更新m.read。提升后m.dirty、m.misses重置，并且m.read.amended为false。</p>
+
+<p>元素取值</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">entry</span><span class="p">)</span> <span class="nf">load</span><span class="p">()</span> <span class="p">(</span><span class="nx">value</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">ok</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">p</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
+    <span class="c1">// 元素不存在或者被删除，则直接返回
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kd">interface</span><span class="p">{})(</span><span class="nx">p</span><span class="p">),</span> <span class="kc">true</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<h2 id="store">Store</h2>
+
+<p>这个方法是更新或者新增一个entry。</p>
+
+<p>read和dirty的相同key指向同一个value</p>
+
+<p>写入的时候，先看read中能否查到key，在read中存在的话，直接通过read中的entry来更新值；在read中不存在，那么就上锁，然后double check。这里需要留意，分几种情况：</p>
+
+<ol>
+<li>double check发现read中存在key，如果不是expunged,直接写入值。如果entry.p==expunged,那么就先把expunged替换成nil,并且把e复制到dirty中，再在read中写入值.</li>
+<li>read中不存在key,dirty中存在key，直接更新</li>
+<li>dirty中不存在key，如果此时dirty为空，那么需要将read复制到dirty中，最后再把新值写入到dirty中。复制的时候调用的是dirtyLocked()，在复制到dirty的时候，read中为nil的元素，会更新为expunged，并且不复制到dirty中</li>
+</ol>
+
+<p>我们可以看到，在更新read中的数据时，使用的是tryStore，通过CAS来解决冲突，在CAS出现冲突后，如果发现数据被置为expunge，tryStore那么就不会写入数据，而是会返回false，在Store流程中，就是接着往下走，在dirty中写入。</p>
+
+<p>再看下情况1的时候，为啥要那么做。double check的时候，在read中存在，那么就是说在加锁之前，有并发线程先写入了key，然后由Load触发了dirty提升为read，这时dirty可能为空，也可能不为空，但无论dirty状态如何，都是可以直接更新entry.p。如果是expunged的话，那么要先替换成nil，再复制entry到dirty中。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
+</span><span class="lnt">83
+</span><span class="lnt">84
+</span><span class="lnt">85
+</span><span class="lnt">86
+</span><span class="lnt">87
+</span><span class="lnt">88
+</span><span class="lnt">89
+</span><span class="lnt">90
+</span><span class="lnt">91
+</span><span class="lnt">92
+</span><span class="lnt">93
+</span><span class="lnt">94
+</span><span class="lnt">95
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">Store</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="c1">// 如果m.read存在这个键，并且这个entry没有被标记删除，尝试直接存储。
+</span><span class="c1"></span>	<span class="c1">// 因为m.dirty也指向这个entry,所以m.dirty也保持最新的entry。
+</span><span class="c1"></span>	<span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">];</span> <span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">e</span><span class="p">.</span><span class="nf">tryStore</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">value</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="c1">// 如果`m.read`不存在或者已经被标记删除(设置为空标记)
+</span><span class="c1"></span>	<span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span><span class="c1">// dirty map锁
+</span><span class="c1"></span>	<span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">];</span> <span class="nx">ok</span> <span class="p">{</span><span class="c1">//read中存在该key,e为值,也就是说可以确定该key是被标记清除了
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">e</span><span class="p">.</span><span class="nf">unexpungeLocked</span><span class="p">()</span> <span class="p">{</span> <span class="c1">// unexpungeLocked确保条目标记为未清除。
+</span><span class="c1"></span>			<span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">e</span> <span class="c1">//m.dirty中不存在这个value，所以加入m.dirty,因为read是只读,不能进行操作
+</span><span class="c1"></span>		<span class="p">}</span>
+		<span class="nx">e</span><span class="p">.</span><span class="nf">storeLocked</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">value</span><span class="p">)</span> <span class="c1">//更新
+</span><span class="c1"></span>	<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">];</span> <span class="nx">ok</span> <span class="p">{</span> 
+		<span class="c1">// 此时read map没有该元素，但是dirty map有该元素，并需修改dirty map元素值为最新值
+</span><span class="c1"></span>		<span class="nx">e</span><span class="p">.</span><span class="nf">storeLocked</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">value</span><span class="p">)</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span> <span class="c1">//新键值
+</span><span class="c1"></span>        <span class="k">if</span> <span class="p">!</span><span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span> <span class="c1">//m.dirty中没有新的数据,
+</span><span class="c1"></span>        <span class="c1">//从m.read中复制未删除的数据
+</span><span class="c1"></span>			<span class="nx">m</span><span class="p">.</span><span class="nf">dirtyLocked</span><span class="p">()</span> 
+			<span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">readOnly</span><span class="p">{</span><span class="nx">m</span><span class="p">:</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">,</span> <span class="nx">amended</span><span class="p">:</span> <span class="kc">true</span><span class="p">})</span>
+        <span class="p">}</span>
+        <span class="c1">//m.dirty中没有新的数据，往m.dirty中增加第一个新键
+</span><span class="c1"></span>		<span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nf">newEntry</span><span class="p">(</span><span class="nx">value</span><span class="p">)</span> <span class="c1">//将这个entry加入到m.dirty中
+</span><span class="c1"></span>	<span class="p">}</span>
+<span class="c1">// 解锁，有人认为锁的范围有点大，假设read map数据很大，那么执行m.dirtyLocked()会耗费花时间较多，完全可以在操作dirty map时才加锁，这样的想法是不对的，因为m.dirtyLocked()中有写入操作
+</span><span class="c1"></span>	<span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">entry</span><span class="p">)</span> <span class="nf">tryStore</span><span class="p">(</span><span class="nx">i</span> <span class="o">*</span><span class="kd">interface</span><span class="p">{})</span> <span class="kt">bool</span> <span class="p">{</span>
+    <span class="c1">// 获取对应Key的元素，判断是否标识为删除,因为并发问题,这里也需要二次检查确认
+</span><span class="c1"></span>    <span class="nx">p</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="kc">false</span>
+    <span class="p">}</span>
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="c1">// cas尝试写入新元素值
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">,</span> <span class="nx">p</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">i</span><span class="p">))</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="kc">true</span>
+        <span class="p">}</span>
+        <span class="c1">// 判断是否标识为删除
+</span><span class="c1"></span>        <span class="nx">p</span> <span class="p">=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="kc">false</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">newEntry</span><span class="p">(</span><span class="nx">i</span> <span class="kd">interface</span><span class="p">{})</span> <span class="o">*</span><span class="nx">entry</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">entry</span><span class="p">{</span><span class="nx">p</span><span class="p">:</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">i</span><span class="p">)}</span>
+<span class="p">}</span>
+
+<span class="c1">//从m.read中复制未删除的数据(如此做的原因在于删除的时候如果read map存在该元素且read的amended==false：直接将read中的元素置为nil。还有一种情况是read map和dirty map同时存在该元素：将read map中的元素置为nil，因为read map和dirty map 使用的均为元素地址，所以均被置为nil。)
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">dirtyLocked</span><span class="p">()</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
+	<span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kd">interface</span><span class="p">{}]</span><span class="o">*</span><span class="nx">entry</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">))</span>
+	<span class="k">for</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">e</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="p">!</span><span class="nx">e</span><span class="p">.</span><span class="nf">tryExpungeLocked</span><span class="p">()</span> <span class="p">{</span>
+			<span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">k</span><span class="p">]</span> <span class="p">=</span> <span class="nx">e</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">//尝试将已经删除的标记设置为nil标记
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">entry</span><span class="p">)</span> <span class="nf">tryExpungeLocked</span><span class="p">()</span> <span class="p">(</span><span class="nx">isExpunged</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">p</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
+	<span class="k">for</span> <span class="nx">p</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// 将已经删除标记为nil的数据标记为expunged
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">expunged</span><span class="p">)</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="kc">true</span>
+		<span class="p">}</span>
+		<span class="nx">p</span> <span class="p">=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span>
+<span class="p">}</span>
+
+<span class="c1">// expunged是一个任意指针，用于标记已删除的条目
+</span><span class="c1">//来自dirty map
+</span><span class="c1"></span><span class="kd">var</span> <span class="nx">expunged</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nb">new</span><span class="p">(</span><span class="kd">interface</span><span class="p">{}))</span>
+<span class="c1">// unexpungeLocked确保条目标记为未清除。
+</span><span class="c1">//如果该条目先前已被清除，则必须将其添加到dirty map中
+</span><span class="c1">//在m.mu解锁之前
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">entry</span><span class="p">)</span> <span class="nf">unexpungeLocked</span><span class="p">()</span> <span class="p">(</span><span class="nx">wasExpunged</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">,</span> <span class="nx">expunged</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="c1">// storeLocked无条件地将值存储到条目中。
+</span><span class="c1">//必须知道该条目不被删除。
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">entry</span><span class="p">)</span> <span class="nf">storeLocked</span><span class="p">(</span><span class="nx">i</span> <span class="o">*</span><span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">StorePointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">i</span><span class="p">))</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>你可以看到，以上操作都是先从操作m.read开始的，不满足条件再加锁，然后操作m.dirty。</p>
+
+<p>Store可能会在某种情况下(初始化或者m.dirty刚被提升后)从m.read中复制数据(函数dirtyLocked)，如果这个时候m.read中数据量非常大，可能会影响性能。</p>
+
+<h2 id="delete">Delete</h2>
+
+<p>删除元素,采用延迟删除，当read map存在元素时，将元素置为nil，只有在提升dirty的时候才清理删除的数,延迟删除可以避免后续获取删除的元素时候需要加锁。当read map不存在元素时，直接删除dirty map中的元素</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">Delete</span><span class="p">(</span><span class="nx">key</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+    <span class="c1">// 1. 从read map中查找，如果存在，则置为nil
+</span><span class="c1"></span>    <span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
+    <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+    <span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
+        <span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+        <span class="c1">// 第二次检测
+</span><span class="c1"></span>        <span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
+        <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="p">=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+        <span class="c1">// 2. 如果read map中不存在，但dirty map中存在，则直接从dirty map删除
+</span><span class="c1"></span>        <span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
+            <span class="nb">delete</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="nx">ok</span> <span class="p">{</span>
+        <span class="c1">// 如果在read中，将entry.p 置为 nil
+</span><span class="c1"></span>        <span class="nx">e</span><span class="p">.</span><span class="nb">delete</span><span class="p">()</span>
+    <span class="p">}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>同样，删除操作还是从m.read中开始，如果这个entry不存在于m.read中，并且m.dirty中有新数据，则加锁尝试从m.dirty中删除。注意，还是要双检查的。 从m.dirty中直接删除即可，就当它没存在过.</p>
+
+<p>但是如果是从m.read中删除，并不会直接删除，而是打标记,因为read map和dirty map 使用的均为元素地址，所以均被置为nil：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">entry</span><span class="p">)</span> <span class="nb">delete</span><span class="p">()</span> <span class="p">(</span><span class="nx">hadValue</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">p</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
+		<span class="c1">// 已标记为删除
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="kc">false</span>
+		<span class="p">}</span>
+		<span class="c1">// 原子操作，e.p标记为nil
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">,</span> <span class="nx">p</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="kc">true</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<h2 id="loadorstore">LoadOrStore</h2>
+
+<p>如果对应的元素存在，则返回该元素的值，如果不存在，则将元素写入到sync.Map。如果已加载值，则加载结果为true;如果已存储，则为false。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">LoadOrStore</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">(</span><span class="nx">actual</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">loaded</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// 不加锁的情况下读取read map
+</span><span class="c1"></span>    <span class="c1">// 第一次检测
+</span><span class="c1"></span>    <span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">];</span> <span class="nx">ok</span> <span class="p">{</span>
+        <span class="c1">// 如果元素存在（是否标识为删除由tryLoadOrStore执行处理），尝试获取该元素已存在的值或者将元素写入
+</span><span class="c1"></span>        <span class="nx">actual</span><span class="p">,</span> <span class="nx">loaded</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">tryLoadOrStore</span><span class="p">(</span><span class="nx">value</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">ok</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="nx">actual</span><span class="p">,</span> <span class="nx">loaded</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="c1">// 第二次检测
+</span><span class="c1"></span>    <span class="c1">// 以下逻辑参看Store
+</span><span class="c1"></span>    <span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">];</span> <span class="nx">ok</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">e</span><span class="p">.</span><span class="nf">unexpungeLocked</span><span class="p">()</span> <span class="p">{</span>
+            <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">e</span>
+        <span class="p">}</span>
+        <span class="nx">actual</span><span class="p">,</span> <span class="nx">loaded</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">tryLoadOrStore</span><span class="p">(</span><span class="nx">value</span><span class="p">)</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">];</span> <span class="nx">ok</span> <span class="p">{</span>
+        <span class="nx">actual</span><span class="p">,</span> <span class="nx">loaded</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">tryLoadOrStore</span><span class="p">(</span><span class="nx">value</span><span class="p">)</span>
+        <span class="nx">m</span><span class="p">.</span><span class="nf">missLocked</span><span class="p">()</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="p">!</span><span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
+            <span class="nx">m</span><span class="p">.</span><span class="nf">dirtyLocked</span><span class="p">()</span>
+            <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">readOnly</span><span class="p">{</span><span class="nx">m</span><span class="p">:</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">,</span> <span class="nx">amended</span><span class="p">:</span> <span class="kc">true</span><span class="p">})</span>
+        <span class="p">}</span>
+        <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nf">newEntry</span><span class="p">(</span><span class="nx">value</span><span class="p">)</span>
+        <span class="nx">actual</span><span class="p">,</span> <span class="nx">loaded</span> <span class="p">=</span> <span class="nx">value</span><span class="p">,</span> <span class="kc">false</span>
+    <span class="p">}</span>
+    <span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="nx">actual</span><span class="p">,</span> <span class="nx">loaded</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>如果没有删除元素，tryLoadOrStore将自动加载或存储一个值。如果删除元素，tryLoadOrStore保持条目不变并返回ok= false。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">entry</span><span class="p">)</span> <span class="nf">tryLoadOrStore</span><span class="p">(</span><span class="nx">i</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">(</span><span class="nx">actual</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">loaded</span><span class="p">,</span> <span class="nx">ok</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">p</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
+    <span class="c1">// 元素标识删除，直接返回
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="kc">false</span>
+    <span class="p">}</span>
+    <span class="c1">// 存在该元素真实值，则直接返回原来的元素值
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">p</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kd">interface</span><span class="p">{})(</span><span class="nx">p</span><span class="p">),</span> <span class="kc">true</span><span class="p">,</span> <span class="kc">true</span>
+    <span class="p">}</span>
+
+    <span class="c1">// 如果p为nil(此处的nil，并是不是指元素的值为nil，而是atomic.LoadPointer(&amp;e.p)为nil，元素的nil在unsafe.Pointer是有值的)，则更新该元素值
+</span><span class="c1"></span>    <span class="nx">ic</span> <span class="o">:=</span> <span class="nx">i</span>
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ic</span><span class="p">))</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="nx">i</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="kc">true</span>
+        <span class="p">}</span>
+        <span class="nx">p</span> <span class="p">=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="kc">false</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="nx">p</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kd">interface</span><span class="p">{})(</span><span class="nx">p</span><span class="p">),</span> <span class="kc">true</span><span class="p">,</span> <span class="kc">true</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<h2 id="range">Range</h2>
+
+<p>因为for &hellip; range map是内建的语言特性，所以没有办法使用for range遍历sync.Map, 但是可以使用它的Range方法，通过回调的方式遍历。</p>
+
+<p>遍历获取sync.Map中所有的元素，使用的为快照方式，所以不一定是准确的。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">Range</span><span class="p">(</span><span class="nx">f</span> <span class="kd">func</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// 第一检测
+</span><span class="c1"></span>    <span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
+    <span class="c1">// read.amended=true,说明dirty map包含所有有效的元素（含新加，不含被删除的），使用dirty map
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
+        <span class="c1">// 第二检测
+</span><span class="c1"></span>        <span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+        <span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
+            <span class="c1">// 使用dirty map并且升级为read map
+</span><span class="c1"></span>            <span class="nx">read</span> <span class="p">=</span> <span class="nx">readOnly</span><span class="p">{</span><span class="nx">m</span><span class="p">:</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">}</span>
+            <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">read</span><span class="p">)</span>
+            <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span> <span class="p">=</span> <span class="kc">nil</span>
+            <span class="nx">m</span><span class="p">.</span><span class="nx">misses</span> <span class="p">=</span> <span class="mi">0</span>
+        <span class="p">}</span>
+        <span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="c1">// 一贯原则，使用read map作为读
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">e</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span> <span class="p">{</span>
+        <span class="nx">v</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">load</span><span class="p">()</span>
+        <span class="c1">// 被删除的不计入
+</span><span class="c1"></span>        <span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+            <span class="k">continue</span>
+        <span class="p">}</span>
+        <span class="c1">// 函数返回false，终止
+</span><span class="c1"></span>        <span class="k">if</span> <span class="p">!</span><span class="nf">f</span><span class="p">(</span><span class="nx">k</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span> <span class="p">{</span>
+            <span class="k">break</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>Range方法调用前可能会做一个m.dirty的提升，不过提升m.dirty不是一个耗时的操作。</p>
+
+<h1 id="sync-map的适用场景">sync.Map的适用场景</h1>
+
+<p>sync.Map 为了保证并发安全有一些性能损失，因此在非并发情况下，使用 map 相比使用 sync.Map 会有更好的性能。</p>
+
+<p>总结一下，sync.Map像是一个不够完善的容器，比起已有的map主要存在以下不足：</p>
+
+<ol>
+<li>低并发情况下的性能不足</li>
+<li>冗余数据</li>
+<li>缺少类型安全控制</li>
+<li>有限的api。比如不支持len操作</li>
+</ol>
+
+<p>它针对keys长时间没有变化且只有很少的稳态存储的，或者每一个Goroutine中有一个本地存储的key的并发循环使用做了优化。</p>
+
+<p>对于不共享这些属性的使用场景，使用它同与使用sys.RWMutex保护的内置map相比可能有更差的性能表现，以及更差的类型安全。</p>
+
+<p>经过了上面的分析可以得到,sync.Map并不适合同时存在大量读写的场景(这里的写是指新增和删除key, 修改key还是用的原子性操作),大量的写会导致read map读取不到数据从而加锁进行进一步读取,同时dirty map不断升级为read map。 从而导致整体性能较低,特别是针对cache场景.针对append-only以及大量读,少量写场景使用sync.Map则相对比较合适。</p>
+
+<p>所以如我在前面理解的，如果我使用内置map显示出了数据竞争迹象同时map的key在整个应用程序的生命周期内不会经常变换，我可能会考虑使用sync.Map。对我来说，通俗的讲这个就是一个只有少量更新的高并发读取场景，或者只在一些突发情况下会发生大规模更新的场景。对我来说，通俗的讲这个就是一个只有少量更新的高并发读取场景，或者只在一些突发情况下会发生大规模更新的场景。</p>
+
+<p>第一个benchmark显示了使用与sync.RWMutex一起的常规map与sync.Map之间写数据的比较：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">nrand</span><span class="p">(</span><span class="nx">n</span> <span class="kt">int</span><span class="p">)</span> <span class="p">[]</span><span class="kt">int</span> <span class="p">{</span>
+    <span class="nx">i</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">int</span><span class="p">,</span> <span class="nx">n</span><span class="p">)</span>
+    <span class="k">for</span> <span class="nx">ind</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">i</span> <span class="p">{</span>
+        <span class="nx">i</span><span class="p">[</span><span class="nx">ind</span><span class="p">]</span> <span class="p">=</span> <span class="nx">rand</span><span class="p">.</span><span class="nf">Int</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nx">i</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">BenchmarkStoreRegular</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">nums</span> <span class="o">:=</span> <span class="nf">nrand</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">)</span>
+    <span class="nx">rm</span> <span class="o">:=</span> <span class="nf">NewRegularIntMap</span><span class="p">()</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">nums</span> <span class="p">{</span>
+        <span class="nx">rm</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">BenchmarkStoreSync</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">nums</span> <span class="o">:=</span> <span class="nf">nrand</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">)</span>
+    <span class="kd">var</span> <span class="nx">sm</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Map</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">nums</span> <span class="p">{</span>
+        <span class="nx">sm</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="cm">/*
+</span><span class="cm">BenchmarkStoreRegular-32                     5000000           319 ns/op
+</span><span class="cm">BenchmarkStoreSync-32                        1000000          1146 ns/op
+</span><span class="cm">*/</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>下面是删除操作的benchmark：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">BenchmarkDeleteRegular</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">nums</span> <span class="o">:=</span> <span class="nf">nrand</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">)</span>
+    <span class="nx">rm</span> <span class="o">:=</span> <span class="nf">NewRegularIntMap</span><span class="p">()</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">nums</span> <span class="p">{</span>
+        <span class="nx">rm</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">nums</span> <span class="p">{</span>
+        <span class="nx">rm</span><span class="p">.</span><span class="nf">Delete</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">BenchmarkDeleteSync</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">nums</span> <span class="o">:=</span> <span class="nf">nrand</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">)</span>
+    <span class="kd">var</span> <span class="nx">sm</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Map</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">nums</span> <span class="p">{</span>
+        <span class="nx">sm</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">nums</span> <span class="p">{</span>
+        <span class="nx">sm</span><span class="p">.</span><span class="nf">Delete</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="cm">/*
+</span><span class="cm">BenchmarkDeleteRegular-32                   10000000           238 ns/op
+</span><span class="cm">BenchmarkDeleteSync-32                       5000000           393 ns/op
+</span><span class="cm">*/</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>下面是读数据的benchmark，其中叫Found用例总是能够从map中读取到数据，叫NotFound的用例则几乎总是读取不到数据。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">BenchmarkLoadRegularFound</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">nums</span> <span class="o">:=</span> <span class="nf">nrand</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">)</span>
+    <span class="nx">rm</span> <span class="o">:=</span> <span class="nf">NewRegularIntMap</span><span class="p">()</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">nums</span> <span class="p">{</span>
+        <span class="nx">rm</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="nx">currentResult</span> <span class="o">:=</span> <span class="mi">0</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">currentResult</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">rm</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="nx">nums</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+    <span class="p">}</span>
+    <span class="nx">globalResult</span> <span class="p">=</span> <span class="nx">currentResult</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">BenchmarkLoadRegularNotFound</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">nums</span> <span class="o">:=</span> <span class="nf">nrand</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">)</span>
+    <span class="nx">rm</span> <span class="o">:=</span> <span class="nf">NewRegularIntMap</span><span class="p">()</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">nums</span> <span class="p">{</span>
+        <span class="nx">rm</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">currentResult</span> <span class="o">:=</span> <span class="mi">0</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">currentResult</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">rm</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">globalResult</span> <span class="p">=</span> <span class="nx">currentResult</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">BenchmarkLoadSyncFound</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">nums</span> <span class="o">:=</span> <span class="nf">nrand</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">)</span>
+    <span class="kd">var</span> <span class="nx">sm</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Map</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">nums</span> <span class="p">{</span>
+        <span class="nx">sm</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">currentResult</span> <span class="o">:=</span> <span class="mi">0</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">r</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">sm</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="nx">nums</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+        <span class="k">if</span> <span class="nx">ok</span> <span class="p">{</span>
+            <span class="nx">currentResult</span> <span class="p">=</span> <span class="nx">r</span><span class="p">.(</span><span class="kt">int</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="nx">globalResult</span> <span class="p">=</span> <span class="nx">currentResult</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">BenchmarkLoadSyncNotFound</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">nums</span> <span class="o">:=</span> <span class="nf">nrand</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">)</span>
+    <span class="kd">var</span> <span class="nx">sm</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Map</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">nums</span> <span class="p">{</span>
+        <span class="nx">sm</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">currentResult</span> <span class="o">:=</span> <span class="mi">0</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">r</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">sm</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">ok</span> <span class="p">{</span>
+            <span class="nx">currentResult</span> <span class="p">=</span> <span class="nx">r</span><span class="p">.(</span><span class="kt">int</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="nx">globalResult</span> <span class="p">=</span> <span class="nx">currentResult</span>
+<span class="p">}</span>
+
+<span class="cm">/*
+</span><span class="cm">BenchmarkLoadRegularFound-32                10000000           180 ns/op
+</span><span class="cm">BenchmarkLoadRegularNotFound-32             20000000           107 ns/op
+</span><span class="cm">BenchmarkLoadSyncFound-32                   10000000           200 ns/op
+</span><span class="cm">BenchmarkLoadSyncNotFound-32                20000000           291 ns/op
+</span><span class="cm">*/</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>正如你所看到的，这些benchmark中的所有用例中使用sync.RWMutex保护的常规map的性能都远胜于sync.Map。并且到目前为止，我们还没有将benchmark引入到多个goroutines中。让我们继续讨论这个问题，让我们看看夸核扩展成为一个因子后设计的benchmark性能如何。</p>
+
+<p>让我们来使用Digital Ocean上的一个32核的虚拟机看看趋势是怎么样的。</p>
+
+<p>对于这个benchmark，我想在当前的理想场景下测量基于两种map的实现的性能。在这个场景下，我将构建存储一组随机数据的两中map，并且我将在每个benchmark中使用不同的* GOMAXPROCS*并且创建与GOMAXPROCS数量相同的goroutines来执行。</p>
+
+<p>再次，我将运行这些测试来模拟一个高读取场景，所以在benchmark时钟开始之前map内容就已经被构建并固定了。在这篇的文章的下一次更新中，我可能会创建一个benchmark来模拟固定数量的写入，但是现在让我们考虑这个有点人造的但是理想的用例。</p>
+
+<p>接下来是我将如何定义这些并发的benmarks，但是首先概要的说明下代码：</p>
+
+<p>这些benchmarks实际是一些被其他函数调用的函数，在调用函数中我们写死了workerCount。这样我们就能为每个benchmark配置GOMAXPROCS和workers的数量。</p>
+
+<p>确保我们不会遇到Go编译器的优化，我们捕获了Load方法的输出。我们并不关心Load的结果，只是确保编译器不会因为我们未使用输出结果而将代码判断为死代码并将这段代码移除。</p>
+
+<p>代码的主要部分将启动一个goroutine作为worker，它将通过使用b.N值来尽可能的的迭代满足Go benchmark的条件。随着每个goroutines的运行，我们执行我们的Load操作，最后使用sync.WaitGroup来通知goroutine的结束。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span><span class="lnt">103
+</span><span class="lnt">104
+</span><span class="lnt">105
+</span><span class="lnt">106
+</span><span class="lnt">107
+</span><span class="lnt">108
+</span><span class="lnt">109
+</span><span class="lnt">110
+</span><span class="lnt">111
+</span><span class="lnt">112
+</span><span class="lnt">113
+</span><span class="lnt">114
+</span><span class="lnt">115
+</span><span class="lnt">116
+</span><span class="lnt">117
+</span><span class="lnt">118
+</span><span class="lnt">119
+</span><span class="lnt">120
+</span><span class="lnt">121
+</span><span class="lnt">122
+</span><span class="lnt">123
+</span><span class="lnt">124
+</span><span class="lnt">125
+</span><span class="lnt">126
+</span><span class="lnt">127
+</span><span class="lnt">128
+</span><span class="lnt">129
+</span><span class="lnt">130
+</span><span class="lnt">131
+</span><span class="lnt">132
+</span><span class="lnt">133
+</span><span class="lnt">134
+</span><span class="lnt">135
+</span><span class="lnt">136
+</span><span class="lnt">137
+</span><span class="lnt">138
+</span><span class="lnt">139
+</span><span class="lnt">140
+</span><span class="lnt">141
+</span><span class="lnt">142
+</span><span class="lnt">143
+</span><span class="lnt">144
+</span><span class="lnt">145
+</span><span class="lnt">146
+</span><span class="lnt">147
+</span><span class="lnt">148
+</span><span class="lnt">149
+</span><span class="lnt">150
+</span><span class="lnt">151
+</span><span class="lnt">152
+</span><span class="lnt">153
+</span><span class="lnt">154
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">benchmarkRegularStableKeys</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">,</span> <span class="nx">workerCount</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="nx">workerCount</span><span class="p">)</span>
+
+    <span class="nx">rm</span> <span class="o">:=</span> <span class="nf">NewRegularIntMap</span><span class="p">()</span>
+    <span class="nf">populateMap</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">,</span> <span class="nx">rm</span><span class="p">)</span>
+
+    <span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+    <span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">workerCount</span><span class="p">)</span>
+
+    <span class="c1">// Holds our final results, to prevent compiler optimizations.
+</span><span class="c1"></span>    <span class="nx">globalResultChan</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">workerCount</span><span class="p">)</span>
+
+    <span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="nx">wc</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">wc</span> <span class="p">&lt;</span> <span class="nx">workerCount</span><span class="p">;</span> <span class="nx">wc</span><span class="o">++</span> <span class="p">{</span>
+        <span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">n</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+            <span class="nx">currentResult</span> <span class="o">:=</span> <span class="mi">0</span>
+            <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">n</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+                <span class="nx">currentResult</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">rm</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
+            <span class="p">}</span>
+            <span class="nx">globalResultChan</span> <span class="o">&lt;-</span> <span class="nx">currentResult</span>
+            <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+        <span class="p">}(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">benchmarkSyncStableKeys</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">,</span> <span class="nx">workerCount</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="nx">workerCount</span><span class="p">)</span>
+
+    <span class="kd">var</span> <span class="nx">sm</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Map</span>
+    <span class="nf">populateSyncMap</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">sm</span><span class="p">)</span>
+
+    <span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+    <span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">workerCount</span><span class="p">)</span>
+
+    <span class="c1">// Holds our final results, to prevent compiler optimizations.
+</span><span class="c1"></span>    <span class="nx">globalResultChan</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">workerCount</span><span class="p">)</span>
+
+    <span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="nx">wc</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">wc</span> <span class="p">&lt;</span> <span class="nx">workerCount</span><span class="p">;</span> <span class="nx">wc</span><span class="o">++</span> <span class="p">{</span>
+        <span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">n</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+            <span class="nx">currentResult</span> <span class="o">:=</span> <span class="mi">0</span>
+            <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">n</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+                <span class="nx">r</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">sm</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
+                <span class="k">if</span> <span class="nx">ok</span> <span class="p">{</span>
+                    <span class="nx">currentResult</span> <span class="p">=</span> <span class="nx">r</span><span class="p">.(</span><span class="kt">int</span><span class="p">)</span>
+                <span class="p">}</span>
+            <span class="p">}</span>
+            <span class="nx">globalResultChan</span> <span class="o">&lt;-</span> <span class="nx">currentResult</span>
+            <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+        <span class="p">}(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">benchmarkRegularStableKeysFound</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">,</span> <span class="nx">workerCount</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="nx">workerCount</span><span class="p">)</span>
+
+    <span class="nx">rm</span> <span class="o">:=</span> <span class="nf">NewRegularIntMap</span><span class="p">()</span>
+    <span class="nx">values</span> <span class="o">:=</span> <span class="nf">populateMap</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">,</span> <span class="nx">rm</span><span class="p">)</span>
+
+    <span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+    <span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">workerCount</span><span class="p">)</span>
+
+    <span class="c1">// Holds our final results, to prevent compiler optimizations.
+</span><span class="c1"></span>    <span class="nx">globalResultChan</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">workerCount</span><span class="p">)</span>
+
+    <span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="nx">wc</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">wc</span> <span class="p">&lt;</span> <span class="nx">workerCount</span><span class="p">;</span> <span class="nx">wc</span><span class="o">++</span> <span class="p">{</span>
+        <span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">n</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+            <span class="nx">currentResult</span> <span class="o">:=</span> <span class="mi">0</span>
+            <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">n</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+                <span class="nx">currentResult</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">rm</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="nx">values</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+            <span class="p">}</span>
+            <span class="nx">globalResultChan</span> <span class="o">&lt;-</span> <span class="nx">currentResult</span>
+            <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+        <span class="p">}(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">benchmarkSyncStableKeysFound</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">,</span> <span class="nx">workerCount</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="nx">workerCount</span><span class="p">)</span>
+
+    <span class="kd">var</span> <span class="nx">sm</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Map</span>
+    <span class="nx">values</span> <span class="o">:=</span> <span class="nf">populateSyncMap</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">sm</span><span class="p">)</span>
+
+    <span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+    <span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">workerCount</span><span class="p">)</span>
+
+    <span class="c1">// Holds our final results, to prevent compiler optimizations.
+</span><span class="c1"></span>    <span class="nx">globalResultChan</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">workerCount</span><span class="p">)</span>
+
+    <span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="nx">wc</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">wc</span> <span class="p">&lt;</span> <span class="nx">workerCount</span><span class="p">;</span> <span class="nx">wc</span><span class="o">++</span> <span class="p">{</span>
+        <span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">n</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+            <span class="nx">currentResult</span> <span class="o">:=</span> <span class="mi">0</span>
+            <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">n</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+                <span class="nx">r</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">sm</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="nx">values</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+                <span class="k">if</span> <span class="nx">ok</span> <span class="p">{</span>
+                    <span class="nx">currentResult</span> <span class="p">=</span> <span class="nx">r</span><span class="p">.(</span><span class="kt">int</span><span class="p">)</span>
+                <span class="p">}</span>
+            <span class="p">}</span>
+            <span class="nx">globalResultChan</span> <span class="o">&lt;-</span> <span class="nx">currentResult</span>
+            <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+        <span class="p">}(</span><span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="cm">/*
+</span><span class="cm">// These tests do a lookup using a literal value.
+</span><span class="cm">// Regular Map backed by RWMutex
+</span><span class="cm">BenchmarkRegularStableKeys1-32              50000000            30.5 ns/op
+</span><span class="cm">BenchmarkRegularStableKeys2-32              10000000           157 ns/op
+</span><span class="cm">BenchmarkRegularStableKeys4-32               5000000           377 ns/op
+</span><span class="cm">BenchmarkRegularStableKeys8-32               2000000           701 ns/op
+</span><span class="cm">BenchmarkRegularStableKeys16-32              1000000          1446 ns/op
+</span><span class="cm">BenchmarkRegularStableKeys32-32               500000          2825 ns/op
+</span><span class="cm">BenchmarkRegularStableKeys64-32               200000          5699 ns/op
+</span><span class="cm">// Sync Map
+</span><span class="cm">BenchmarkSyncStableKeys1-32                 20000000            89.3 ns/op
+</span><span class="cm">BenchmarkSyncStableKeys2-32                 20000000           101 ns/op
+</span><span class="cm">BenchmarkSyncStableKeys4-32                  5000000           247 ns/op
+</span><span class="cm">BenchmarkSyncStableKeys8-32                  5000000           330 ns/op
+</span><span class="cm">BenchmarkSyncStableKeys16-32                 5000000           295 ns/op
+</span><span class="cm">BenchmarkSyncStableKeys32-32                 5000000           269 ns/op
+</span><span class="cm">BenchmarkSyncStableKeys64-32                 5000000           249 ns/op
+</span><span class="cm">// These tests do a lookup of keys already defined in the map per iteration.
+</span><span class="cm">// Regular Map backed by RWMutex
+</span><span class="cm">BenchmarkRegularStableKeysFound1-32         20000000           114 ns/op
+</span><span class="cm">BenchmarkRegularStableKeysFound2-32         10000000           203 ns/op
+</span><span class="cm">BenchmarkRegularStableKeysFound4-32          3000000           460 ns/op
+</span><span class="cm">BenchmarkRegularStableKeysFound8-32          2000000           976 ns/op
+</span><span class="cm">BenchmarkRegularStableKeysFound16-32         1000000          1895 ns/op
+</span><span class="cm">BenchmarkRegularStableKeysFound32-32          300000          3620 ns/op
+</span><span class="cm">BenchmarkRegularStableKeysFound64-32          200000          6762 ns/op
+</span><span class="cm">// Sync Map
+</span><span class="cm">BenchmarkSyncStableKeysFound1-32             5000000           357 ns/op
+</span><span class="cm">BenchmarkSyncStableKeysFound2-32             3000000           446 ns/op
+</span><span class="cm">BenchmarkSyncStableKeysFound4-32             3000000           501 ns/op
+</span><span class="cm">BenchmarkSyncStableKeysFound8-32             3000000           576 ns/op
+</span><span class="cm">BenchmarkSyncStableKeysFound16-32            2000000           566 ns/op
+</span><span class="cm">BenchmarkSyncStableKeysFound32-32            3000000           527 ns/op
+</span><span class="cm">BenchmarkSyncStableKeysFound64-32            2000000           873 ns/op
+</span><span class="cm">*/</span></code></pre></td></tr></table>
+</div>
+</div>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190125125715.png" alt="" /></p>
+
+<p>正如你所看到的，在使用sync.RWMutex保护的常规map上我们有很好的性能表现。事情一直沿着很好的方向在发展，但是到我们开始使用4核时情况就变了。在4核时，不仅数据竞争开始变成问题，就连我们夸核的扩展因子也是一个问题了。如果你是看的红线，当我们的CPU到8核的时候，你就可以忘了这根线了。在这个点上使用RWMutex我们有太多的读竞争，以至于到32核时性能受到很大影响。</p>
+
+<p>蓝线表现的是sync.Map则展示了一个可预测的行为，因为我们持续的在扩展我们的核数。至此，我可以说基于我的初步测试和分析我们知道了sync.Map的发光点在哪儿。这个理想场景就是为它而建的。</p>
+
+<h1 id="补全len">补全Len</h1>
+
+<p>sync.Map没有提供获取元素个数的Len()方法，不过可以通过Range()实现。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Len</span><span class="p">(</span><span class="nx">sm</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Map</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
+    <span class="nx">lengh</span> <span class="o">:=</span> <span class="mi">0</span>
+    <span class="nx">f</span> <span class="o">:=</span> <span class="kd">func</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kt">bool</span> <span class="p">{</span>
+        <span class="nx">lengh</span><span class="o">++</span>
+        <span class="k">return</span> <span class="kc">true</span>
+    <span class="p">}</span>
+    <span class="nx">one</span><span class="o">:=</span><span class="nx">lengh</span>
+    <span class="nx">lengh</span><span class="p">=</span><span class="mi">0</span>
+    <span class="nx">sm</span><span class="p">.</span><span class="nf">Range</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">one</span> <span class="o">!=</span> <span class="nx">lengh</span> <span class="p">{</span>
+        <span class="nx">one</span> <span class="p">=</span> <span class="nx">lengh</span>
+        <span class="nx">lengh</span><span class="p">=</span><span class="mi">0</span>
+        <span class="nx">sm</span><span class="p">.</span><span class="nf">Range</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">one</span> <span class="p">&lt;</span><span class="nx">lengh</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="nx">lengh</span>
+        <span class="p">}</span>
+        
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nx">one</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<h1 id="警告-切记拷贝sync-map">警告:切记拷贝sync.Map</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;math/rand&#34;</span>
+	<span class="s">&#34;sync&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">m</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Map</span>
+
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">64</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">key</span> <span class="o">:=</span> <span class="nx">rand</span><span class="p">.</span><span class="nf">Intn</span><span class="p">(</span><span class="mi">128</span><span class="p">)</span>
+		<span class="nx">m</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">n</span> <span class="o">:=</span> <span class="nx">m</span>
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="p">{</span>
+			<span class="nx">key</span> <span class="o">:=</span> <span class="nx">rand</span><span class="p">.</span><span class="nf">Intn</span><span class="p">(</span><span class="mi">128</span><span class="p">)</span>
+			<span class="nx">m</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">n</span><span class="p">.</span><span class="nf">Range</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kt">bool</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">key</span> <span class="o">==</span> <span class="nx">value</span>
+		<span class="p">})</span>
+	<span class="p">}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>上述代码会报panic,原因在于创建完成的 sync.Map 是线程安全的，但是经过拷贝之后，两个 sync.Map 里面存储的是同一个 map（就是那个原生的，线程不安全的 map）， mutex 无法起到保护作用，就线程不安全了。</p>
+
+<p>但是如果真的要拷贝这个 sync.Map 应该怎么办呢？ 那就只能再创建一个，然后 Range 老的 Map 一个个把 KV 拷进去了。</p>
+
+<p>参考:<br />
+<a href="https://colobu.com/2017/07/11/dive-into-sync-Map">https://colobu.com/2017/07/11/dive-into-sync-Map</a><br />
+<a href="https://segmentfault.com/a/1190000015242373">https://segmentfault.com/a/1190000015242373</a><br />
+<a href="https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/">https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/</a><br />
+<a href="http://www.qiuxiaobing.cn/%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80/2018/03/09/go-sync-map.html">http://www.qiuxiaobing.cn/%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80/2018/03/09/go-sync-map.html</a>
+<a href="http://www.gogodjzhu.com/index.php/code/basic/397/">http://www.gogodjzhu.com/index.php/code/basic/397/</a>
+<a href="http://russellluo.com/2017/06/go-sync-map-diagram.html">http://russellluo.com/2017/06/go-sync-map-diagram.html</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2019-01-19
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/sync/">sync</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/sync-atomic%E5%8C%85%E8%A7%A3%E6%9E%90/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">sync/atomic包解析</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/go%E8%AF%AD%E8%A8%80%E7%9A%84%E5%8F%AF%E5%8F%98%E5%8F%82%E6%95%B0%E8%AF%A6%E8%A7%A3/">
+            <span class="next-text nav-default">Go语言的可变参数详解</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2019
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
