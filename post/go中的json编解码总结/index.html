@@ -56,7 +56,7 @@
 
 <meta itemprop="datePublished" content="2018-11-15T18:25:06&#43;00:00" />
 <meta itemprop="dateModified" content="2018-11-15T18:25:06&#43;00:00" />
-<meta itemprop="wordCount" content="10614">
+<meta itemprop="wordCount" content="12232">
 
 
 
@@ -171,8 +171,8 @@
         <div class="post-category">
             <a href="/categories/go/"> Go </a>
             </div>
-          <span class="more-meta"> 约 10614 字 </span>
-          <span class="more-meta"> 预计阅读 22 分钟 </span>
+          <span class="more-meta"> 约 12232 字 </span>
+          <span class="more-meta"> 预计阅读 25 分钟 </span>
         
       </div>
     </header>
@@ -194,6 +194,7 @@
 <li><a href="#omitempty可选字段">omitempty可选字段</a></li>
 <li><a href="#string选项">string选项</a></li>
 </ul></li>
+<li><a href="#编码中的html字符转义">编码中的html字符转义</a></li>
 </ul></li>
 <li><a href="#解码">解码</a>
 <ul>
@@ -225,9 +226,16 @@
 <li><a href="#原理">原理</a></li>
 </ul></li>
 </ul></li>
+</ul></li>
 <li><a href="#time-time的编解码">time.time的编解码</a></li>
 <li><a href="#nil的编码解码">nil的编码解码</a></li>
-<li><a href="#总结">总结</a></li>
+<li><a href="#json多次转义">Json多次转义</a>
+<ul>
+<li><a href="#编码-1">编码</a>
+<ul>
+<li><a href="#解决方案">解决方案</a></li>
+</ul></li>
+<li><a href="#解码-1">解码</a></li>
 </ul></li>
 </ul>
 </nav>
@@ -840,6 +848,146 @@ func main() {
 </div>
 </div>
 <p>可以看到输出为 money: &ldquo;100.5&rdquo;， money字段的值是字串。</p>
+
+<h2 id="编码中的html字符转义">编码中的html字符转义</h2>
+
+<p>json.Marshal生成json特殊字符&lt;、&gt;、&amp;会被转义。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">testMap</span> <span class="o">:=</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">{</span>
+		<span class="s">&#34;demo&#34;</span><span class="p">:</span> <span class="s">`https://xxx.xxx.com?a=1&amp;b=2`</span><span class="p">,</span>
+	<span class="p">}</span>
+	<span class="nx">bytes</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">json</span><span class="p">.</span><span class="nf">Marshal</span><span class="p">(</span><span class="nx">testMap</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nb">string</span><span class="p">(</span><span class="nx">bytes</span><span class="p">))</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>输出结果：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">{&#34;demo&#34;:&#34;https://xxx.xxx.com?a=1\u0026b=2&#34;}</pre></td></tr></table>
+</div>
+</div>
+<p>查看json.Marshal源码</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Marshal</span><span class="p">(</span><span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">e</span> <span class="o">:=</span> <span class="nf">newEncodeState</span><span class="p">()</span>
+
+	<span class="nx">err</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">marshal</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">encOpts</span><span class="p">{</span><span class="nx">escapeHTML</span><span class="p">:</span> <span class="kc">true</span><span class="p">})</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="nx">buf</span> <span class="o">:=</span> <span class="nb">append</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">e</span><span class="p">.</span><span class="nf">Bytes</span><span class="p">()</span><span class="o">...</span><span class="p">)</span>
+
+	<span class="nx">e</span><span class="p">.</span><span class="nf">Reset</span><span class="p">()</span>
+	<span class="nx">encodeStatePool</span><span class="p">.</span><span class="nf">Put</span><span class="p">(</span><span class="nx">e</span><span class="p">)</span>
+
+	<span class="k">return</span> <span class="nx">buf</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>json.Marshal 默认 escapeHtml 为true,会转义 &lt;、&gt;、&amp;</p>
+
+<p>查看官方文档:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">// String values encode as JSON strings coerced to valid UTF-8,
+// replacing invalid bytes with the Unicode replacement rune.
+// The angle brackets &#34;&lt;&#34; and &#34;&gt;&#34; are escaped to &#34;\u003c&#34; and &#34;\u003e&#34;
+// to keep some browsers from misinterpreting JSON output as HTML.
+// Ampersand &#34;&amp;&#34; is also escaped to &#34;\u0026&#34; for the same reason.
+// This escaping can be disabled using an Encoder that had SetEscapeHTML(false)
+// called on it.</pre></td></tr></table>
+</div>
+</div>
+<p>简单的说就是，字符串在编码为JSON字符串时会被强制转换为有效的UTF-8，为了防止一些浏览器在JSON输出误解以为是HTML，“&lt;”，“&gt;”，“&amp;”这类字符会被进行转义，如果不想被转义，就使用Encoder，并且SetEscapeHTML(false)即可。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">testMap</span> <span class="o">:=</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">{</span>
+		<span class="s">&#34;demo&#34;</span><span class="p">:</span> <span class="s">`https://xxx.xxx.com?a=1&amp;b=2`</span><span class="p">,</span>
+	<span class="p">}</span>
+	<span class="nx">byteBuf</span> <span class="o">:=</span> <span class="nx">bytes</span><span class="p">.</span><span class="nf">NewBuffer</span><span class="p">([]</span><span class="kt">byte</span><span class="p">{})</span>
+	<span class="nx">encoder</span> <span class="o">:=</span> <span class="nx">json</span><span class="p">.</span><span class="nf">NewEncoder</span><span class="p">(</span><span class="nx">byteBuf</span><span class="p">)</span>
+	<span class="nx">encoder</span><span class="p">.</span><span class="nf">SetEscapeHTML</span><span class="p">(</span><span class="kc">false</span><span class="p">)</span>
+	<span class="nx">err</span> <span class="o">:=</span> <span class="nx">encoder</span><span class="p">.</span><span class="nf">Encode</span><span class="p">(</span><span class="nx">testMap</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">byteBuf</span><span class="p">.</span><span class="nf">String</span><span class="p">())</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>输出结果：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">{&#34;demo&#34;:&#34;https://xxx.xxx.com?a=1&amp;b=2&#34;}</pre></td></tr></table>
+</div>
+</div>
+<p>可见，&amp; 符号没有被转义</p>
 
 <h1 id="解码">解码</h1>
 
@@ -2932,7 +3080,7 @@ after: 1234567</pre></td></tr></table>
 
 <p>使用Int64还是float64就可以通过用户自己的情况选择了。</p>
 
-<h2 id="time-time的编解码">time.time的编解码</h2>
+<h1 id="time-time的编解码">time.time的编解码</h1>
 
 <p>对于 json 格式，是没有时间类型的，日期和时间以 json 格式存储时，需要转换为字符串类型。这就带来了一个问题，日期时间的字符串表示有多种多样，go 的 json 包支持的是哪一种呢？</p>
 
@@ -3037,7 +3185,7 @@ after: 1234567</pre></td></tr></table>
 </div>
 <p>经过试验，发现 json.Unmarshal 方法只支持 RFC3339 和 RFC3339Nano 两种格式的转换。还有一个需要注意的地方，使用 time.Now() 生成的时间是带有一个 Monotonic Time 的，经过 json.Marshal 转换时候，由于 RFC3339 规范里没有存放 Monotonic Time 的位置，会丢掉这一部分。</p>
 
-<h2 id="nil的编码解码">nil的编码解码</h2>
+<h1 id="nil的编码解码">nil的编码解码</h1>
 
 <p>官方文档:</p>
 <div class="highlight"><div class="chroma">
@@ -3198,10 +3346,287 @@ after: 1234567</pre></td></tr></table>
 
 <p>所以，如果你只是希望在空的情况下，序列化得出空的结果，那么最好在序列化之前进行一次判空。</p>
 
-<h2 id="总结">总结</h2>
+<h1 id="json多次转义">Json多次转义</h1>
 
-<p>关于golang解析json的介绍基本就这么多。想要解析越简单，就需要定义越明确的map结构。面对无法确定的数据结构或类型，在动态解析方面可以借助接口与断言的方式解析，也可以使用json.RawMessage延迟解析。具体使用情况，还得考虑实际的需求和应用场景。</p>
+<h2 id="编码-1">编码</h2>
 
+<p>我们在对外提供API接口，返回响应的时候，很多时候需要使用如下的数据结构</p>
+
+<p>type Response struct {
+    Code int         <code>json:&quot;code&quot;</code>
+    Msg  string      <code>json:&quot;msg&quot;</code>
+    Data interface{} <code>json:&quot;data&quot;</code>
+}</p>
+
+<p>该API接口返回一个状体码，状态信息，以及具体的值。但是具体的值可能根据各个接口的不同而不同。
+在实际的开发过程中我们可能会得到一个实际的数据值，并将这个值赋值给data，然后json序列化返回给调用方。
+这时如果你得到的data是一个经过json序列化之后的字符串，类似于{&ldquo;Name&rdquo;:&ldquo;happy&rdquo;},然后再将这个字符串赋值给data，此时将response序列化得到的string，如下</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">{“code”:1,”msg”:”success”,”data”:”{\”Name\”:\”Happy\”}”}</pre></td></tr></table>
+</div>
+</div>
+<p>我们会发现之前已经序列化好的字符串，每一个都多了\，这是因为转义引起的问题。</p>
+
+<h3 id="解决方案">解决方案</h3>
+
+<p>直接将未序列化的data赋值给data:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;encoding/json&#34;</span>
+    <span class="s">&#34;fmt&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">type</span> <span class="nx">Response</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">Code</span> <span class="kt">int</span>         <span class="s">`json:&#34;code&#34;`</span>
+    <span class="nx">Msg</span>  <span class="kt">string</span>      <span class="s">`json:&#34;msg&#34;`</span>
+    <span class="nx">Data</span> <span class="kd">interface</span><span class="p">{}</span> <span class="s">`json:&#34;data&#34;`</span>
+<span class="p">}</span>
+<span class="kd">type</span> <span class="nx">People</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">Name</span> <span class="kt">string</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">data</span> <span class="o">:=</span> <span class="nx">People</span><span class="p">{</span><span class="nx">Name</span><span class="p">:</span> <span class="s">&#34;happy&#34;</span><span class="p">}</span>
+    <span class="nx">response</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Response</span><span class="p">{</span>
+        <span class="nx">Code</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="nx">Msg</span><span class="p">:</span>  <span class="s">&#34;success&#34;</span><span class="p">,</span>
+        <span class="nx">Data</span><span class="p">:</span> <span class="nx">data</span><span class="p">,</span>
+    <span class="p">}</span>
+
+    <span class="nx">b</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">json</span><span class="p">.</span><span class="nf">Marshal</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">response</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;err&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nb">string</span><span class="p">(</span><span class="nx">b</span><span class="p">))</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>使用json 的RawMessage 将转义后的string，赋值给data:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;encoding/json&#34;</span>
+    <span class="s">&#34;fmt&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">type</span> <span class="nx">Response</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">Code</span> <span class="kt">int</span>         <span class="s">`json:&#34;code&#34;`</span>
+    <span class="nx">Msg</span>  <span class="kt">string</span>      <span class="s">`json:&#34;msg&#34;`</span>
+    <span class="nx">Data</span> <span class="kd">interface</span><span class="p">{}</span> <span class="s">`json:&#34;data&#34;`</span>
+<span class="p">}</span>
+<span class="kd">type</span> <span class="nx">People</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">Name</span> <span class="kt">string</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">data</span> <span class="o">:=</span> <span class="s">`{&#34;Name&#34;:&#34;Happy&#34;}`</span>
+    <span class="nx">response</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Response</span><span class="p">{</span>
+        <span class="nx">Code</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="nx">Msg</span><span class="p">:</span>  <span class="s">&#34;success&#34;</span><span class="p">,</span>
+        <span class="nx">Data</span><span class="p">:</span> <span class="nx">json</span><span class="p">.</span><span class="nf">RawMessage</span><span class="p">(</span><span class="nx">data</span><span class="p">),</span>
+    <span class="p">}</span>
+
+    <span class="nx">b</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">json</span><span class="p">.</span><span class="nf">Marshal</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">response</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;err&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nb">string</span><span class="p">(</span><span class="nx">b</span><span class="p">))</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>通过使用json的json.RawMessage(data)函数将其转换一下，这样也能保证不存在转义符。</p>
+
+<h2 id="解码-1">解码</h2>
+
+<p>利用strconv.Unquote做一次转义:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;encoding/json&#34;</span>
+    <span class="s">&#34;fmt&#34;</span>
+    <span class="s">&#34;strconv&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">type</span> <span class="nx">Msg</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">Channel</span> <span class="kt">string</span>
+    <span class="nx">Name</span> <span class="kt">string</span>
+    <span class="nx">Msg</span> <span class="kt">string</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">msg</span> <span class="nx">Msg</span>
+    <span class="kd">var</span> <span class="nx">val</span> <span class="p">[]</span><span class="kt">byte</span> <span class="p">=</span> <span class="p">[]</span><span class="nb">byte</span><span class="p">(</span><span class="s">`&#34;{\&#34;channel\&#34;:\&#34;buu\&#34;,\&#34;name\&#34;:\&#34;john\&#34;, \&#34;msg\&#34;:\&#34;doe\&#34;}&#34;`</span><span class="p">)</span>
+
+    <span class="nx">s</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">strconv</span><span class="p">.</span><span class="nf">Unquote</span><span class="p">(</span><span class="nb">string</span><span class="p">(</span><span class="nx">val</span><span class="p">))</span>
+
+    <span class="nx">err</span> <span class="o">:=</span> <span class="nx">json</span><span class="p">.</span><span class="nf">Unmarshal</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">s</span><span class="p">),</span> <span class="o">&amp;</span><span class="nx">msg</span><span class="p">)</span>
+
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">msg</span><span class="p">.</span><span class="nx">Channel</span><span class="p">,</span> <span class="nx">msg</span><span class="p">.</span><span class="nx">Name</span><span class="p">,</span> <span class="nx">msg</span><span class="p">.</span><span class="nx">Msg</span><span class="p">)</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 将带有单引号、双引号、反引号的字符串转为常规字符串
+</span><span class="c1">// 函数假设s是一个单引号、双引号、反引号包围的go语法字符串，解析它并返回它表示的值。（如果是单引号括起来的，函数会认为s是go字符字面值，返回一个单字符的字符串）
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">Unquote</span><span class="p">(</span><span class="nx">s</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">t</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span>
+
+<span class="c1">// 将带引号字符串（不包含首尾的引号）中的第一个字符“取消转义”并解码
+</span><span class="c1">// 1) value，表示一个rune值或者一个byte值
+</span><span class="c1">// 2) multibyte，表示value是否是一个多字节的utf-8字符
+</span><span class="c1">// 3) tail，表示字符串剩余的部分
+</span><span class="c1">// 4) err，表示可能存在的语法错误
+</span><span class="c1"></span>
+<span class="c1">// 参数 quote 定义“引号符”语法规范
+</span><span class="c1">// 如果设置为单引号，则认为单引号是语法字符， s 中允许出现 \&#39;、&#34; 字符，不允许出现单独的 &#39; 字符
+</span><span class="c1">// 如果设置为双引号，则认为双引号是语法字符， s 中允许出现 \&#34;、&#39; 字符，不允许出现单独的 &#34; 字符
+</span><span class="c1">// 如果设置为 0，函数把单引号和双引号当成普通字符，则可以出现单独的 &#39; 或 &#34; 字符，但不允许出现 \&#39; 或 \&#34; 字符，
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">UnquoteChar</span><span class="p">(</span><span class="nx">s</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">quote</span> <span class="kt">byte</span><span class="p">)</span> <span class="p">(</span><span class="nx">value</span> <span class="kt">rune</span><span class="p">,</span> <span class="nx">multibyte</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">tail</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span>
+
+<span class="c1">// 示例
+</span><span class="c1"></span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">strconv</span><span class="p">.</span><span class="nf">Unquote</span><span class="p">(</span><span class="s">&#34;`or backquoted.`&#34;</span><span class="p">))</span>    <span class="c1">// or backquoted.  &lt;nil&gt;
+</span><span class="c1"></span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">strconv</span><span class="p">.</span><span class="nf">Unquote</span><span class="p">(</span><span class="s">&#34;\&#34;The string must be either double-quoted\&#34;&#34;</span><span class="p">))</span>    <span class="c1">// The string must be either double-quoted  &lt;nil&gt;
+</span><span class="c1"></span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">strconv</span><span class="p">.</span><span class="nf">Unquote</span><span class="p">(</span><span class="s">&#34;&#39;\u2639&#39;&#34;</span><span class="p">))</span>    <span class="c1">// ☹  &lt;nil&gt;
+</span><span class="c1"></span>
+<span class="nx">value</span><span class="p">,</span> <span class="nx">mb</span><span class="p">,</span> <span class="nx">tail</span> <span class="p">,</span><span class="nx">err</span> <span class="o">:=</span> <span class="nx">strconv</span><span class="p">.</span><span class="nf">UnquoteChar</span><span class="p">(</span><span class="s">`\&#34;Test *&amp;^$ Test Func\&#34;`</span><span class="p">,</span> <span class="sc">&#39;&#34;&#39;</span><span class="p">)</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">value</span><span class="p">,</span> <span class="nx">mb</span><span class="p">,</span> <span class="nx">tail</span> <span class="p">,</span><span class="nx">err</span><span class="p">)</span><span class="c1">// 34 false Test *&amp;^$ Test Func\&#34; &lt;nil&gt;
+</span><span class="c1"></span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nb">string</span><span class="p">(</span><span class="nx">value</span><span class="p">),</span> <span class="nx">mb</span><span class="p">,</span> <span class="nx">tail</span> <span class="p">,</span><span class="nx">err</span><span class="p">)</span><span class="o">//</span> <span class="s">&#34; false Test *&amp;^$ Test Func\&#34;</span> <span class="p">&lt;</span><span class="kc">nil</span><span class="p">&gt;</span></code></pre></td></tr></table>
+</div>
+</div>
 <p>参考:</p>
 
 <p><a href="https://www.jianshu.com/p/40d5556842f1">https://www.jianshu.com/p/40d5556842f1</a>
@@ -3211,7 +3636,9 @@ after: 1234567</pre></td></tr></table>
 <a href="https://blog.cyeam.com/golang/2016/05/02/jsonnumber">https://blog.cyeam.com/golang/2016/05/02/jsonnumber</a>
 <a href="https://hackcv.com/index.php/archives/97/">https://hackcv.com/index.php/archives/97/</a>
 <a href="https://www.simpleapples.com/2018/12/24/practice-in-json-with-go/">https://www.simpleapples.com/2018/12/24/practice-in-json-with-go/</a>
-<a href="https://ictar.xyz/2017/11/29/golang%E7%9A%84%E8%B8%A9%E5%9D%91%E4%B8%8D%E5%AE%8C%E5%85%A8%E8%AE%B0%E5%BD%95%E4%B9%8Bjson/">https://ictar.xyz/2017/11/29/golang%E7%9A%84%E8%B8%A9%E5%9D%91%E4%B8%8D%E5%AE%8C%E5%85%A8%E8%AE%B0%E5%BD%95%E4%B9%8Bjson/</a></p>
+<a href="https://ictar.xyz/2017/11/29/golang%E7%9A%84%E8%B8%A9%E5%9D%91%E4%B8%8D%E5%AE%8C%E5%85%A8%E8%AE%B0%E5%BD%95%E4%B9%8Bjson/">https://ictar.xyz/2017/11/29/golang%E7%9A%84%E8%B8%A9%E5%9D%91%E4%B8%8D%E5%AE%8C%E5%85%A8%E8%AE%B0%E5%BD%95%E4%B9%8Bjson/</a><br />
+<a href="https://blog.csdn.net/linhenk/article/details/89636192">https://blog.csdn.net/linhenk/article/details/89636192</a>
+<a href="https://blog.csdn.net/suiban7403/article/details/79175583">https://blog.csdn.net/suiban7403/article/details/79175583</a></p>
 
     </div>
 
