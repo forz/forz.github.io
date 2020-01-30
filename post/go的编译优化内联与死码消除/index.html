@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Go的编译优化:内联与死码消除 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="内联 在 Go 中，函数调用有固定的开销；栈和抢占检查。 硬件分支预测器改善了其中的一些功能，但就功能大小和时钟周期而言，这仍然是一个成本。 内联是避免" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.55.6 with theme even" />
+
+
+<link rel="canonical" href="/post/go%E7%9A%84%E7%BC%96%E8%AF%91%E4%BC%98%E5%8C%96%E5%86%85%E8%81%94%E4%B8%8E%E6%AD%BB%E7%A0%81%E6%B6%88%E9%99%A4/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Go的编译优化:内联与死码消除" />
+<meta property="og:description" content="内联 在 Go 中，函数调用有固定的开销；栈和抢占检查。 硬件分支预测器改善了其中的一些功能，但就功能大小和时钟周期而言，这仍然是一个成本。 内联是避免" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/go%E7%9A%84%E7%BC%96%E8%AF%91%E4%BC%98%E5%8C%96%E5%86%85%E8%81%94%E4%B8%8E%E6%AD%BB%E7%A0%81%E6%B6%88%E9%99%A4/" />
+<meta property="article:published_time" content="2020-01-30T16:33:02&#43;00:00"/>
+<meta property="article:modified_time" content="2020-01-30T16:33:02&#43;00:00"/>
+
+<meta itemprop="name" content="Go的编译优化:内联与死码消除">
+<meta itemprop="description" content="内联 在 Go 中，函数调用有固定的开销；栈和抢占检查。 硬件分支预测器改善了其中的一些功能，但就功能大小和时钟周期而言，这仍然是一个成本。 内联是避免">
+
+
+<meta itemprop="datePublished" content="2020-01-30T16:33:02&#43;00:00" />
+<meta itemprop="dateModified" content="2020-01-30T16:33:02&#43;00:00" />
+<meta itemprop="wordCount" content="1946">
+
+
+
+<meta itemprop="keywords" content="Go," />
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Go的编译优化:内联与死码消除"/>
+<meta name="twitter:description" content="内联 在 Go 中，函数调用有固定的开销；栈和抢占检查。 硬件分支预测器改善了其中的一些功能，但就功能大小和时钟周期而言，这仍然是一个成本。 内联是避免"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Go的编译优化:内联与死码消除</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2020-01-30 </span>
+        <div class="post-category">
+            <a href="/categories/go%E8%B0%83%E4%BC%98/"> Go调优 </a>
+            </div>
+          <span class="more-meta"> 约 1946 字 </span>
+          <span class="more-meta"> 预计阅读 4 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+<ul>
+<li>
+<ul>
+<li><a href="#内联">内联</a></li>
+<li><a href="#内联-例1">内联 - 例1</a>
+<ul>
+<li><a href="#内联是什么样的">内联是什么样的？</a></li>
+<li><a href="#调整内联级别">调整内联级别</a></li>
+</ul></li>
+<li><a href="#死码消除">死码消除</a>
+<ul>
+<li><a href="#死码消除-续">死码消除（续）</a></li>
+<li><a href="#进一步阅读">进一步阅读</a></li>
+<li><a href="#编译器标识练习">编译器标识练习</a></li>
+<li><a href="#further-reading">Further reading</a></li>
+</ul></li>
+</ul></li>
+</ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      
+
+<h2 id="内联">内联</h2>
+
+<p>在 Go 中，函数调用有固定的开销；栈和抢占检查。</p>
+
+<p>硬件分支预测器改善了其中的一些功能，但就功能大小和时钟周期而言，这仍然是一个成本。</p>
+
+<p>内联是避免这些成本的经典优化方法。</p>
+
+<p>内联只对叶子函数有效，叶子函数是不调用其他函数的。这样做的理由是:</p>
+
+<ul>
+<li>如果你的函数做了很多工作，那么前序开销可以忽略不计。</li>
+<li>另一方面，小函数为相对较少的有用工作付出固定的开销。这些是内联目标的功能，因为它们最受益。</li>
+</ul>
+
+<p>还有一个原因就是严重的内联会使得堆栈信息更加难以跟踪。</p>
+
+<h2 id="内联-例1">内联 - 例1</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Max</span><span class="p">(</span><span class="nx">a</span><span class="p">,</span> <span class="nx">b</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">a</span> <span class="p">&gt;</span> <span class="nx">b</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="nx">a</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="nx">b</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">F</span><span class="p">()</span> <span class="p">{</span>
+        <span class="kd">const</span> <span class="nx">a</span><span class="p">,</span> <span class="nx">b</span> <span class="p">=</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">20</span>
+        <span class="k">if</span> <span class="nf">Max</span><span class="p">(</span><span class="nx">a</span><span class="p">,</span> <span class="nx">b</span><span class="p">)</span> <span class="o">==</span> <span class="nx">b</span> <span class="p">{</span>
+                <span class="nb">panic</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span>
+        <span class="p">}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>我们再次使用 <code>-gcflags = -m</code> 标识来查看编译器优化决策。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">% go build -gcflags=-m examples/max/max.go
+# command-line-arguments
+examples/max/max.go:3:6: can inline Max
+examples/max/max.go:12:8: inlining call to Max</pre></td></tr></table>
+</div>
+</div>
+<p>编译器打印了两行信息：</p>
+
+<ul>
+<li>首先第3行，<code>Max</code>的声明告诉我们它可以内联</li>
+<li>其次告诉我们，<code>Max</code>的主体已经内联到第12行调用者中。</li>
+</ul>
+
+<h3 id="内联是什么样的">内联是什么样的？</h3>
+
+<p>编译 <code>max.go</code> 然后我们看看优化版本的 <code>F()</code> 变成什么样了。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">% go build -gcflags=-S examples/max/max.go 2&gt;&amp;1 | grep -A5 &#39;&#34;&#34;.F STEXT&#39;
+&#34;&#34;.F STEXT nosplit size=1 args=0x0 locals=0x0
+        0x0000 00000 (/Users/dfc/devel/gophercon2018-performance-tuning-workshop/4-compiler-optimisations/examples/max/max.go:10)       TEXT    &#34;&#34;.F(SB), NOSPLIT, $0-0
+        0x0000 00000 (/Users/dfc/devel/gophercon2018-performance-tuning-workshop/4-compiler-optimisations/examples/max/max.go:10)       FUNCDATA        $0, gclocals·33cdeccccebe80329f1fdbee7f5874cb(SB)
+        0x0000 00000 (/Users/dfc/devel/gophercon2018-performance-tuning-workshop/4-compiler-optimisations/examples/max/max.go:10)       FUNCDATA        $1, gclocals·33cdeccccebe80329f1fdbee7f5874cb(SB)
+        0x0000 00000 (&lt;unknown line number&gt;)    RET
+        0x0000 c3</pre></td></tr></table>
+</div>
+</div>
+<p>一旦<code>Max</code>被内联到这里，这就是F的主体 - 这个函数什么都没干。我知道屏幕上有很多没用的文字，但是相信我的话，唯一发生的就是<code>RET</code>。实际上<code>F</code>变成了:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">F</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">return</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p><em>注意</em>: 利用 <code>-S</code> 的输出并不是进入二进制文件的最终机器码。链接器在最后的链接阶段进行一些处理。像<code>FUNCDATA</code>和<code>PCDATA</code>这样的行是垃圾收集器的元数据，它们在链接时移动到其他位置。 如果你正在读取<code>-S</code>的输出，请忽略<code>FUNCDATA</code>和<code>PCDATA</code>行；它们不是最终二进制的一部分。</p>
+
+<h3 id="调整内联级别">调整内联级别</h3>
+
+<p>使用<code>-gcflags=-l</code>标识调整内联级别。有些令人困惑的是，传递一个<code>-l</code>将禁用内联，两个或两个以上将在更激进的设置中启用内联。</p>
+
+<ul>
+<li><code>-gcflags=-l</code>，禁用内联。</li>
+<li>什么都不做，常规的内联</li>
+<li><code>-gcflags='-l -l'</code> 内联级别2，更积极，可能更快，可能会制作更大的二进制文件。</li>
+<li><code>-gcflags='-l -l -l'</code> 内联级别3，再次更加激进，二进制文件肯定更大，也许更快，但也许会有 bug。</li>
+<li><code>-gcflags=-l=4</code> (4个 <code>-l</code>) 在 Go 1.11 中将支持实验性的 <a href="https://github.com/golang/go/issues/19348#issuecomment-393654429">中间栈内联优化</a>。</li>
+</ul>
+
+<h2 id="死码消除">死码消除</h2>
+
+<p>为什么<code>a</code>和<code>b</code>是常数很重要?</p>
+
+<p>为了理解发生了什么，让我们看一下编译器在把<code>Max</code>内联到<code>F</code>中的时候看到了什么。我们不能轻易地从编译器中获得这个，但是直接手动完成它。</p>
+
+<p>Before:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Max</span><span class="p">(</span><span class="nx">a</span><span class="p">,</span> <span class="nx">b</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">a</span> <span class="p">&gt;</span> <span class="nx">b</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="nx">a</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="nx">b</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">F</span><span class="p">()</span> <span class="p">{</span>
+        <span class="kd">const</span> <span class="nx">a</span><span class="p">,</span> <span class="nx">b</span> <span class="p">=</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">20</span>
+        <span class="k">if</span> <span class="nf">Max</span><span class="p">(</span><span class="nx">a</span><span class="p">,</span> <span class="nx">b</span><span class="p">)</span> <span class="o">==</span> <span class="nx">b</span> <span class="p">{</span>
+                <span class="nb">panic</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span>
+        <span class="p">}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>After:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">F</span><span class="p">()</span> <span class="p">{</span>
+        <span class="kd">const</span> <span class="nx">a</span><span class="p">,</span> <span class="nx">b</span> <span class="p">=</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">20</span>
+        <span class="kd">var</span> <span class="nx">result</span> <span class="kt">int</span>
+        <span class="k">if</span> <span class="nx">a</span> <span class="p">&gt;</span> <span class="nx">b</span> <span class="p">{</span>
+                <span class="nx">result</span> <span class="p">=</span> <span class="nx">a</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+                <span class="nx">result</span> <span class="p">=</span> <span class="nx">b</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="nx">result</span> <span class="o">==</span> <span class="nx">b</span> <span class="p">{</span>
+                <span class="nb">panic</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span> 
+        <span class="p">}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>因为<code>a</code>和<code>b</code>是常量，所以编译器可以在编译时证明分支永远不会是假的；<code>100</code>总是大于<code>20</code>。因此它可以进一步优化 <code>F</code> 为</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">F</span><span class="p">()</span> <span class="p">{</span>
+        <span class="kd">const</span> <span class="nx">a</span><span class="p">,</span> <span class="nx">b</span> <span class="p">=</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">20</span>
+        <span class="kd">var</span> <span class="nx">result</span> <span class="kt">int</span>
+        <span class="k">if</span> <span class="kc">true</span> <span class="p">{</span>
+                <span class="nx">result</span> <span class="p">=</span> <span class="nx">a</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+                <span class="nx">result</span> <span class="p">=</span> <span class="nx">b</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="nx">result</span> <span class="o">==</span> <span class="nx">b</span> <span class="p">{</span>
+                <span class="nb">panic</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span> 
+        <span class="p">}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>既然分支的结果已经知道了，那么结果的内容也就知道了。这叫做分支消除。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">F</span><span class="p">()</span> <span class="p">{</span>
+        <span class="kd">const</span> <span class="nx">a</span><span class="p">,</span> <span class="nx">b</span> <span class="p">=</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">20</span>
+        <span class="kd">const</span> <span class="nx">result</span> <span class="p">=</span> <span class="nx">a</span>
+        <span class="k">if</span> <span class="nx">result</span> <span class="o">==</span> <span class="nx">b</span> <span class="p">{</span>
+                <span class="nb">panic</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span> 
+        <span class="p">}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>现在分支被消除了，我们知道结果总是等于<code>a</code>，并且因为<code>a</code>是常数，我们知道结果是常数。 编译器将此证明应用于第二个分支</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">F</span><span class="p">()</span> <span class="p">{</span>
+        <span class="kd">const</span> <span class="nx">a</span><span class="p">,</span> <span class="nx">b</span> <span class="p">=</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">20</span>
+        <span class="kd">const</span> <span class="nx">result</span> <span class="p">=</span> <span class="nx">a</span>
+        <span class="k">if</span> <span class="kc">false</span> <span class="p">{</span>
+                <span class="nb">panic</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span> 
+        <span class="p">}</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>并且再次使用分支消除，<code>F</code>的最终形式减少成这样。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">F</span><span class="p">()</span> <span class="p">{</span>
+        <span class="kd">const</span> <span class="nx">a</span><span class="p">,</span> <span class="nx">b</span> <span class="p">=</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">20</span>
+        <span class="kd">const</span> <span class="nx">result</span> <span class="p">=</span> <span class="nx">a</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>最后就变成</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">F</span><span class="p">()</span> <span class="p">{</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<h3 id="死码消除-续">死码消除（续）</h3>
+
+<p>分支消除是一种被称为死码消除的优化。实际上，使用静态证明来表明一段代码永远不可达，通常称为死代码，因此它不需要在最终的二进制文件中编译、优化或发出。</p>
+
+<p>我们发现死码消除与内联一起工作，以减少循环和分支产生的代码数量，这些循环和分支被证明是不可到达的。</p>
+
+<p>你可以利用这一点来实现昂贵的调试，并将其隐藏起来</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">const debug = false </pre></td></tr></table>
+</div>
+</div>
+<p>结合构建标记，这可能非常有用。</p>
+
+<h3 id="进一步阅读">进一步阅读</h3>
+
+<ul>
+<li><a href="http://dave.cheney.net/2014/09/28/using-build-to-switch-between-debug-and-release">Using // +build to switch between debug and release builds</a></li>
+<li><a href="http://dave.cheney.net/2013/10/12/how-to-use-conditional-compilation-with-the-go-build-tool">How to use conditional compilation with the go build tool</a></li>
+</ul>
+
+<h3 id="编译器标识练习">编译器标识练习</h3>
+
+<p>编译器标识提供如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">go build -gcflags=$FLAGS</pre></td></tr></table>
+</div>
+</div>
+<p>研究以下编译器功能的操作：</p>
+
+<ul>
+<li><code>-S</code> 打印正在编译的包的汇编代码</li>
+<li><code>-l</code> 控制内联行为； <code>-l</code> 禁止内联， <code>-l -l</code> 增加<code>-l</code>（更多<code>-l</code>会增加编译器对代码内联的强度）。试验编译时间，程序大小和运行时间的差异。</li>
+<li><code>-m</code> 控制优化决策的打印，如内联，逃逸分析。<code>-m</code>打印关于编译器的想法的更多细节。</li>
+<li><code>-l -N</code> 禁用所有优化。</li>
+</ul>
+
+<p><em>注意</em>: If you find that subsequent runs of <code>go build ...</code> produce no output, delete the <code>./max</code> binary in your working directory.</p>
+
+<h3 id="further-reading">Further reading</h3>
+
+<ul>
+<li><a href="http://go-talks.appspot.com/github.com/rakyll/talks/gcinspect/talk.slide#1">Codegen Inspection by Jaana Burcu Dogan</a></li>
+</ul>
+
+<p>转载:<a href="https://github.com/sxs2473/go-performane-tuning/blob/master/2.%E7%BC%96%E8%AF%91%E4%BC%98%E5%8C%96/%E7%BC%96%E8%AF%91%E4%BC%98%E5%8C%96.md">https://github.com/sxs2473/go-performane-tuning/blob/master/2.%E7%BC%96%E8%AF%91%E4%BC%98%E5%8C%96/%E7%BC%96%E8%AF%91%E4%BC%98%E5%8C%96.md</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2020-01-30
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go/">Go</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/go%E6%80%A7%E8%83%BD%E5%88%86%E6%9E%90pprof/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Go性能分析:pprof</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/go%E4%B8%AD%E7%9A%84%E5%9F%BA%E5%87%86%E6%B5%8B%E8%AF%95/">
+            <span class="next-text nav-default">Go中的基准测试</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2020
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
