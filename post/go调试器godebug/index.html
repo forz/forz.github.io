@@ -17,7 +17,7 @@
 
 
 <meta name="author"
-  content="Forz" /><meta name="description" content="" /><meta name="keywords"
+  content="Forz" /><meta name="description" content="介绍 让 Go 更强大的原因之一莫过于它的 GODEBUG 工具，GODEBUG 的设置可以让 Go 程序在运行时输出调试信息，可以根据你的要求很直观的看到你想要的调度器或" /><meta name="keywords"
   content="Hugo, theme, even" />
 
 
@@ -44,26 +44,26 @@
 
 
 <meta property="og:title" content="Go调试器:GODEBUG" />
-<meta property="og:description" content="" />
+<meta property="og:description" content="介绍 让 Go 更强大的原因之一莫过于它的 GODEBUG 工具，GODEBUG 的设置可以让 Go 程序在运行时输出调试信息，可以根据你的要求很直观的看到你想要的调度器或" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/go%E8%B0%83%E8%AF%95%E5%99%A8godebug/" />
 <meta property="article:published_time" content="2020-02-11T10:22:37&#43;00:00"/>
 <meta property="article:modified_time" content="2020-02-11T10:22:37&#43;00:00"/>
 
 <meta itemprop="name" content="Go调试器:GODEBUG">
-<meta itemprop="description" content="">
+<meta itemprop="description" content="介绍 让 Go 更强大的原因之一莫过于它的 GODEBUG 工具，GODEBUG 的设置可以让 Go 程序在运行时输出调试信息，可以根据你的要求很直观的看到你想要的调度器或">
 
 
 <meta itemprop="datePublished" content="2020-02-11T10:22:37&#43;00:00" />
 <meta itemprop="dateModified" content="2020-02-11T10:22:37&#43;00:00" />
-<meta itemprop="wordCount" content="0">
+<meta itemprop="wordCount" content="7080">
 
 
 
 <meta itemprop="keywords" content="Go," />
 <meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go调试器:GODEBUG"/>
-<meta name="twitter:description" content=""/>
+<meta name="twitter:description" content="介绍 让 Go 更强大的原因之一莫过于它的 GODEBUG 工具，GODEBUG 的设置可以让 Go 程序在运行时输出调试信息，可以根据你的要求很直观的看到你想要的调度器或"/>
 
 <!--[if lte IE 9]>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
@@ -171,8 +171,8 @@
         <div class="post-category">
             <a href="/categories/go%E8%B0%83%E4%BC%98/"> Go调优 </a>
             </div>
-          <span class="more-meta"> 约 0 字 </span>
-          <span class="more-meta"> 预计阅读 0 分钟 </span>
+          <span class="more-meta"> 约 7080 字 </span>
+          <span class="more-meta"> 预计阅读 15 分钟 </span>
         
       </div>
     </header>
@@ -180,11 +180,978 @@
     <div class="post-toc" id="post-toc">
   <h2 class="post-toc-title">文章目录</h2>
   <div class="post-toc-content always-active">
-    
+    <nav id="TableOfContents">
+<ul>
+<li><a href="#介绍">介绍</a></li>
+<li><a href="#调度器观察">调度器观察</a>
+<ul>
+<li><a href="#演示代码">演示代码</a></li>
+<li><a href="#schedtrace">schedtrace</a></li>
+<li><a href="#scheddetail">scheddetail</a>
+<ul>
+<li><a href="#g">G</a></li>
+<li><a href="#m">M</a></li>
+<li><a href="#p">P</a></li>
+</ul></li>
+<li><a href="#实战">实战</a></li>
+</ul></li>
+<li><a href="#gc观察">GC观察</a>
+<ul>
+<li><a href="#涉及术语">涉及术语</a></li>
+<li><a href="#演示代码-1">演示代码</a></li>
+<li><a href="#gctrace">gctrace</a></li>
+<li><a href="#格式">格式</a></li>
+<li><a href="#案例">案例</a></li>
+<li><a href="#副作用-runtime调度阻塞">副作用:runtime调度阻塞</a>
+<ul>
+<li><a href="#查找问题">查找问题</a></li>
+<li><a href="#解决方法">解决方法</a></li>
+</ul></li>
+</ul></li>
+</ul>
+</nav>
   </div>
 </div>
     <div class="post-content">
       
+
+<h1 id="介绍">介绍</h1>
+
+<p>让 Go 更强大的原因之一莫过于它的 GODEBUG 工具，GODEBUG 的设置可以让 Go 程序在运行时输出调试信息，可以根据你的要求很直观的看到你想要的调度器或垃圾回收等详细信息，并且还不需要加装其它的插件，非常方便，今天我们将先讲解 GODEBUG 的调度器相关内容，希望对你有所帮助。</p>
+
+<p>GODEBUG 变量可以控制运行时内的调试变量，参数以逗号分隔，格式为：name=val。</p>
+
+<h1 id="调度器观察">调度器观察</h1>
+
+<p>本节重点在调度器观察上，将会使用如下两个参数：</p>
+
+<ul>
+<li>schedtrace：设置 schedtrace=X 参数可以使运行时在每 X 毫秒发出一行调度器的摘要信息到标准 err 输出中。</li>
+<li>scheddetail：设置 schedtrace=X 和 scheddetail=1 可以使运行时在每 X 毫秒发出一次详细的多行信息，信息内容主要包括调度程序、处理器、OS 线程 和 Goroutine 的状态。</li>
+</ul>
+
+<h2 id="演示代码">演示代码</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;sync&#34;</span>
+	<span class="s">&#34;time&#34;</span>
+<span class="p">)</span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+	<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">10</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="k">go</span> <span class="nf">work</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">wg</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+	<span class="c1">// Wait to see the global run queue deplete.
+</span><span class="c1"></span>	<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="mi">3</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">work</span><span class="p">(</span><span class="nx">wg</span> <span class="o">*</span><span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+	<span class="kd">var</span> <span class="nx">counter</span> <span class="kt">int</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mf">1e10</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">counter</span><span class="o">++</span>
+	<span class="p">}</span>
+	<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>列表1的第12行使用一个for循环创建10个goroutine，第16行main函数中等待所有的goroutine完成任务。第22行的work函数先sleep 1秒，然后计数 10亿次。一旦计数完成，调用waitGroup的Done方法然后返回。</p>
+
+<p>首先go build程序，然后运行时设置GODEBUG环境变量。这个变量会被运行时读取，所以Go命令也会产生跟踪信息。如果在运行go run命令的时候设置了GODEBUG变量，在程序运行之前就会看到跟踪信息。</p>
+
+<p>所以还是让我们先编译程序：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="k">go</span> <span class="nx">build</span> <span class="nx">example</span><span class="p">.</span><span class="k">go</span></code></pre></td></tr></table>
+</div>
+</div>
+<h2 id="schedtrace">schedtrace</h2>
+
+<p>schedtrace参数告诉运行时打印一行调度器的摘要信息到标准err输出中，时间间隔可以指定，单位毫秒，如下所示：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">$ GOMAXPROCS=1 GODEBUG=schedtrace=1000 ./example
+SCHED 0ms: gomaxprocs=1 idleprocs=0 threads=2 spinningthreads=0 idlethreads=0
+runqueue=0 [1]
+SCHED 1009ms: gomaxprocs=1 idleprocs=0 threads=3 spinningthreads=0 idlethreads=1
+runqueue=0 [9]</pre></td></tr></table>
+</div>
+</div>
+<ul>
+<li>sched：每一行都代表调度器的调试信息，后面提示的毫秒数表示启动到现在的运行时间，输出的时间间隔受 schedtrace 的值影响。</li>
+<li>gomaxprocs：当前的 CPU 核心数（GOMAXPROCS 的当前值）。</li>
+<li>idleprocs：空闲的处理器数量，后面的数字表示当前的空闲数量。</li>
+<li>threads：OS 线程数量，后面的数字表示当前正在运行的线程数量。</li>
+<li>spinningthreads：自旋状态的 OS 线程数量。</li>
+<li>idlethreads：空闲的线程数量。</li>
+<li>runqueue：全局队列中中的 Goroutine 数量，而后面的 [0 0 1 1] 则分别代表这 4 个 P 的本地队列正在运行的 Goroutine 数量。</li>
+</ul>
+
+<p>自旋线程的这个说法，是因为 Go Scheduler 的设计者在考虑了 “OS 的资源利用率” 以及 “频繁的线程抢占给 OS 带来的负载” 之后，提出了 “Spinning Thread” 的概念。也就是当 “自旋线程” 没有找到可供其调度执行的 Goroutine 时，并不会销毁该线程 ，而是采取 “自旋” 的操作保存了下来。虽然看起来这是浪费了一些资源，但是考虑一下 syscall 的情景就可以知道，比起 “自旋&rdquo;，线程间频繁的抢占以及频繁的创建和销毁操作可能带来的危害会更大。</p>
+
+<p>Go运行时给了我们很多有用的摘要信息。当我们看第一秒的跟踪数据时，我们看到一个goroutine正在运行，而其它9个都在等待：</p>
+
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200211231120.png" alt="" /></p>
+
+<p>图1中处理器由字符P代表，线程由M代表，goroutine由G代表。我们看到全局run队列为空，处理器正在执行一个goroutine。其余9在本地队列中等待。</p>
+
+<p>如果我们配置多个处理器会怎样呢？让我们增加GOMAXPROCS 看看输出结果:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">GOMAXPROCS=2 GODEBUG=schedtrace=1000 ./example
+SCHED 0ms: gomaxprocs=2 idleprocs=1 threads=2 spinningthreads=0
+idlethreads=0 runqueue=0 [0 0]
+SCHED 1002ms: gomaxprocs=2 idleprocs=0 threads=4 spinningthreads=1
+idlethreads=1 runqueue=0 [0 4]
+SCHED 2006ms: gomaxprocs=2 idleprocs=0 threads=4 spinningthreads=0
+idlethreads=1 runqueue=0 [4 4]
+…
+SCHED 6024ms: gomaxprocs=2 idleprocs=0 threads=4 spinningthreads=0
+idlethreads=1 runqueue=2 [3 3]
+…
+SCHED 10049ms: gomaxprocs=2 idleprocs=0 threads=4 spinningthreads=0
+idlethreads=1 runqueue=4 [2 2]
+…
+SCHED 13067ms: gomaxprocs=2 idleprocs=0 threads=4 spinningthreads=0
+idlethreads=1 runqueue=6 [1 1]
+…
+SCHED 17084ms: gomaxprocs=2 idleprocs=0 threads=4 spinningthreads=0
+idlethreads=1 runqueue=8 [0 0]
+…
+SCHED 21100ms: gomaxprocs=2 idleprocs=2 threads=4 spinningthreads=0
+idlethreads=2 runqueue=0 [0 0]</pre></td></tr></table>
+</div>
+</div>
+<p>让我们将视线放在第二秒：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">SCHED 2002ms: gomaxprocs=2 idleprocs=0 threads=4 spinningthreads=0
+idlethreads=1 runqueue=0 [4 4]
+2002ms        : This is the trace for the 2 second mark.
+gomaxprocs=2  : 2 processors are configured for this program.
+threads=4     : 4 threads exist. 2 for processors and 2 for the runtime.
+idlethreads=1 : 1 idle thread (3 threads running).
+idleprocs=0   : 0 processors are idle (2 processors busy).
+runqueue=0    : All runnable goroutines have been moved to a local run queue.
+[4 4]         : 4 goroutines are waiting inside each local run queue.</pre></td></tr></table>
+</div>
+</div>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200211231241.png" alt="" /></p>
+
+<p>让我们看第二秒的信息，可以看到goroutine是如何被处理器运行的。我们也可以看到有8个goroutine在本地run队列中等待，每个本地run队列包含4个等待的goroutine。</p>
+
+<p>让我们再来看第6秒的信息：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">SCHED 6024ms: gomaxprocs=2 idleprocs=0 threads=4 spinningthreads=0
+idlethreads=1 runqueue=2 [3 3]
+idleprocs=0 : 0 processors are idle (2 processors busy).
+runqueue=2  : 2 goroutines returned and are waiting to be terminated.
+[3 3]       : 3 goroutines are waiting inside each local run queue.</pre></td></tr></table>
+</div>
+</div>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200211231308.png" alt="" /></p>
+
+<p>第6秒数据有些变化，如图3所示，两个goroutine完成了它们的任务，放回到全局run队列中。当然我们还是有两个goruntine在运行(G6,G7)，每个P运行一个。每个本地run队列中还有3个goroutine在等待。</p>
+
+<p>注意:</p>
+
+<p>在很多情况下goroutine在终止前并没有被放回到全局run队列。本文中的例子比较特殊，它的方法体是一个for循环，并没有调用其它函数，而且运行时间超过10ms。10毫秒是调度器的调度标杆，过了10毫秒的执行时间，调度器就会尝试占用(preempt)这个goroutine。本例中的goroutine没有被占用是因为它们没有调用其它函数。本例中一旦goroutine执行到wg.Done调用，它们立即被占用，然后移动到全局run队列等待终止。</p>
+
+<p>在17秒我们看到只有两个goroutine还在运行:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">SCHED 17084ms: gomaxprocs=2 idleprocs=0 threads=4 spinningthreads=0
+idlethreads=1 runqueue=8 [0 0]
+idleprocs=0 : 0 processors are idle (2 processors busy).
+runqueue=8  : 8 goroutines returned and are waiting to be terminated.
+[0 0]       : No goroutines are waiting inside any local run queue.</pre></td></tr></table>
+</div>
+</div>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200211231428.png" alt="" /></p>
+
+<p>从图4可以看出，8个goroutine被移动到全局run队列等待终止。两个goroutine(G12和G13)还在运行，本地run队列都为空。</p>
+
+<p>最后在第21秒：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">SCHED 21100ms: gomaxprocs=2 idleprocs=2 threads=4 spinningthreads=0
+idlethreads=2 runqueue=0 [0 0]
+idleprocs=2 : 2 processors are idle (0 processors busy).
+runqueue=0  : All the goroutines that were in the queue have been terminated.
+[0 0]       : No goroutines are waiting inside any local run queue.</pre></td></tr></table>
+</div>
+</div>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200211231452.png" alt="" /></p>
+
+<p>如图5所示，这时那10个goroutine都已经完成任务被终止。</p>
+
+<h2 id="scheddetail">scheddetail</h2>
+
+<p>如果我们想要更详细的看到调度器的完整信息时，我们可以增加 scheddetail 参数，就能够更进一步的查看调度的细节逻辑，如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">$ GODEBUG=scheddetail=1,schedtrace=1000 ./awesomeProject
+SCHED 1000ms: gomaxprocs=4 idleprocs=0 threads=5 spinningthreads=0 idlethreads=0 runqueue=0 gcwaiting=0 nmidlelocked=0 stopwait=0 sysmonwait=0
+  P0: status=1 schedtick=2 syscalltick=0 m=3 runqsize=3 gfreecnt=0
+  P1: status=1 schedtick=2 syscalltick=0 m=4 runqsize=1 gfreecnt=0
+  P2: status=1 schedtick=2 syscalltick=0 m=0 runqsize=1 gfreecnt=0
+  P3: status=1 schedtick=1 syscalltick=0 m=2 runqsize=1 gfreecnt=0
+  M4: p=1 curg=18 mallocing=0 throwing=0 preemptoff= locks=0 dying=0 spinning=false blocked=false lockedg=-1
+  M3: p=0 curg=22 mallocing=0 throwing=0 preemptoff= locks=0 dying=0 spinning=false blocked=false lockedg=-1
+  M2: p=3 curg=24 mallocing=0 throwing=0 preemptoff= locks=0 dying=0 spinning=false blocked=false lockedg=-1
+  M1: p=-1 curg=-1 mallocing=0 throwing=0 preemptoff= locks=1 dying=0 spinning=false blocked=false lockedg=-1
+  M0: p=2 curg=26 mallocing=0 throwing=0 preemptoff= locks=0 dying=0 spinning=false blocked=false lockedg=-1
+  G1: status=4(semacquire) m=-1 lockedm=-1
+  G2: status=4(force gc (idle)) m=-1 lockedm=-1
+  G3: status=4(GC sweep wait) m=-1 lockedm=-1
+  G17: status=1() m=-1 lockedm=-1
+  G18: status=2() m=4 lockedm=-1
+  G19: status=1() m=-1 lockedm=-1
+  G20: status=1() m=-1 lockedm=-1
+  G21: status=1() m=-1 lockedm=-1
+  G22: status=2() m=3 lockedm=-1
+  G23: status=1() m=-1 lockedm=-1
+  G24: status=2() m=2 lockedm=-1
+  G25: status=1() m=-1 lockedm=-1
+  G26: status=2() m=0 lockedm=-1</pre></td></tr></table>
+</div>
+</div>
+<p>在这里我们抽取了 1000ms 时的调试信息来查看，信息量比较大，我们先从每一个字段开始了解。如下：</p>
+
+<h3 id="g">G</h3>
+
+<ul>
+<li>status：G 的运行状态。</li>
+<li>m：隶属哪一个 M。-1表示未分配.</li>
+<li>lockedm：是否有锁定 M。-1表示否.</li>
+</ul>
+
+<p>在第一点中我们有提到 G 的运行状态，这对于分析内部流转非常的有用，共涉及如下 9 种状态：</p>
+
+<table>
+<thead>
+<tr>
+<th>状态</th>
+<th>值</th>
+<th>含义</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>_Gidle</td>
+<td>0</td>
+<td>刚刚被分配，还没有进行初始化。</td>
+</tr>
+
+<tr>
+<td>_Grunnable</td>
+<td>1</td>
+<td>已经在运行队列中，还没有执行用户代码。</td>
+</tr>
+
+<tr>
+<td>_Grunning</td>
+<td>2</td>
+<td>不在运行队列里中，已经可以执行用户代码，此时已经分配了 M 和 P。</td>
+</tr>
+
+<tr>
+<td>_Gsyscall</td>
+<td>3</td>
+<td>正在执行系统调用，此时分配了 M。</td>
+</tr>
+
+<tr>
+<td>_Gwaiting</td>
+<td>4</td>
+<td>在运行时被阻止，没有执行用户代码，也不在运行队列中，此时它正在某处阻塞等待中。</td>
+</tr>
+
+<tr>
+<td>_Gmoribund_unused</td>
+<td>5</td>
+<td>尚未使用，但是在 gdb 中进行了硬编码。</td>
+</tr>
+
+<tr>
+<td>_Gdead</td>
+<td>6</td>
+<td>尚未使用，这个状态可能是刚退出或是刚被初始化，此时它并没有执行用户代码，有可能有也有可能没有分配堆栈。</td>
+</tr>
+
+<tr>
+<td>_Genqueue_unused</td>
+<td>7</td>
+<td>尚未使用。</td>
+</tr>
+
+<tr>
+<td>_Gcopystack</td>
+<td>8</td>
+<td>正在复制堆栈，并没有执行用户代码，也不在运行队列中。</td>
+</tr>
+
+<tr>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+
+<p>在理解了各类的状态的意思后，我们结合上述案例看看，如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">G1: status=4(semacquire) m=-1 lockedm=-1
+G2: status=4(force gc (idle)) m=-1 lockedm=-1
+G3: status=4(GC sweep wait) m=-1 lockedm=-1
+G17: status=1() m=-1 lockedm=-1
+G18: status=2() m=4 lockedm=-1</pre></td></tr></table>
+</div>
+</div>
+<p>在这个片段中，G1 的运行状态为 _Gwaiting，并没有分配 M 和锁定。这时候你可能好奇在片段中括号里的是什么东西呢，其实是因为该 status=4 是表示 Goroutine 在运行时时被阻止，而阻止它的事件就是 semacquire 事件，是因为 semacquire 会检查信号量的情况，在合适的时机就调用 goparkunlock 函数，把当前 Goroutine 放进等待队列，并把它设为 _Gwaiting 状态。</p>
+
+<p>那么在实际运行中还有什么原因会导致这种现象呢，我们一起看看，如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">    <span class="nx">waitReasonZero</span>                                    <span class="c1">// &#34;&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonGCAssistMarking</span>                         <span class="c1">// &#34;GC assist marking&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonIOWait</span>                                  <span class="c1">// &#34;IO wait&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonChanReceiveNilChan</span>                      <span class="c1">// &#34;chan receive (nil chan)&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonChanSendNilChan</span>                         <span class="c1">// &#34;chan send (nil chan)&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonDumpingHeap</span>                             <span class="c1">// &#34;dumping heap&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonGarbageCollection</span>                       <span class="c1">// &#34;garbage collection&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonGarbageCollectionScan</span>                   <span class="c1">// &#34;garbage collection scan&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonPanicWait</span>                               <span class="c1">// &#34;panicwait&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonSelect</span>                                  <span class="c1">// &#34;select&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonSelectNoCases</span>                           <span class="c1">// &#34;select (no cases)&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonGCAssistWait</span>                            <span class="c1">// &#34;GC assist wait&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonGCSweepWait</span>                             <span class="c1">// &#34;GC sweep wait&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonChanReceive</span>                             <span class="c1">// &#34;chan receive&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonChanSend</span>                                <span class="c1">// &#34;chan send&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonFinalizerWait</span>                           <span class="c1">// &#34;finalizer wait&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonForceGGIdle</span>                             <span class="c1">// &#34;force gc (idle)&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonSemacquire</span>                              <span class="c1">// &#34;semacquire&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonSleep</span>                                   <span class="c1">// &#34;sleep&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonSyncCondWait</span>                            <span class="c1">// &#34;sync.Cond.Wait&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonTimerGoroutineIdle</span>                      <span class="c1">// &#34;timer goroutine (idle)&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonTraceReaderBlocked</span>                      <span class="c1">// &#34;trace reader (blocked)&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonWaitForGCCycle</span>                          <span class="c1">// &#34;wait for GC cycle&#34;
+</span><span class="c1"></span>    <span class="nx">waitReasonGCWorkerIdle</span>                            <span class="o">//</span> <span class="s">&#34;GC worker (idle)&#34;</span></code></pre></td></tr></table>
+</div>
+</div>
+<p>我们通过以上 waitReason 可以了解到 Goroutine 会被暂停运行的原因要素，也就是会出现在括号中的事件。</p>
+
+<h3 id="m">M</h3>
+
+<ul>
+<li>p：隶属哪一个 P。</li>
+<li>curg：当前正在使用哪个 G。</li>
+<li>runqsize：运行队列中的 G 数量。</li>
+<li>gfreecnt：可用的G（状态为 Gdead）。</li>
+<li>mallocing：是否正在分配内存。</li>
+<li>throwing：是否抛出异常。</li>
+<li>preemptoff：不等于空字符串的话，保持 curg 在这个 m 上运行。</li>
+</ul>
+
+<h3 id="p">P</h3>
+
+<ul>
+<li>status：P 的运行状态。</li>
+<li>schedtick：P 的调度次数。</li>
+<li>syscalltick：P 的系统调用次数。</li>
+<li>m：隶属哪一个 M。</li>
+<li>runqsize：运行队列中的 G 数量。</li>
+<li>gfreecnt：可用的G（状态为 Gdead）。</li>
+</ul>
+
+<table>
+<thead>
+<tr>
+<th>状态</th>
+<th>值</th>
+<th>含义</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>_Pidle</td>
+<td>0</td>
+<td>刚刚被分配，还没有进行进行初始化。</td>
+</tr>
+
+<tr>
+<td>_Prunning</td>
+<td>1</td>
+<td>当 M 与 P 绑定调用 acquirep 时，P 的状态会改变为 _Prunning。</td>
+</tr>
+
+<tr>
+<td>_Psyscall</td>
+<td>2</td>
+<td>正在执行系统调用。</td>
+</tr>
+
+<tr>
+<td>_Pgcstop</td>
+<td>3</td>
+<td>暂停运行，此时系统正在进行 GC，直至 GC 结束后才会转变到下一个状态阶段。</td>
+</tr>
+
+<tr>
+<td>_Pdead</td>
+<td>4</td>
+<td>废弃，不再使用。</td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="实战">实战</h2>
+
+<h1 id="gc观察">GC观察</h1>
+
+<p>本节着重点在 GC 的观察上，主要涉及 gctrace 参数，我们通过设置 gctrace=1 后就可以使得垃圾收集器向标准错误流发出 GC 运行信息。</p>
+
+<h2 id="涉及术语">涉及术语</h2>
+
+<ul>
+<li>mark：标记阶段。</li>
+<li>markTermination：标记结束阶段。</li>
+<li>mutator assist：辅助 GC，是指在 GC 过程中 mutator 线程会并发运行，而 mutator assist 机制会协助 GC 做一部分的工作。</li>
+<li>heap_live：在 Go 的内存管理中，span 是内存页的基本单元，每页大小为 8kb，同时 Go 会根据对象的大小不同而分配不同页数的 span，而 heap_live 就代表着所有 span 的总大小。</li>
+<li>dedicated / fractional / idle：在标记阶段会分为三种不同的 mark worker 模式，分别是 * dedicated、fractional 和 idle，它们代表着不同的专注程度，其中 dedicated 模式最专注，是完整的 GC 回收行为，fractional 只会干部分的 GC 行为，idle 最轻松。这里你只需要了解它是不同专注程度的 mark worker 就好了。</li>
+</ul>
+
+<table>
+<thead>
+<tr>
+<th>行为</th>
+<th>会不会 STW</th>
+<th>为什么</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>标记开始</td>
+<td>会</td>
+<td>在开始标记时，准备根对象的扫描，会打开写屏障（Write Barrier） 和 辅助GC（mutator assist），而回收器和应用程序是并发运行的，因此会暂停当前正在运行的所有 Goroutine。</td>
+</tr>
+
+<tr>
+<td>并发标记中</td>
+<td>不会</td>
+<td>标记阶段，主要目的是标记堆内存中仍在使用的值。</td>
+</tr>
+
+<tr>
+<td>标记结束</td>
+<td>会</td>
+<td>在完成标记任务后，将重新扫描部分根对象，这时候会禁用写屏障（Write Barrier）和辅助GC（mutator assist），而标记阶段和应用程序是并发运行的，所以在标记阶段可能会有新的对象产生，因此在重新扫描时需要进行 STW。</td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="演示代码-1">演示代码</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;log&#34;</span>
+	<span class="s">&#34;runtime&#34;</span>
+	<span class="s">&#34;time&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">f</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">container</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">int</span><span class="p">,</span> <span class="mi">8</span><span class="p">)</span>
+	<span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;&gt; loop.&#34;</span><span class="p">)</span>
+	<span class="c1">// slice会动态扩容，用它来做堆内存的申请
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">32</span><span class="o">*</span><span class="mi">1000</span><span class="o">*</span><span class="mi">1000</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">container</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">container</span><span class="p">,</span> <span class="nx">i</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;&lt; loop.&#34;</span><span class="p">)</span>
+	<span class="c1">// container在f函数执行完毕后不再使用
+</span><span class="c1"></span><span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;start.&#34;</span><span class="p">)</span>
+	<span class="nf">f</span><span class="p">()</span>
+
+	<span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;force gc.&#34;</span><span class="p">)</span>
+	<span class="nx">runtime</span><span class="p">.</span><span class="nf">GC</span><span class="p">()</span> <span class="c1">// 调用强制gc函数
+</span><span class="c1"></span>
+	<span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;done.&#34;</span><span class="p">)</span>
+	<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="mi">1</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Hour</span><span class="p">)</span> <span class="c1">// 保持程序不退出
+</span><span class="c1"></span><span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<h2 id="gctrace">gctrace</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">$ GODEBUG=gctrace=1 go run main.go    
+gc 1 @0.001s 0%: 0.005+0.92+0.004 ms clock, 0.011+0.027/0/0.13+0.009 ms cpu, 4-&gt;6-&gt;2 MB, 5 MB goal, 2 P
+gc 2 @0.003s 0%: 0.002+0.43+0.002 ms clock, 0.004+0.013/0/0.32+0.005 ms cpu, 5-&gt;5-&gt;1 MB, 6 MB goal, 2 P
+gc 3 @0.003s 1%: 0.002+0.47+0.003 ms clock, 0.004+0.027/0/0.44+0.006 ms cpu, 4-&gt;4-&gt;2 MB, 5 MB goal, 2 P
+gc 4 @0.004s 1%: 0.002+0.50+0.003 ms clock, 0.004+0.022/0/0.48+0.007 ms cpu, 5-&gt;5-&gt;2 MB, 6 MB goal, 2 P
+gc 5 @0.004s 1%: 0.001+1.2+0.003 ms clock, 0.003+0.070/0/1.1+0.006 ms cpu, 6-&gt;6-&gt;3 MB, 7 MB goal, 2 P
+gc 6 @0.006s 1%: 0.002+1.8+0.004 ms clock, 0.004+0.027/0.001/1.8+0.008 ms cpu, 8-&gt;8-&gt;4 MB, 9 MB goal, 2 P
+gc 7 @0.008s 1%: 0.002+2.4+0.005 ms clock, 0.005+0.042/0/2.4+0.010 ms cpu, 10-&gt;10-&gt;5 MB, 11 MB goal, 2 P
+gc 8 @0.010s 1%: 0.002+1.0+0.004 ms clock, 0.005+0.025/0/0.99+0.008 ms cpu, 12-&gt;12-&gt;6 MB, 13 MB goal, 2 P
+gc 9 @0.012s 1%: 0.011+1.8+0.005 ms clock, 0.022+0.025/0/1.7+0.010 ms cpu, 15-&gt;15-&gt;8 MB, 16 MB goal, 2 P
+gc 10 @0.014s 1%: 0.002+3.8+0.004 ms clock, 0.005+0.014/0/3.8+0.009 ms cpu, 19-&gt;19-&gt;10 MB, 20 MB goal, 2 P
+gc 11 @0.018s 1%: 0.003+2.0+0.004 ms clock, 0.006+0.026/0/2.0+0.008 ms cpu, 24-&gt;24-&gt;13 MB, 25 MB goal, 2 P
+gc 12 @0.020s 1%: 0.002+3.0+0.005 ms clock, 0.005+0.028/0/3.0+0.011 ms cpu, 30-&gt;30-&gt;16 MB, 31 MB goal, 2 P
+gc 13 @0.024s 0%: 0.003+9.0+0.004 ms clock, 0.006+0.028/0/9.0+0.009 ms cpu, 38-&gt;38-&gt;21 MB, 39 MB goal, 2 P
+gc 14 @0.033s 0%: 0.002+4.6+0.005 ms clock, 0.005+0.036/0/4.6+0.011 ms cpu, 47-&gt;47-&gt;26 MB, 48 MB goal, 2 P
+gc 15 @0.039s 0%: 0.003+13+0.004 ms clock, 0.007+0.024/0/13+0.009 ms cpu, 59-&gt;59-&gt;33 MB, 60 MB goal, 2 P
+gc 16 @0.053s 0%: 0.002+17+0.005 ms clock, 0.005+0.030/0.027/17+0.011 ms cpu, 74-&gt;74-&gt;41 MB, 75 MB goal, 2 P
+gc 17 @0.072s 0%: 0.049+29+0.004 ms clock, 0.098+0.015/0.091/29+0.009 ms cpu, 93-&gt;93-&gt;51 MB, 94 MB goal, 2 P
+gc 18 @0.103s 0%: 0.003+29+0.005 ms clock, 0.007+0.031/0.029/29+0.010 ms cpu, 116-&gt;116-&gt;64 MB, 117 MB goal, 2 P
+gc 19 @0.134s 0%: 0.003+41+0.004 ms clock, 0.006+0.016/0.030/41+0.009 ms cpu, 145-&gt;145-&gt;80 MB, 146 MB goal, 2 P
+gc 20 @0.178s 0%: 0.003+44+0.005 ms clock, 0.006+0.016/0.045/44+0.010 ms cpu, 181-&gt;181-&gt;101 MB, 182 MB goal, 2 P
+gc 21 @0.223s 0%: 0.003+55+0.004 ms clock, 0.006+0.015/0.044/55+0.008 ms cpu, 227-&gt;227-&gt;126 MB, 228 MB goal, 2 P
+gc 22 @0.281s 0%: 0.004+67+0.004 ms clock, 0.009+0.048/0.023/67+0.008 ms cpu, 284-&gt;284-&gt;157 MB, 285 MB goal, 2 P
+gc 23 @0.352s 0%: 0.004+90+0.005 ms clock, 0.008+0.035/0.042/90+0.011 ms cpu, 355-&gt;355-&gt;197 MB, 356 MB goal, 2 P
+2019/04/06 14:28:27 &lt; loop.
+2019/04/06 14:28:27 force gc.
+gc 24 @0.446s 0%: 0.005+107+0.007 ms clock, 0.010+0.015/0.050/107+0.014 ms cpu, 444-&gt;444-&gt;0 MB, 445 MB goal, 2 P (forced)
+2019/04/06 14:28:27 done.
+gc 25 @0.554s 0%: 0.077+0.071+0.002 ms clock, 0.15+0/0.078/0.036+0.004 ms cpu, 0-&gt;0-&gt;0 MB, 8 MB goal, 2 P (forced)</pre></td></tr></table>
+</div>
+</div>
+<h2 id="格式">格式</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">gc # @#s #%: #+#+# ms clock, #+#/#/#+# ms cpu, #-&gt;#-&gt;# MB, # MB goal, # P</pre></td></tr></table>
+</div>
+</div>
+<ul>
+<li>gc #：GC 执行次数的编号，每次叠加。</li>
+<li>@#s：自程序启动后到当前的具体秒数。</li>
+<li>#%：自程序启动以来在GC中花费的时间百分比。</li>
+<li>#+&hellip;+#：GC 的标记工作共使用的 CPU 时间占总 CPU 时间的百分比。</li>
+<li>#-&gt;#-&gt;# MB：分别表示开始mark阶段前的heap_live大小；开始markTermination阶段前的heap_live大小和被标记对象的大小(当前活跃堆内存的大小)。444-&gt;444-&gt;0 MB, 表示垃圾回收器已经把444M的内存标记为非活跃的内存。注意:垃圾回收器回收了应用层的内存后，并不会立即将内存归还给系统。</li>
+<li>#MB goal：下一次触发 GC 的内存占用阈值。</li>
+<li>#P：当前使用的处理器 P 的数量。</li>
+</ul>
+
+<p>如果信息以&rdquo;(forced)&ldquo;结尾，那么这次GC是被runtime.GC()调用所触发。</p>
+
+<p>如果gctrace设置了任何大于0的值，还会在垃圾回收器将内存归还给系统时打印一条汇总信息。</p>
+
+<p>这个将内存归还给系统的操作叫做scavenging。</p>
+
+<p>这个汇总信息的格式以后可能会发生变化。</p>
+
+<p>目前它的格式：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span><span class="lnt">2
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">scvg#: # MB released  printed only if non-zero
+scvg#: inuse: # idle: # sys: # released: # consumed: # (MB)</pre></td></tr></table>
+</div>
+</div>
+<p>各字段的含义:</p>
+
+<ul>
+<li>scvg#        scavenge次数的变化，每次scavenge时递增</li>
+<li>inuse: #     MB 垃圾回收器中使用的大小</li>
+<li>idle: #      MB 垃圾回收器中空闲等待归还的大小</li>
+<li>sys: #       MB 垃圾回收器中系统映射内存的大小</li>
+<li>released: #  MB 归还给系统的大小</li>
+<li>consumed: #  MB 从系统申请的大小</li>
+</ul>
+
+<h2 id="案例">案例</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><span class="lnt">1
+</span></pre></td>
+<td class="lntd">
+<pre class="chroma">gc 7 @0.140s 1%: 0.031+2.0+0.042 ms clock, 0.12+0.43/1.8/0.049+0.17 ms cpu, 4-&gt;4-&gt;1 MB, 5 MB goal, 4 P</pre></td></tr></table>
+</div>
+</div>
+<ul>
+<li>gc 7：第 7 次 GC。</li>
+<li>@0.140s：当前是程序启动后的 0.140s。</li>
+<li>1%：程序启动后到现在共花费 1% 的时间在 GC 上。</li>
+<li>0.031+2.0+0.042 ms clock：
+
+<ul>
+<li>0.031：表示单个 P 在 mark 阶段的 STW 时间。</li>
+<li>2.0：表示所有 P 的 mark concurrent（并发标记）所使用的时间。</li>
+<li>0.042：表示单个 P 的 markTermination 阶段的 STW 时间。</li>
+</ul></li>
+<li>0.12+0.<sup>43</sup>&frasl;<sub>1</sub>.<sup>8</sup>&frasl;<sub>0</sub>.049+0.17 ms cpu：
+
+<ul>
+<li>0.12：表示整个进程在 mark 阶段 STW 停顿的时间。</li>
+<li>0.<sup>43</sup>&frasl;<sub>1</sub>.<sup>8</sup>&frasl;<sub>0</sub>.049：0.43 表示 mutator assist 占用的时间，1.8 表示 dedicated + fractional 占用的时间，0.049 表示 idle 占用的时间。</li>
+</ul></li>
+<li>0.17ms：0.17 表示整个进程在 markTermination 阶段 STW 时间。</li>
+<li>4-&gt;4-&gt;1 MB：
+
+<ul>
+<li>4：表示开始 mark 阶段前的 heap_live 大小。</li>
+<li>4：表示开始 markTermination 阶段前的 heap_live 大小。</li>
+<li>1：表示被标记对象的大小。</li>
+</ul></li>
+<li>5 MB goal：表示下一次触发 GC 回收的阈值是 5 MB。</li>
+<li>4 P：本次 GC 一共涉及多少个 P。</li>
+</ul>
+
+<h2 id="副作用-runtime调度阻塞">副作用:runtime调度阻塞</h2>
+
+<p>当你开启GODEBUG=gctrace=1，并且日志是重定向到文件，那么有概率会造成runtime调度阻塞。</p>
+
+<h3 id="查找问题">查找问题</h3>
+
+<p>开始业务方说我们的grpc sidecar时不时发生高时延抖动，我对比了监控上的性能数据，貌似是磁盘io引起的，我迅速调高了日志级别及修改日志库为异步写入模式。接口的时延抖动问题确实减少了，但依旧还是出现。</p>
+
+<p>通过项目代码变更得知，一同事在部署脚本里加入了gctrace监控。开始不觉得是这个问题引起的，但近一段时间也就这一个commit提交，我就尝试回滚代码，问题居然就这么解决了。</p>
+
+<p>我们先来分析下golang gc gctrace相关的代码，我们知道go 1.12的stop the world会发生mark的两个阶段，一个是mark setup开始阶段，另一个就是mark termination收尾阶段。gc在进行到gcMarkTermination时，会stop the world，然后判断是否需要输出gctrace的调试日志。</p>
+
+<p>简单说，这个打印输出的过程是在stop the world里。默认是打印到pts伪终端上，这个过程是纯内存操作，理论是很快的。</p>
+
+<p>但如果在开启gctrace时进行文件重定向，那么他的操作就是文件io操作了。如果这时候你的服务里有大量的磁盘io的操作，本来写page buffer的操作，会触发阻塞flush磁盘。那么这时候go gctrace打印日志是在开启stop the world之后操作的，因为磁盘繁忙，只能是等待磁盘io操作完，这里的stw会影响runtime对其他协程的调度。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcMarkTermination</span><span class="p">(</span><span class="nx">nextTriggerRatio</span> <span class="kt">float64</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// World is stopped  已经开启了stop the world
+</span><span class="c1"></span>    <span class="o">...</span>
+    <span class="c1">// Print gctrace before dropping worldsema.
+</span><span class="c1"></span>
+    <span class="k">if</span> <span class="nx">debug</span><span class="p">.</span><span class="nx">gctrace</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">util</span> <span class="o">:=</span> <span class="nb">int</span><span class="p">(</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">gc_cpu_fraction</span> <span class="o">*</span> <span class="mi">100</span><span class="p">)</span>
+
+		<span class="kd">var</span> <span class="nx">sbuf</span> <span class="p">[</span><span class="mi">24</span><span class="p">]</span><span class="kt">byte</span>
+		<span class="nf">printlock</span><span class="p">()</span>
+		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;gc &#34;</span><span class="p">,</span> <span class="nx">memstats</span><span class="p">.</span><span class="nx">numgc</span><span class="p">,</span>
+			<span class="s">&#34; @&#34;</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nf">itoaDiv</span><span class="p">(</span><span class="nx">sbuf</span><span class="p">[:],</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">work</span><span class="p">.</span><span class="nx">tSweepTerm</span><span class="o">-</span><span class="nx">runtimeInitTime</span><span class="p">)</span><span class="o">/</span><span class="mf">1e6</span><span class="p">,</span> <span class="mi">3</span><span class="p">)),</span> <span class="s">&#34;s &#34;</span><span class="p">,</span>
+			<span class="nx">util</span><span class="p">,</span> <span class="s">&#34;%: &#34;</span><span class="p">)</span>
+		<span class="nx">prev</span> <span class="o">:=</span> <span class="nx">work</span><span class="p">.</span><span class="nx">tSweepTerm</span>
+		<span class="k">for</span> <span class="nx">i</span><span class="p">,</span> <span class="nx">ns</span> <span class="o">:=</span> <span class="k">range</span> <span class="p">[]</span><span class="kt">int64</span><span class="p">{</span><span class="nx">work</span><span class="p">.</span><span class="nx">tMark</span><span class="p">,</span> <span class="nx">work</span><span class="p">.</span><span class="nx">tMarkTerm</span><span class="p">,</span> <span class="nx">work</span><span class="p">.</span><span class="nx">tEnd</span><span class="p">}</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">i</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nb">print</span><span class="p">(</span><span class="s">&#34;+&#34;</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="nb">print</span><span class="p">(</span><span class="nb">string</span><span class="p">(</span><span class="nf">fmtNSAsMS</span><span class="p">(</span><span class="nx">sbuf</span><span class="p">[:],</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">ns</span><span class="o">-</span><span class="nx">prev</span><span class="p">))))</span>
+			<span class="nx">prev</span> <span class="p">=</span> <span class="nx">ns</span>
+		<span class="p">}</span>
+		<span class="nb">print</span><span class="p">(</span><span class="s">&#34; ms clock, &#34;</span><span class="p">)</span>
+		<span class="k">for</span> <span class="nx">i</span><span class="p">,</span> <span class="nx">ns</span> <span class="o">:=</span> <span class="k">range</span> <span class="p">[]</span><span class="kt">int64</span><span class="p">{</span><span class="nx">sweepTermCpu</span><span class="p">,</span> <span class="nx">gcController</span><span class="p">.</span><span class="nx">assistTime</span><span class="p">,</span> <span class="nx">gcController</span><span class="p">.</span><span class="nx">dedicatedMarkTime</span> <span class="o">+</span> <span class="nx">gcController</span><span class="p">.</span><span class="nx">fractionalMarkTime</span><span class="p">,</span> <span class="nx">gcController</span><span class="p">.</span><span class="nx">idleMarkTime</span><span class="p">,</span> <span class="nx">markTermCpu</span><span class="p">}</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">i</span> <span class="o">==</span> <span class="mi">2</span> <span class="o">||</span> <span class="nx">i</span> <span class="o">==</span> <span class="mi">3</span> <span class="p">{</span>
+				<span class="c1">// Separate mark time components with /.
+</span><span class="c1"></span>				<span class="nb">print</span><span class="p">(</span><span class="s">&#34;/&#34;</span><span class="p">)</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">i</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nb">print</span><span class="p">(</span><span class="s">&#34;+&#34;</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="nb">print</span><span class="p">(</span><span class="nb">string</span><span class="p">(</span><span class="nf">fmtNSAsMS</span><span class="p">(</span><span class="nx">sbuf</span><span class="p">[:],</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">ns</span><span class="p">))))</span>
+		<span class="p">}</span>
+		<span class="nb">print</span><span class="p">(</span><span class="s">&#34; ms cpu, &#34;</span><span class="p">,</span>
+			<span class="nx">work</span><span class="p">.</span><span class="nx">heap0</span><span class="o">&gt;&gt;</span><span class="mi">20</span><span class="p">,</span> <span class="s">&#34;-&gt;&#34;</span><span class="p">,</span> <span class="nx">work</span><span class="p">.</span><span class="nx">heap1</span><span class="o">&gt;&gt;</span><span class="mi">20</span><span class="p">,</span> <span class="s">&#34;-&gt;&#34;</span><span class="p">,</span> <span class="nx">work</span><span class="p">.</span><span class="nx">heap2</span><span class="o">&gt;&gt;</span><span class="mi">20</span><span class="p">,</span> <span class="s">&#34; MB, &#34;</span><span class="p">,</span>
+			<span class="nx">work</span><span class="p">.</span><span class="nx">heapGoal</span><span class="o">&gt;&gt;</span><span class="mi">20</span><span class="p">,</span> <span class="s">&#34; MB goal, &#34;</span><span class="p">,</span>
+			<span class="nx">work</span><span class="p">.</span><span class="nx">maxprocs</span><span class="p">,</span> <span class="s">&#34; P&#34;</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">work</span><span class="p">.</span><span class="nx">userForced</span> <span class="p">{</span>
+			<span class="nb">print</span><span class="p">(</span><span class="s">&#34; (forced)&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;\n&#34;</span><span class="p">)</span>
+		<span class="nf">printunlock</span><span class="p">()</span>
+	<span class="p">}</span>
+
+	<span class="nf">semrelease</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">worldsema</span><span class="p">)</span>  <span class="c1">// 关闭stop the world
+</span><span class="c1"></span>
+        <span class="o">...</span>
+<span class="p">}</span></code></pre></td></tr></table>
+</div>
+</div>
+<h3 id="解决方法">解决方法</h3>
+
+<p>线上就不应该长期的去监控gctrace的日志。另外需要把较为频繁的业务日志进行采样输出。前面有说，我们第一个解决方法就修改日志的写入模式，当几千个协程写日志时，不利于磁盘的高效使用和性能，可以借助disruptor做日志缓存，然后由独立的协程来写入日志。</p>
+
+<p>除此之外，还发现一个问题，开始时整个golang进程开了几百个线程，这是由于过多的写操作超过磁盘瓶颈，继而触发了disk io阻塞。这时候golang runtime sysmon检测到syscall超时，继而解绑mp，接着实例化新的m线程进行绑定p。</p>
+
+<p>我们可以想到如果函数gcMarkTermination输出日志放在关闭stop the world后面，这样就不会影响runtime调度。当然，这个在线上重定向go gctrace的问题本来就很奇葩。</p>
+
+<p>参考:<br />
+<a href="https://book.eddycjy.com/golang/tools/godebug-sched.html">https://book.eddycjy.com/golang/tools/godebug-sched.html</a><br />
+<a href="https://book.eddycjy.com/golang/tools/godebug-gc.html">https://book.eddycjy.com/golang/tools/godebug-gc.html</a><br />
+<a href="http://xiaorui.cc/2019/12/13/go-gctrace%E6%97%A5%E5%BF%97%E5%BC%95%E8%B5%B7runtime%E8%B0%83%E5%BA%A6%E9%98%BB%E5%A1%9E/">http://xiaorui.cc/2019/12/13/go-gctrace%E6%97%A5%E5%BF%97%E5%BC%95%E8%B5%B7runtime%E8%B0%83%E5%BA%A6%E9%98%BB%E5%A1%9E/</a><br />
+<a href="https://colobu.com/2016/04/19/Scheduler-Tracing-In-Go/">https://colobu.com/2016/04/19/Scheduler-Tracing-In-Go/</a></p>
+
     </div>
 
     <div class="post-copyright">
@@ -207,7 +1174,11 @@
           <a href="/tags/go/">Go</a>
           </div>
       <nav class="post-nav">
-        
+        <a class="prev" href="/post/memstats%E4%B8%8Egcstats/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">MemStats与GCStats</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
         <a class="next" href="/post/%E5%A0%86%E6%A0%88%E8%B7%9F%E8%B8%AAstack-trace/">
             <span class="next-text nav-default">堆栈跟踪:Stack-Trace</span>
             <span class="next-text nav-mobile">下一篇</span>
