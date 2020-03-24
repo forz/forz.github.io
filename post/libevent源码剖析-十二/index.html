@@ -25,7 +25,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.55.6 with theme even" />
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
 
 
 <link rel="canonical" href="/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E5%8D%81%E4%BA%8C/" />
@@ -47,21 +47,17 @@
 <meta property="og:description" content="Libevent本身不是多线程安全的，在多核的时代，如何能充分利用CPU的能力呢，这一节来说说如何在多线程环境中使用libevent，跟源代" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E5%8D%81%E4%BA%8C/" />
-<meta property="article:published_time" content="2017-06-25T17:02:21&#43;00:00"/>
-<meta property="article:modified_time" content="2017-06-25T17:02:21&#43;00:00"/>
-
+<meta property="article:published_time" content="2017-06-25T17:02:21+00:00" />
+<meta property="article:modified_time" content="2017-06-25T17:02:21+00:00" />
 <meta itemprop="name" content="libevent源码剖析(十二)">
 <meta itemprop="description" content="Libevent本身不是多线程安全的，在多核的时代，如何能充分利用CPU的能力呢，这一节来说说如何在多线程环境中使用libevent，跟源代">
-
-
 <meta itemprop="datePublished" content="2017-06-25T17:02:21&#43;00:00" />
 <meta itemprop="dateModified" content="2017-06-25T17:02:21&#43;00:00" />
-<meta itemprop="wordCount" content="1763">
+<meta itemprop="wordCount" content="1759">
 
 
 
-<meta itemprop="keywords" content="" />
-<meta name="twitter:card" content="summary"/>
+<meta itemprop="keywords" content="" /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="libevent源码剖析(十二)"/>
 <meta name="twitter:description" content="Libevent本身不是多线程安全的，在多核的时代，如何能充分利用CPU的能力呢，这一节来说说如何在多线程环境中使用libevent，跟源代"/>
 
@@ -171,7 +167,7 @@
         <div class="post-category">
             <a href="/categories/libevent/"> Libevent </a>
             </div>
-          <span class="more-meta"> 约 1763 字 </span>
+          <span class="more-meta"> 约 1759 字 </span>
           <span class="more-meta"> 预计阅读 4 分钟 </span>
         
       </div>
@@ -180,83 +176,48 @@
     <div class="post-toc" id="post-toc">
   <h2 class="post-toc-title">文章目录</h2>
   <div class="post-toc-content always-active">
-    <nav id="TableOfContents">
-<ul>
-<li><a href="#1-错误使用示例">1 错误使用示例</a></li>
-<li><a href="#2-支持多线程的几种模式">2 支持多线程的几种模式</a></li>
-<li><a href="#2-1-暴力抢占">2.1 暴力抢占</a></li>
-<li><a href="#2-2-纯粹的消息通知机制">2.2 纯粹的消息通知机制</a></li>
-<li><a href="#2-3-消息通知-同步层">2.3 消息通知+同步层</a></li>
-<li><a href="#3例子-memcached">3例子——memcached</a></li>
-<li><a href="#4-小结">4 小结</a></li>
-</ul>
-</nav>
+    <nav id="TableOfContents"></nav>
   </div>
 </div>
     <div class="post-content">
-      
-
-<p>Libevent本身不是多线程安全的，在多核的时代，如何能充分利用CPU的能力呢，这一节来说说如何在多线程环境中使用libevent，跟源代码并没有太大的关系，纯粹是使用上的技巧。</p>
-
+      <p>Libevent本身不是多线程安全的，在多核的时代，如何能充分利用CPU的能力呢，这一节来说说如何在多线程环境中使用libevent，跟源代码并没有太大的关系，纯粹是使用上的技巧。</p>
 <h1 id="1-错误使用示例">1 错误使用示例</h1>
-
 <p>在多核的CPU上只使用一个线程始终是对不起CPU的处理能力啊，那好吧，那就多创建几个线程，比如下面的简单服务器场景。</p>
-
 <ol>
 <li>主线程创建工作线程1；</li>
 <li>接着主线程监听在端口上，等待新的连接；</li>
 <li>在线程1中执行event事件循环，等待事件到来；</li>
 <li>新连接到来，主线程调用libevent接口event_add将新连接注册到libevent上；</li>
 </ol>
-
 <p>… …</p>
-
 <p>上面的逻辑看起来没什么错误，在很多服务器设计中都可能用到主线程和工作线程的模式….
 可是就在线程1注册事件时，主线程很可能也在操作事件，比如删除，修改，通过libevent的源代码也能看到，没有同步保护机制，问题麻烦了，看起来不能这样做啊，难道只能使用单线程不成！？</p>
-
 <h1 id="2-支持多线程的几种模式">2 支持多线程的几种模式</h1>
-
 <p>Libevent并不是线程安全的，但这不代表libevent不支持多线程模式，其实方法在前面已经将signal事件处理时就接触到了，那就是消息通知机制。</p>
-
 <p>一句话，“你发消息通知我，然后再由我在合适的时间来处理”；</p>
-
 <p>说到这就再多说几句，再打个比方，把你自己比作一个工作线程，而你的头是主线程，你有一个消息信箱来接收别人发给你的消息，当时头有个新任务要指派给你。</p>
-
-<h1 id="2-1-暴力抢占">2.1 暴力抢占</h1>
-
+<h1 id="21-暴力抢占">2.1 暴力抢占</h1>
 <p>那么第一节中使用的多线程方法相当下面的流程：</p>
-
 <ol>
 <li>当时你正在做事，比如在写文档；</li>
 <li>你的头找到了一个任务，要指派给你，比如帮他搞个PPT，哈；</li>
 <li>头命令你马上搞PPT，你这是不得不停止手头的工作，把PPT搞定了再接着写文档；</li>
 </ol>
-
 <p>…</p>
-
-<h1 id="2-2-纯粹的消息通知机制">2.2 纯粹的消息通知机制</h1>
-
+<h1 id="22-纯粹的消息通知机制">2.2 纯粹的消息通知机制</h1>
 <p>那么基于纯粹的消息通知机制的多线程方式就像下面这样：</p>
-
 <ol>
 <li>当时你正在写文档；</li>
 <li>你的头找到了一个任务，要指派给你，帮他搞个PPT；</li>
 <li>头发个消息到你信箱，有个PPT要帮他搞定，这时你并不鸟他；</li>
 <li>你写好文档，接着检查消息发现头有个PPT要你搞定，你开始搞PPT；</li>
 </ol>
-
 <p>…</p>
-
 <p>第一种的好处是消息可以立即得到处理，但是很方法很粗暴，你必须立即处理这个消息，所以你必须处理好切换问题，省得把文档上的内容不小心写到PPT里。在操作系统的进程通信中，消息队列（消息信箱）都是操作系统维护的，你不必关心。</p>
-
 <p>第二种的优点是通过消息通知，切换问题省心了，不过消息是不能立即处理的（基于消息通知机制，这个总是难免的），而且所有的内容都通过消息发送，比如PPT的格式、内容等等信息，这无疑增加了通信开销。</p>
-
-<h1 id="2-3-消息通知-同步层">2.3 消息通知+同步层</h1>
-
+<h1 id="23-消息通知同步层">2.3 消息通知+同步层</h1>
 <p>有个折中机制可以减少消息通信的开销，就是提取一个同步层，还拿上面的例子来说，你把工作安排都存放在一个工作队列中，而且你能够保证“任何人把新任务扔到这个队列”，“自己取出当前第一个任务”等这些操作都能够保证不会把队列搞乱（其实就是个加锁的队列容器）。</p>
-
 <p>再来看看处理过程和上面有什么不同：</p>
-
 <ol>
 <li>当时你正在写文档；</li>
 <li>你的头找到了一个任务，要指派给你，帮他搞个PPT；</li>
@@ -264,24 +225,15 @@
 <li>头发个消息（一个字节）到你信箱，有个PPT要帮他搞定，这时你并不鸟他；</li>
 <li>你写好文档，发现有新消息（这预示着有新任务来了），检查工作队列知道头有个PPT要你搞定，你开始搞PPT；</li>
 </ol>
-
 <p>…</p>
-
 <p>工作队列其实就是一个加锁的容器（队列、链表等等），这个很容易实现实现；而消息通知仅需要一个字节，具体的任务都push到了在工作队列中，因此想比2.2减少了不少通信开销。</p>
-
 <p>多线程编程有很多陷阱，线程间资源的同步互斥不是一两句能说得清的，而且出现bug很难跟踪调试；这也有很多的经验和教训，因此如果让我选择，在绝大多数情况下都会选择机制3作为实现多线程的方法。</p>
-
-<h1 id="3例子-memcached">3例子——memcached</h1>
-
+<h1 id="3例子memcached">3例子——memcached</h1>
 <p>Memcached中的网络部分就是基于libevent完成的，其中的多线程模型就是典型的消息通知+同步层机制。下面的图足够说明其多线程模型了，其中有详细的文字说明。</p>
-
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/Picture1.jpg" alt="" /></p>
-
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/Picture1.jpg" alt=""></p>
 <h1 id="4-小结">4 小结</h1>
-
 <p>本节更是libevent的使用方面的技巧，讨论了一下如何让libevent支持多线程，以及几种支持多线程的机制，和memcached使用libevent的多线程模型。</p>
-
-<p>转载：[<a href="http://blog.csdn.net/sparkliang/article/details/5130822](">http://blog.csdn.net/sparkliang/article/details/5130822](</a>)</p>
+<p>转载：<a href="">http://blog.csdn.net/sparkliang/article/details/5130822</a></p>
 
     </div>
 

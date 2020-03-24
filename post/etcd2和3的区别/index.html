@@ -25,7 +25,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.55.6 with theme even" />
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
 
 
 <link rel="canonical" href="/post/etcd2%E5%92%8C3%E7%9A%84%E5%8C%BA%E5%88%AB/" />
@@ -47,21 +47,17 @@
 <meta property="og:description" content="从 etcd2 到 etcd3 etcd 最早是被设计用来解决 CoreOS 升级时机器的协调问题的。现在它被用于分布式网络、服务发现、配置管理、任务调度和负载均衡等服务中。原始设计的部" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/etcd2%E5%92%8C3%E7%9A%84%E5%8C%BA%E5%88%AB/" />
-<meta property="article:published_time" content="2019-09-06T21:18:46&#43;00:00"/>
-<meta property="article:modified_time" content="2019-09-06T21:18:46&#43;00:00"/>
-
+<meta property="article:published_time" content="2019-09-06T21:18:46+00:00" />
+<meta property="article:modified_time" content="2019-09-06T21:18:46+00:00" />
 <meta itemprop="name" content="etcd2和3的区别">
 <meta itemprop="description" content="从 etcd2 到 etcd3 etcd 最早是被设计用来解决 CoreOS 升级时机器的协调问题的。现在它被用于分布式网络、服务发现、配置管理、任务调度和负载均衡等服务中。原始设计的部">
-
-
 <meta itemprop="datePublished" content="2019-09-06T21:18:46&#43;00:00" />
 <meta itemprop="dateModified" content="2019-09-06T21:18:46&#43;00:00" />
 <meta itemprop="wordCount" content="2213">
 
 
 
-<meta itemprop="keywords" content="" />
-<meta name="twitter:card" content="summary"/>
+<meta itemprop="keywords" content="" /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="etcd2和3的区别"/>
 <meta name="twitter:description" content="从 etcd2 到 etcd3 etcd 最早是被设计用来解决 CoreOS 升级时机器的协调问题的。现在它被用于分布式网络、服务发现、配置管理、任务调度和负载均衡等服务中。原始设计的部"/>
 
@@ -181,61 +177,34 @@
   <h2 class="post-toc-title">文章目录</h2>
   <div class="post-toc-content always-active">
     <nav id="TableOfContents">
-<ul>
-<li><a href="#从-etcd2-到-etcd3">从 etcd2 到 etcd3</a></li>
-<li><a href="#效率与支持大规模使用">效率与支持大规模使用</a>
-<ul>
-<li><a href="#远程调用">远程调用</a></li>
-<li><a href="#租约">租约</a></li>
-<li><a href="#观察者">观察者</a></li>
-</ul></li>
-<li><a href="#可靠事件的数据模型">可靠事件的数据模型</a></li>
-<li><a href="#并发控制">并发控制</a></li>
-</ul>
+  <ul>
+    <li><a href="#远程调用">远程调用</a></li>
+    <li><a href="#租约">租约</a></li>
+    <li><a href="#观察者">观察者</a></li>
+  </ul>
 </nav>
   </div>
 </div>
     <div class="post-content">
-      
-
-<h1 id="从-etcd2-到-etcd3">从 etcd2 到 etcd3</h1>
-
+      <h1 id="从-etcd2-到-etcd3">从 etcd2 到 etcd3</h1>
 <p>etcd 最早是被设计用来解决 CoreOS 升级时机器的协调问题的。现在它被用于分布式网络、服务发现、配置管理、任务调度和负载均衡等服务中。原始设计的部分内容被证明是成功的：etcd 已经成长为键值对存储引擎，包括 JSON 外部协议，持续键值更新观察者和有生存时间的键等特性。不幸的是，其他的一些功能被频繁吐槽，包括客户端空闲时会把仲裁的压力释放到集群中，对于老的键存在不可预测的垃圾回收。虽然 etcd2 可以满足协调机器的任务，但当今微服务的趋势使得 etcd 需要具备数以万计的客户端去操作数百万键的能力。</p>
-
 <p>etcd3 吸取了 etcd2 的教训。基础服务接口使用 gRPC 代替了 JSON 以增加效率。JSON 外部协议可以通过 gRPC gateway 得到支持。有生命周期的键的实现被替换为轻型流式租约存活（streaming lease keepalive）模型。观察者也被重新设计，使用流式多路复用事件替代老式的事件模型。v3 的数据模型去除了显示键继承和不稳定的观察窗口，取而代之的是扁平二进制键空间，并使用多版本并发控制的事务语义。</p>
-
 <h1 id="效率与支持大规模使用">效率与支持大规模使用</h1>
-
 <h2 id="远程调用">远程调用</h2>
-
 <p>原生的 etcd3 客户端使用 gRPC 协议进行通信。协议消息使用 protobuf 进行定义，它简化了 PRC 客户端存根代码的生成并且使协议易于管理。比较来看，即使 etcd2 客户端经过解析优化后与 etcd3 的消息处理性能仍然有 2 倍的差距。并且，gRPC 在处理链接方面优势明显，因为 gRPC 使用单一链接的 HTTP2 多路复用流式 RPC 调用，而 JSON 客户端必须为每个请求建立一个链接。</p>
-
 <h2 id="租约">租约</h2>
-
 <p>etcd2 的键失效是通过存活时间（TTL）机制实现的。对于每个有存活时间的键，客户端必须周期性的刷新该键以保证到期时它不会被自动删除掉。每个刷新行为都会建立一个新连接并提交一个一致性仲裁给 etcd 去更新键。为了保证所有的 TTL 键存活，一个空闲的集群必须支持保持一个最低限度的 TTL 的键除以平均过期时间的吞吐量。</p>
-
 <p>etcd3 中的租约替代了早期 TTL 的实现。租约减少了保持活动的请求并限制了平稳状态一致性更新。与一个键一个 TTL 不同，一个租约包含一个 TTL，租约被分配给一个键。当租约生命到期了，它所关联的所有键全被删除。这个模型在很多键有相同的租约时减少了保持活性的通信量。保持活性的链接也不会像在 etcd2 中那样被回收，而是使用多路复用的 gPRC 流的方式来保持活性。同样的，保持活性现在由领导者来处理，避免了在空闲集群提交一致性协议占用资源过多的情况。</p>
-
 <h2 id="观察者">观察者</h2>
-
 <p>观察者在 etcd 中持续观测键值的变化。与 ZooKeeper 或 Consul 等返回观察事件不同，etcd 可以持续观察从当前版本开始的变化。在 etcd2 中，这些流式的观察室通过 long polling 模式的 HTTP 请求实现的，它使 etcd2 的服务器极其浪费的为每个观察者建立一个 TCP 链接。当应用有数千个客户端观察数千个键时，这种机制会很快耗尽 etcd2 服务器的套接字和内存资源。</p>
-
 <p>etcd3 的多路复用观察者使用一个链接。与每次都打开一个新连接不同，客户端会在一个双向 gRPC 流中注册一个观察者。流会发送一个带有观察者注册 ID 的事件。多个观察流甚至可以共享相同的 TCP 链接。多路复用和流式链接共享减少了至少一个数量级的 etcd3 的内存占用。</p>
-
 <h1 id="可靠事件的数据模型">可靠事件的数据模型</h1>
-
 <p>跟所有键值对存储引擎相同，etcd 的数据模型是键映射到值上。etcd2 的模型仅仅保持最近的键值映射是可用的；老版本是被废掉的。但是，跟踪所有键变化或者扫描整个键空间的应用需要一个可靠的事件流去持续重构过去的键状态。为了避免过早的删除事件以保证这些应用在短暂掉线后仍能正常工作，etcd2 维护一个短小的全局滑动事件窗口。但是，如果一个观察者从一个窗口划过的修订开始观察，那么观察者将错过废弃的事件。</p>
-
 <p>etcd3 去掉了这个不可预计的窗口，取而代之的是通过新的多版本并发控制模型去维护键的历史版本。历史版本保留策略可以为了细粒度存储管理的需要由集群管理员进行配置。通常 etcd3 通过一个定时器作废老版本的键更改。一个典型的 etcd3 集群会保存几个小时的作废键。为了稳定处理客户端过长时间离线，不仅仅是透明的网络中断，观察者可以从最后一次观察的历史修订中恢复过来。为了从存储中读取特定时间的数据，键读取请求需要使用一个修订版来标记，这样就会返回键在这个特定版本的值。</p>
-
 <p>另外为了保存历史数据，etcd3 用扁平二进制键空间替代了 etcd2 的继承键结构。事件上，应用更倾向于获取单独的键或者迭代获取一个目录下所有的键。使用继承模式的场景并不常见。etcd3 额外提供了在一个区间中键按范围搜索的功能。这个区间模型支持前缀匹配查询和一个键命名习惯模式，这种模式像从一个目录里来列出键一样。</p>
-
 <h1 id="并发控制">并发控制</h1>
-
 <p>当多个客户端并发读取或修改一个或一组键时，为了阻止损害应用状态的数据竞争，同步原子操作变得格外重要。为了这个目的，etcd2 提供了 load-link/store-conditional 和 compare-and-swap 操作；一个客户端确定一个先前的版本索引或者值去做匹配，看是否可以更新键。虽然对于简单的信号量和有限的原子更新这些操作是足够的，但是对于一个像分布式锁和事务级内存这种更加要求成熟度的序列化数据访问方案来说，这就明显不适合了。</p>
-
 <p>etcd3 可以序列化多个操作为一个条件性的迷你事务。每个事务包含一组条件守护的组合（例如，对于键版本，键值，已经修改的版本和创建版本的检查），当所有提交满足时一组操作被执行（例如，Get、Put、Delete 操作），并且任何条件不满足时另外一组操作被执行。事务可以保证分布式锁的安全。在 etcd3 中，因为访问是否被条件性取决于是否客户端持有它的锁。这意味着如果一个客户端因为时钟倾斜或者错过失效事件而失去它获得的锁，那么 etcd3 会毫不留情的拒绝客户端失效的请求。</p>
-
 <p>转载:<a href="https://www.infoq.cn/article/2016/07/etcd3">https://www.infoq.cn/article/2016/07/etcd3</a></p>
 
     </div>

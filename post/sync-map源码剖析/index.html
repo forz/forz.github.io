@@ -25,7 +25,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.55.6 with theme even" />
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
 
 
 <link rel="canonical" href="/post/sync-map%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
@@ -47,21 +47,17 @@
 <meta property="og:description" content="在Go 1.6之前， 内置的map类型是部分goroutine安全的，并发的读没有问题，并发的写可能有问题。自go 1.6之后， 并发地读写map会" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/sync-map%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
-<meta property="article:published_time" content="2019-01-19T21:11:24&#43;00:00"/>
-<meta property="article:modified_time" content="2019-01-19T21:11:24&#43;00:00"/>
-
+<meta property="article:published_time" content="2019-01-19T21:11:24+00:00" />
+<meta property="article:modified_time" content="2019-01-19T21:11:24+00:00" />
 <meta itemprop="name" content="sync.Map源码剖析">
 <meta itemprop="description" content="在Go 1.6之前， 内置的map类型是部分goroutine安全的，并发的读没有问题，并发的写可能有问题。自go 1.6之后， 并发地读写map会">
-
-
 <meta itemprop="datePublished" content="2019-01-19T21:11:24&#43;00:00" />
 <meta itemprop="dateModified" content="2019-01-19T21:11:24&#43;00:00" />
-<meta itemprop="wordCount" content="13699">
+<meta itemprop="wordCount" content="13695">
 
 
 
-<meta itemprop="keywords" content="sync," />
-<meta name="twitter:card" content="summary"/>
+<meta itemprop="keywords" content="sync," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="sync.Map源码剖析"/>
 <meta name="twitter:description" content="在Go 1.6之前， 内置的map类型是部分goroutine安全的，并发的读没有问题，并发的写可能有问题。自go 1.6之后， 并发地读写map会"/>
 
@@ -171,7 +167,7 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 13699 字 </span>
+          <span class="more-meta"> 约 13695 字 </span>
           <span class="more-meta"> 预计阅读 28 分钟 </span>
         
       </div>
@@ -181,48 +177,32 @@
   <h2 class="post-toc-title">文章目录</h2>
   <div class="post-toc-content always-active">
     <nav id="TableOfContents">
-<ul>
-<li><a href="#有并发问题的map">有并发问题的map</a></li>
-<li><a href="#go-1-9之前的解决方案">Go 1.9之前的解决方案</a></li>
-<li><a href="#sync-map">sync.Map</a>
-<ul>
-<li><a href="#read和dirty">read和dirty</a></li>
-<li><a href="#amended">amended</a></li>
-<li><a href="#entry-p">entry.p</a></li>
-<li><a href="#misses">misses</a></li>
-</ul></li>
-<li><a href="#优化点">优化点</a></li>
-<li><a href="#原理解析">原理解析</a></li>
-<li><a href="#源码分析">源码分析</a>
-<ul>
-<li><a href="#load">Load</a></li>
-<li><a href="#store">Store</a></li>
-<li><a href="#delete">Delete</a></li>
-<li><a href="#loadorstore">LoadOrStore</a></li>
-<li><a href="#range">Range</a></li>
-</ul></li>
-<li><a href="#sync-map的适用场景">sync.Map的适用场景</a></li>
-<li><a href="#补全len">补全Len</a></li>
-<li><a href="#警告-切记拷贝sync-map">警告:切记拷贝sync.Map</a></li>
-</ul>
+  <ul>
+    <li><a href="#read和dirty">read和dirty</a></li>
+    <li><a href="#amended">amended</a></li>
+    <li><a href="#entryp">entry.p</a></li>
+    <li><a href="#misses">misses</a></li>
+  </ul>
+
+  <ul>
+    <li><a href="#load">Load</a></li>
+    <li><a href="#store">Store</a></li>
+    <li><a href="#delete">Delete</a></li>
+    <li><a href="#loadorstore">LoadOrStore</a></li>
+    <li><a href="#range">Range</a></li>
+  </ul>
 </nav>
   </div>
 </div>
     <div class="post-content">
-      
-
-<p>在Go 1.6之前， 内置的map类型是部分goroutine安全的，并发的读没有问题，并发的写可能有问题。自go 1.6之后， 并发地读写map会报错，这在一些知名的开源库中都存在这个问题，所以go 1.9之前的解决方案是额外绑定一个锁，封装成一个新的struct或者单独使用锁都可以。</p>
-
+      <p>在Go 1.6之前， 内置的map类型是部分goroutine安全的，并发的读没有问题，并发的写可能有问题。自go 1.6之后， 并发地读写map会报错，这在一些知名的开源库中都存在这个问题，所以go 1.9之前的解决方案是额外绑定一个锁，封装成一个新的struct或者单独使用锁都可以。</p>
 <p>本文带你深入到sync.Map的具体实现中，看看为了增加一个功能，代码是如何变的复杂的,以及作者在实现sync.Map的一些思想。</p>
-
 <h1 id="有并发问题的map">有并发问题的map</h1>
-
 <p>官方的faq已经提到内建的map不是线程(goroutine)安全的。</p>
-
-<p>首先，让我们看一段并发读写的代码,下列程序中一个goroutine一直读，一个goroutine一只写同一个键值，即即使读写的键不相同，而且map也没有&rdquo;扩容&rdquo;等操作，代码还是会报错。</p>
+<p>首先，让我们看一段并发读写的代码,下列程序中一个goroutine一直读，一个goroutine一只写同一个键值，即即使读写的键不相同，而且map也没有&quot;扩容&quot;等操作，代码还是会报错。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -253,34 +233,28 @@
 		<span class="p">}</span>
 	<span class="p">}()</span>
 	<span class="k">select</span> <span class="p">{}</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>错误信息是: fatal error: concurrent map read and map write。</p>
-
+</div><p>错误信息是: fatal error: concurrent map read and map write。</p>
 <p>如果你查看Go的源代码: hashmap_fast.go#L118,会看到读的时候会检查hashWriting标志， 如果有这个标志，就会报并发错误。</p>
-
 <p>写的时候会设置这个标志: hashmap.go#L542</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+<pre class="chroma"><code><span class="lnt">1
 </span></code></pre></td>
 <td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">h</span><span class="p">.</span><span class="nx">flags</span> <span class="o">|=</span> <span class="nx">hashWriting</span></code></pre></td></tr></table>
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">h</span><span class="p">.</span><span class="nx">flags</span> <span class="o">|=</span> <span class="nx">hashWriting</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>hashmap.go#L628设置完之后会取消这个标记。</p>
-
+</div><p>hashmap.go#L628设置完之后会取消这个标记。</p>
 <p>当然，代码中还有好几处并发读写的检查， 比如写的时候也会检查是不是有并发的写，删除键的时候类似写，遍历的时候并发读写问题等。</p>
-
 <p>有时候，map的并发问题不是那么容易被发现, 你可以利用-race参数来检查。</p>
-
-<h1 id="go-1-9之前的解决方案">Go 1.9之前的解决方案</h1>
-
+<h1 id="go-19之前的解决方案">Go 1.9之前的解决方案</h1>
 <p>但是，很多时候，我们会并发地使用map对象，尤其是在一定规模的项目中，map总会保存goroutine共享的数据。在Go官方blog的Go maps in action一文中，提供了一种简便的解决方案。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+<pre class="chroma"><code><span class="lnt">1
 </span><span class="lnt">2
 </span><span class="lnt">3
 </span><span class="lnt">4
@@ -289,15 +263,14 @@
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">counter</span> <span class="p">=</span> <span class="kd">struct</span><span class="p">{</span>
     <span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>
     <span class="nx">m</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">int</span>
-<span class="p">}{</span><span class="nx">m</span><span class="p">:</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">int</span><span class="p">)}</span></code></pre></td></tr></table>
+<span class="p">}{</span><span class="nx">m</span><span class="p">:</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">int</span><span class="p">)}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>它使用嵌入struct为map增加一个读写锁,把读写操作变成单线程操作来实现。</p>
-
+</div><p>它使用嵌入struct为map增加一个读写锁,把读写操作变成单线程操作来实现。</p>
 <p>下面是我们使用sync.RWMutex实现的一个简单的线程安全Map。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -328,6 +301,7 @@
 </span><span class="lnt">29
 </span><span class="lnt">30
 </span><span class="lnt">31
+</span><span class="lnt">32
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">RegularIntMap</span>
@@ -360,41 +334,32 @@
     <span class="nx">rm</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
     <span class="nx">rm</span><span class="p">.</span><span class="nx">internal</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">value</span>
     <span class="nx">rm</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-<span class="p">}</span></code></pre></td></tr></table>
-</div>
-</div>
-<p>但是，在对标准库做了额外的审查和性能分析之后，很多Go团队成员发现当使用sync.RWMutex的代码被部署在有很多、很多核的CPU上的时候，它的性能远低于理想值。对于这里提到的“很多”，我并不是在说你的典型的8核或者16核的系统，重要的是那些系统配置可能远超这个。在这些地方CPU的核数能够呈现出代码的高度竞争性，就像使用sync.RWMutex一样。</p>
+<span class="p">}</span>
 
+</code></pre></td></tr></table>
+</div>
+</div><p>但是，在对标准库做了额外的审查和性能分析之后，很多Go团队成员发现当使用sync.RWMutex的代码被部署在有很多、很多核的CPU上的时候，它的性能远低于理想值。对于这里提到的“很多”，我并不是在说你的典型的8核或者16核的系统，重要的是那些系统配置可能远超这个。在这些地方CPU的核数能够呈现出代码的高度竞争性，就像使用sync.RWMutex一样。</p>
 <p>现在我们已经基本明了为什么会创建一个新的Sync.Map了。Go团队确认了一个标准库的性能不佳的情况。在部署在一个有很多CPU核的系统上的高读取场景下，从使用sync.RWMutex封装的数据结构中读取数据的性能会受到很大影响。</p>
-
-<p>但哪怕使用了读写分离锁，当代码运行在多核CPU下(通常情况下是超过8/16核以上的服务器)性能依然堪忧。因为以下几个原因：
-1. reflect.New很慢(map类型安全的底层是通过反射机制来实现的)
-2. sync.RWMutex很慢
-3. atomic.AddUint32很慢
-4. 所有的cpu都在读写同一个内存地址</p>
-
-<h1 id="sync-map">sync.Map</h1>
-
+<p>但哪怕使用了读写分离锁，当代码运行在多核CPU下(通常情况下是超过8/16核以上的服务器)性能依然堪忧。因为以下几个原因：</p>
+<ol>
+<li>reflect.New很慢(map类型安全的底层是通过反射机制来实现的)</li>
+<li>sync.RWMutex很慢</li>
+<li>atomic.AddUint32很慢</li>
+<li>所有的cpu都在读写同一个内存地址</li>
+</ol>
+<h1 id="syncmap">sync.Map</h1>
 <p>并发hashmap的方案有很多，下面简单提一下几种，然后再讨论golang实现时的考虑。</p>
-
 <p>第一种是最简单的，直接在不支持并发的hashmap上，使用一个读写锁的保护，这也是golang sync map还没出来前，大家常用的方法。这种方法的缺点是写会堵塞读。</p>
-
 <p>第二种是数据库常用的方法，分段锁，内部使用多个锁，每个区间共享一把锁，这样减少了数据共享一把锁带来的性能影响，orcaman提供了这个思路的一个实现： concurrent-map。java的ConcurrentHashMap也是这么实现的。平均情况下这样的性能还挺好的，但是极端情况下，如果某个区间有热点写，那么那个区间的读请求也会受到影响。</p>
-
 <p>第三种方法是我们C++自己造轮子时经常用的，使用使用链表法解决冲突，然后链表使用CAS去解决并发下冲突，这样读写都是无锁，我觉得这种挺好的，性能非常高，不知为啥其他语言不这么实现。</p>
-
 <p>然后在《An overview of sync.Map》中有提到，在cpu核数很多的情况下，因为cache contention，reflect.New、sync.RWMutex、atomic.AddUint32都会很慢，golang团队为了适应cpu核很多的情况，没有采用上面的几种常见的方案。</p>
-
 <p>golang sync map的目标是实现适合读多写少的场景、并且要求稳定性很好，不能出现像分段锁那样读经常被阻塞的情况。golang sync map基于map做了一层封装，在大部分情况下，不过写入性能比较差。下面来详细说说实现。</p>
-
 <p>通过引入两个map将读写分离到不同的map，其中read map提供并发读和已存元素原子写，而dirty map则负责读写。 这样read map就可以在不加锁的情况下进行并发读取,当read map中没有读取到值时,再加锁进行后续读取,并累加未命中数,当未命中数大于等于dirty map长度,将dirty map上升为read map。从之前的结构体的定义可以发现，虽然引入了两个map，但是底层数据存储的是指针，指向的是同一份值。</p>
-
 <p>下面我们介绍sync.Map的重点代码，以便理解它的实现思想。</p>
-
 <p>首先，我们看一下sync.Map的数据结构：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -425,14 +390,14 @@
 	<span class="c1">// 当从Map中读取entry的时候，如果read中不包含这个entry,会尝试从dirty中读取，这个时候会将misses加1，
 </span><span class="c1"></span>	<span class="c1">// 当misses累积到 dirty的长度的时候， 就会将dirty提升为read,避免从dirty中miss太多次。因为操作dirty需要加锁。
 </span><span class="c1"></span>	<span class="nx">misses</span> <span class="kt">int</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>它的数据结构很简单，值包含四个字段：read、mu、dirty、misses。
+</div><p>它的数据结构很简单，值包含四个字段：read、mu、dirty、misses。
 read的数据结构是：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+<pre class="chroma"><code><span class="lnt">1
 </span><span class="lnt">2
 </span><span class="lnt">3
 </span><span class="lnt">4
@@ -441,57 +406,38 @@ read的数据结构是：</p>
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">readOnly</span> <span class="kd">struct</span> <span class="p">{</span>
 	<span class="nx">m</span>       <span class="kd">map</span><span class="p">[</span><span class="kd">interface</span><span class="p">{}]</span><span class="o">*</span><span class="nx">entry</span>
 	<span class="nx">amended</span> <span class="kt">bool</span> <span class="c1">// 如果Map.dirty有些数据不在Read中的时候，这个值为true
-</span><span class="c1"></span><span class="p">}</span></code></pre></td></tr></table>
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>使用了两个map，一个叫read，一个叫dirty，两个map存储的都是指针，指向value数据本身，所以两个map是共享value数据的，更新value对两个map同时可见。</p>
-
+</div><p>使用了两个map，一个叫read，一个叫dirty，两个map存储的都是指针，指向value数据本身，所以两个map是共享value数据的，更新value对两个map同时可见。</p>
 <p>dirty可以进行增删查，当时都要进行加互斥锁。</p>
-
 <p>read中存在的key，可以无锁的读，借助CAS进行无锁的更新、删除操作，但是不能新增key，相当于dirty的一个cache，由于value共享，所以能通过read对已存在的value进行更新。</p>
-
 <p>read不能新增key，那么数据怎么来的呢？sync map中会记录miss cache的次数，当miss次数大于等于dirty元素个数时，就会把dirty变成read，原来的dirty清空。</p>
-
 <p>为了方便dirty直接变成read，那么得保证read中存在的数据dirty必须有，所以在dirty是空的时候，如果要新增一个key，那么会把read中的元素复制到dirty中，然后写入新key。</p>
-
 <p>然后删除操作也很有意思，使用的是延迟删除，优先看read中有没有，read中有，就把read中的对应entry指针中的p置为nil，作为一个标记。在read中标记为nil的，只有在dirty提升为read时才会被实际删除。</p>
-
 <h2 id="read和dirty">read和dirty</h2>
-
 <p>readOnly.m和Map.dirty存储的值类型是*entry,它包含一个指针p, 指向用户存储的value值。read和dirty中存的实际是key=&gt;值的指针的结构,会存在存了两份值的指针,但不是存了两份值.这样,在用空间换时间的情况下,如果map存的key很多,也不会消耗大量内存,会增加消耗的是指针定义读内存的占用,这比值的占用要小很多.</p>
-
 <ul>
 <li>read中的key是readOnly的（key的集合不会变，删除也只是打标记），value的操作全都可以原子完成，所以这个结构不用锁</li>
 <li>dirty是一个read的拷贝，用锁的操作在这做，如增加元素、删除元素等（dirty上删除是真删除）</li>
 </ul>
-
 <p>read并不是只是读操作,也有原子写操作.在读操作的时候,是使用了atomic.Value的Load(),没有用锁,达到了在线程安全的情况下读性能的大大提高,同时也会把dirty中的对应的值给修改了，因为相同key的entry，在read和dirty中存的是entry的指针，两个指针没有变，指针的值改了，所以read和dirty 对应的entry同时改变。 为什么呢？因为当key不在map中，会进行map新建记录操作，相同的key既会在read中新建，也会在dirty中新建，新建的就是相应entry的指针： key=&gt;*(entry)。这样，当进行update操作时，就直接修改read，而不需要再加锁操作dirty，性能好多了。</p>
-
 <p>而将read中的值同步到dirty或对dirty进行读或写操作时,使用了互斥量锁Mutex. 写操作分为新增和更新.新增的时候,需要把这个值指针存到dirty.更新的时候,更新一个没有被标记过expunged的key,直接对read进行atomic.CompareAndSwapPointer操作就可以,如果之前expunged过,将key同步到dirty. 而在Store、Delete操作的时候,都要进行m.read.Load().(readOnly)操作.根据上文中推荐的文章进行的benchmark的结果,sync.Map的写、删除性能不尽如意,这个结果可以预料到.</p>
-
 <ul>
 <li>当dirty不存在的时候，read就是全部map的数据</li>
 <li>当dirty存在的时候，dirty才是正确的map数据</li>
 </ul>
-
 <p>可以把read看成是一个cache，当cache miss到一定数量的时候，dirty中的数据会被提升到read中去。但是决定哪些数据应该过去实在太费时了，倒不如时间换空间，read中的数据我在dirty中也存一份，提升的时候直接整个赋值就好了~</p>
-
 <p>read相当于cache层，dirty是更底层的数据层，当read多次没有命中数据时，达到条件，这个cache层命中率太低了，直接将整个read用dirty替换，然后dirty又重新为nil，不需要马上将read同步到dirty，而是下一次Store一个新的key的时候，再触发进行一次dirty的初始同步,并且初始同步在dirty的一个生存周期内,只会进行一次.</p>
-
 <p>在进行Store和Load的时候,其实都是先操作read,如果read中存在并且对应值没有被expunged过,就执行返回了,如果read中不存在,或者对应值被expunged,就需要对dirty进行操作,将这个key同步到dirty中.</p>
-
 <h2 id="amended">amended</h2>
-
 <p>amended指明Map.dirty中有readOnly.m未包含的数据，所以如果从Map.read找不到数据的话，还要进一步到Map.dirty中查找。</p>
-
-<h2 id="entry-p">entry.p</h2>
-
+<h2 id="entryp">entry.p</h2>
 <p>read和dirty中的map存的元素值是entry,entry的field是p unsafe.Pointer,是指向具体存储值的指针,这个具体值是以interface{}值存在的,所以在Load取出值的时候,要自行做.(type)的转换.</p>
-
 <p>假设read和dirty中的map存在name这个key,当read进行了atomic.CompareAndSwapPointer(&amp;e.p, p, unsafe.Pointer(i))操作后,改的是p这个指针所指的值的地址,而entry这个指针没有改变,read和dirty中的map存在name指的是同一个entry.所以,read中对p的写原子操作,如果dirty中有相同的key,也会同样被更改,因为他们的entry是同一个.</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+<pre class="chroma"><code><span class="lnt">1
 </span><span class="lnt">2
 </span><span class="lnt">3
 </span><span class="lnt">4
@@ -504,25 +450,19 @@ read的数据结构是：</p>
 </span><span class="c1"></span>    <span class="c1">// expunged: 也是表示被删除，但是该键只在read而没有在dirty中，这种情况出现在将read复制到dirty中，即复制的过程会先将nil标记为expunged，然后不将其复制到dirty
 </span><span class="c1"></span>    <span class="c1">//  其他: 表示存着真正的数据
 </span><span class="c1"></span>	<span class="nx">p</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// *interface{}
-</span><span class="c1"></span><span class="p">}</span></code></pre></td></tr></table>
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>p有三种值：</p>
-
+</div><p>p有三种值：</p>
 <ul>
 <li>nil: 数据在read中被删除了，但是dirty中还在，所以能直接更新值(如果dirty==nill的特殊情况,下次写入新值时会复制)；</li>
 <li>expunged:数据在ditry中已经被删除了，更新值的时候要先把这个entry复制到dirty。</li>
 <li>其它： entry是一个正常的值</li>
 </ul>
-
 <h2 id="misses">misses</h2>
-
 <p>misses 的作用就是，当从read读取值没有读取到，从dirty中读取到了，自增加1. 当这种情况达到 m.misses &lt; len(m.dirty)的时候，dirty的值就代替为read.m(read是readOnly),然后misses重置为0，dirty置为nil，重新开始计算值.</p>
-
 <h1 id="优化点">优化点</h1>
-
 <p>sync.Map的实现有几个优化点:</p>
-
 <ol>
 <li>空间换时间。 通过冗余的两个数据结构(read、dirty),降低加锁对性能的影响。</li>
 <li>使用只读数据(read)，避免读写冲突。</li>
@@ -531,19 +471,14 @@ read的数据结构是：</p>
 <li>延迟删除。 删除一个键值只是打标记，只有在提升dirty的时候才清理删除的数据。</li>
 <li>优先从read读取、更新、删除，因为对read的读取不需要锁。</li>
 </ol>
-
 <h1 id="原理解析">原理解析</h1>
-
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190125125938.png" alt="" /></p>
-
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190125125938.png" alt=""></p>
 <h1 id="源码分析">源码分析</h1>
-
 <h2 id="load">Load</h2>
-
 <p>读取时，先去read读取；如果没有，就加锁，然后去dirty读取，同时调用missLocked()，再解锁。在missLocked中，会递增misses变量，如果misses&gt;len(dirty)，那么把dirty提升为read，清空原来的dirty。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -594,26 +529,25 @@ read的数据结构是：</p>
 		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
 	<span class="p">}</span>
 	<span class="k">return</span> <span class="nx">e</span><span class="p">.</span><span class="nf">load</span><span class="p">()</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>在代码中，我们可以看到一个double check，检查read没有，上锁，再检查read中有没有，是因为有可能在第一次检查之后，上锁之前的间隙，dirty提升为read了，这时如果不double check，可能会导致一个存在的key却返回给调用方说不存在。 在下面的其他操作中，我们经常会看到这个double check。</p>
+</div><p>在代码中，我们可以看到一个double check，检查read没有，上锁，再检查read中有没有，是因为有可能在第一次检查之后，上锁之前的间隙，dirty提升为read了，这时如果不double check，可能会导致一个存在的key却返回给调用方说不存在。 在下面的其他操作中，我们经常会看到这个double check。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+<pre class="chroma"><code><span class="lnt">1
 </span><span class="lnt">2
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
-        <span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span></code></pre></td></tr></table>
+        <span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>可以看到，如果我们查询的键值正好存在于m.read中，无须加锁，直接返回，理论上性能优异。即使不存在于m.read中，经过miss几次之后，m.dirty会被提升为m.read，又会从m.read中查找。所以对于更新／增加较少，加载存在的key很多的case,性能基本和无锁的map类似。</p>
-
+</div><p>可以看到，如果我们查询的键值正好存在于m.read中，无须加锁，直接返回，理论上性能优异。即使不存在于m.read中，经过miss几次之后，m.dirty会被提升为m.read，又会从m.read中查找。所以对于更新／增加较少，加载存在的key很多的case,性能基本和无锁的map类似。</p>
 <p>下面看看m.dirty是如何被提升的。 missLocked方法中可能会将m.dirty提升。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+<pre class="chroma"><code><span class="lnt">1
 </span><span class="lnt">2
 </span><span class="lnt">3
 </span><span class="lnt">4
@@ -632,15 +566,14 @@ read的数据结构是：</p>
 	<span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">readOnly</span><span class="p">{</span><span class="nx">m</span><span class="p">:</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">})</span>
 	<span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span> <span class="p">=</span> <span class="kc">nil</span>
 	<span class="nx">m</span><span class="p">.</span><span class="nx">misses</span> <span class="p">=</span> <span class="mi">0</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>上面的最后三行代码就是提升m.dirty的，很简单的将m.dirty作为readOnly的m字段，原子更新m.read。提升后m.dirty、m.misses重置，并且m.read.amended为false。</p>
-
+</div><p>上面的最后三行代码就是提升m.dirty的，很简单的将m.dirty作为readOnly的m字段，原子更新m.read。提升后m.dirty、m.misses重置，并且m.read.amended为false。</p>
 <p>元素取值</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+<pre class="chroma"><code><span class="lnt">1
 </span><span class="lnt">2
 </span><span class="lnt">3
 </span><span class="lnt">4
@@ -657,29 +590,23 @@ read的数据结构是：</p>
         <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
     <span class="p">}</span>
     <span class="k">return</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kd">interface</span><span class="p">{})(</span><span class="nx">p</span><span class="p">),</span> <span class="kc">true</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<h2 id="store">Store</h2>
-
+</div><h2 id="store">Store</h2>
 <p>这个方法是更新或者新增一个entry。</p>
-
 <p>read和dirty的相同key指向同一个value</p>
-
 <p>写入的时候，先看read中能否查到key，在read中存在的话，直接通过read中的entry来更新值；在read中不存在，那么就上锁，然后double check。这里需要留意，分几种情况：</p>
-
 <ol>
 <li>double check发现read中存在key，如果不是expunged,直接写入值。如果entry.p==expunged,那么就先把expunged替换成nil,并且把e复制到dirty中，再在read中写入值.</li>
 <li>read中不存在key,dirty中存在key，直接更新</li>
 <li>dirty中不存在key，如果此时dirty为空，那么需要将read复制到dirty中，最后再把新值写入到dirty中。复制的时候调用的是dirtyLocked()，在复制到dirty的时候，read中为nil的元素，会更新为expunged，并且不复制到dirty中</li>
 </ol>
-
 <p>我们可以看到，在更新read中的数据时，使用的是tryStore，通过CAS来解决冲突，在CAS出现冲突后，如果发现数据被置为expunge，tryStore那么就不会写入数据，而是会返回false，在Store流程中，就是接着往下走，在dirty中写入。</p>
-
 <p>再看下情况1的时候，为啥要那么做。double check的时候，在read中存在，那么就是说在加锁之前，有并发线程先写入了key，然后由Load触发了dirty提升为read，这时dirty可能为空，也可能不为空，但无论dirty状态如何，都是可以直接更新entry.p。如果是expunged的话，那么要先替换成nil，再复制entry到dirty中。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -774,6 +701,7 @@ read的数据结构是：</p>
 </span><span class="lnt">93
 </span><span class="lnt">94
 </span><span class="lnt">95
+</span><span class="lnt">96
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">Store</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
@@ -870,19 +798,17 @@ read的数据结构是：</p>
 </span><span class="c1">//必须知道该条目不被删除。
 </span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">entry</span><span class="p">)</span> <span class="nf">storeLocked</span><span class="p">(</span><span class="nx">i</span> <span class="o">*</span><span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
 	<span class="nx">atomic</span><span class="p">.</span><span class="nf">StorePointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">i</span><span class="p">))</span>
-<span class="p">}</span></code></pre></td></tr></table>
-</div>
-</div>
-<p>你可以看到，以上操作都是先从操作m.read开始的，不满足条件再加锁，然后操作m.dirty。</p>
+<span class="p">}</span>
 
+</code></pre></td></tr></table>
+</div>
+</div><p>你可以看到，以上操作都是先从操作m.read开始的，不满足条件再加锁，然后操作m.dirty。</p>
 <p>Store可能会在某种情况下(初始化或者m.dirty刚被提升后)从m.read中复制数据(函数dirtyLocked)，如果这个时候m.read中数据量非常大，可能会影响性能。</p>
-
 <h2 id="delete">Delete</h2>
-
 <p>删除元素,采用延迟删除，当read map存在元素时，将元素置为nil，只有在提升dirty的时候才清理删除的数,延迟删除可以避免后续获取删除的元素时候需要加锁。当read map不存在元素时，直接删除dirty map中的元素</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -923,15 +849,14 @@ read的数据结构是：</p>
         <span class="c1">// 如果在read中，将entry.p 置为 nil
 </span><span class="c1"></span>        <span class="nx">e</span><span class="p">.</span><span class="nb">delete</span><span class="p">()</span>
     <span class="p">}</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>同样，删除操作还是从m.read中开始，如果这个entry不存在于m.read中，并且m.dirty中有新数据，则加锁尝试从m.dirty中删除。注意，还是要双检查的。 从m.dirty中直接删除即可，就当它没存在过.</p>
-
+</div><p>同样，删除操作还是从m.read中开始，如果这个entry不存在于m.read中，并且m.dirty中有新数据，则加锁尝试从m.dirty中删除。注意，还是要双检查的。 从m.dirty中直接删除即可，就当它没存在过.</p>
 <p>但是如果是从m.read中删除，并不会直接删除，而是打标记,因为read map和dirty map 使用的均为元素地址，所以均被置为nil：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -958,15 +883,14 @@ read的数据结构是：</p>
 			<span class="k">return</span> <span class="kc">true</span>
 		<span class="p">}</span>
 	<span class="p">}</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<h2 id="loadorstore">LoadOrStore</h2>
-
+</div><h2 id="loadorstore">LoadOrStore</h2>
 <p>如果对应的元素存在，则返回该元素的值，如果不存在，则将元素写入到sync.Map。如果已加载值，则加载结果为true;如果已存储，则为false。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -1039,13 +963,13 @@ read的数据结构是：</p>
     <span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
 
     <span class="k">return</span> <span class="nx">actual</span><span class="p">,</span> <span class="nx">loaded</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>如果没有删除元素，tryLoadOrStore将自动加载或存储一个值。如果删除元素，tryLoadOrStore保持条目不变并返回ok= false。</p>
+</div><p>如果没有删除元素，tryLoadOrStore将自动加载或存储一个值。如果删除元素，tryLoadOrStore保持条目不变并返回ok= false。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -1098,17 +1022,15 @@ read的数据结构是：</p>
             <span class="k">return</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kd">interface</span><span class="p">{})(</span><span class="nx">p</span><span class="p">),</span> <span class="kc">true</span><span class="p">,</span> <span class="kc">true</span>
         <span class="p">}</span>
     <span class="p">}</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<h2 id="range">Range</h2>
-
+</div><h2 id="range">Range</h2>
 <p>因为for &hellip; range map是内建的语言特性，所以没有办法使用for range遍历sync.Map, 但是可以使用它的Range方法，通过回调的方式遍历。</p>
-
 <p>遍历获取sync.Map中所有的元素，使用的为快照方式，所以不一定是准确的。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -1169,36 +1091,27 @@ read的数据结构是：</p>
             <span class="k">break</span>
         <span class="p">}</span>
     <span class="p">}</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>Range方法调用前可能会做一个m.dirty的提升，不过提升m.dirty不是一个耗时的操作。</p>
-
-<h1 id="sync-map的适用场景">sync.Map的适用场景</h1>
-
+</div><p>Range方法调用前可能会做一个m.dirty的提升，不过提升m.dirty不是一个耗时的操作。</p>
+<h1 id="syncmap的适用场景">sync.Map的适用场景</h1>
 <p>sync.Map 为了保证并发安全有一些性能损失，因此在非并发情况下，使用 map 相比使用 sync.Map 会有更好的性能。</p>
-
 <p>总结一下，sync.Map像是一个不够完善的容器，比起已有的map主要存在以下不足：</p>
-
 <ol>
 <li>低并发情况下的性能不足</li>
 <li>冗余数据</li>
 <li>缺少类型安全控制</li>
 <li>有限的api。比如不支持len操作</li>
 </ol>
-
 <p>它针对keys长时间没有变化且只有很少的稳态存储的，或者每一个Goroutine中有一个本地存储的key的并发循环使用做了优化。</p>
-
 <p>对于不共享这些属性的使用场景，使用它同与使用sys.RWMutex保护的内置map相比可能有更差的性能表现，以及更差的类型安全。</p>
-
 <p>经过了上面的分析可以得到,sync.Map并不适合同时存在大量读写的场景(这里的写是指新增和删除key, 修改key还是用的原子性操作),大量的写会导致read map读取不到数据从而加锁进行进一步读取,同时dirty map不断升级为read map。 从而导致整体性能较低,特别是针对cache场景.针对append-only以及大量读,少量写场景使用sync.Map则相对比较合适。</p>
-
 <p>所以如我在前面理解的，如果我使用内置map显示出了数据竞争迹象同时map的key在整个应用程序的生命周期内不会经常变换，我可能会考虑使用sync.Map。对我来说，通俗的讲这个就是一个只有少量更新的高并发读取场景，或者只在一些突发情况下会发生大规模更新的场景。对我来说，通俗的讲这个就是一个只有少量更新的高并发读取场景，或者只在一些突发情况下会发生大规模更新的场景。</p>
-
 <p>第一个benchmark显示了使用与sync.RWMutex一起的常规map与sync.Map之间写数据的比较：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -1259,13 +1172,13 @@ read的数据结构是：</p>
 <span class="cm">/*
 </span><span class="cm">BenchmarkStoreRegular-32                     5000000           319 ns/op
 </span><span class="cm">BenchmarkStoreSync-32                        1000000          1146 ns/op
-</span><span class="cm">*/</span></code></pre></td></tr></table>
+</span><span class="cm">*/</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>下面是删除操作的benchmark：</p>
+</div><p>下面是删除操作的benchmark：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -1326,13 +1239,13 @@ read的数据结构是：</p>
 <span class="cm">/*
 </span><span class="cm">BenchmarkDeleteRegular-32                   10000000           238 ns/op
 </span><span class="cm">BenchmarkDeleteSync-32                       5000000           393 ns/op
-</span><span class="cm">*/</span></code></pre></td></tr></table>
+</span><span class="cm">*/</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>下面是读数据的benchmark，其中叫Found用例总是能够从map中读取到数据，叫NotFound的用例则几乎总是读取不到数据。</p>
+</div><p>下面是读数据的benchmark，其中叫Found用例总是能够从map中读取到数据，叫NotFound的用例则几乎总是读取不到数据。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -1473,27 +1386,20 @@ read的数据结构是：</p>
 </span><span class="cm">BenchmarkLoadRegularNotFound-32             20000000           107 ns/op
 </span><span class="cm">BenchmarkLoadSyncFound-32                   10000000           200 ns/op
 </span><span class="cm">BenchmarkLoadSyncNotFound-32                20000000           291 ns/op
-</span><span class="cm">*/</span></code></pre></td></tr></table>
+</span><span class="cm">*/</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>正如你所看到的，这些benchmark中的所有用例中使用sync.RWMutex保护的常规map的性能都远胜于sync.Map。并且到目前为止，我们还没有将benchmark引入到多个goroutines中。让我们继续讨论这个问题，让我们看看夸核扩展成为一个因子后设计的benchmark性能如何。</p>
-
+</div><p>正如你所看到的，这些benchmark中的所有用例中使用sync.RWMutex保护的常规map的性能都远胜于sync.Map。并且到目前为止，我们还没有将benchmark引入到多个goroutines中。让我们继续讨论这个问题，让我们看看夸核扩展成为一个因子后设计的benchmark性能如何。</p>
 <p>让我们来使用Digital Ocean上的一个32核的虚拟机看看趋势是怎么样的。</p>
-
 <p>对于这个benchmark，我想在当前的理想场景下测量基于两种map的实现的性能。在这个场景下，我将构建存储一组随机数据的两中map，并且我将在每个benchmark中使用不同的* GOMAXPROCS*并且创建与GOMAXPROCS数量相同的goroutines来执行。</p>
-
 <p>再次，我将运行这些测试来模拟一个高读取场景，所以在benchmark时钟开始之前map内容就已经被构建并固定了。在这篇的文章的下一次更新中，我可能会创建一个benchmark来模拟固定数量的写入，但是现在让我们考虑这个有点人造的但是理想的用例。</p>
-
 <p>接下来是我将如何定义这些并发的benmarks，但是首先概要的说明下代码：</p>
-
 <p>这些benchmarks实际是一些被其他函数调用的函数，在调用函数中我们写死了workerCount。这样我们就能为每个benchmark配置GOMAXPROCS和workers的数量。</p>
-
 <p>确保我们不会遇到Go编译器的优化，我们捕获了Load方法的输出。我们并不关心Load的结果，只是确保编译器不会因为我们未使用输出结果而将代码判断为死代码并将这段代码移除。</p>
-
 <p>代码的主要部分将启动一个goroutine作为worker，它将通过使用b.N值来尽可能的的迭代满足Go benchmark的条件。随着每个goroutines的运行，我们执行我们的Load操作，最后使用sync.WaitGroup来通知goroutine的结束。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">  1
+<pre class="chroma"><code><span class="lnt">  1
 </span><span class="lnt">  2
 </span><span class="lnt">  3
 </span><span class="lnt">  4
@@ -1802,21 +1708,17 @@ read的数据结构是：</p>
 </span><span class="cm">BenchmarkSyncStableKeysFound16-32            2000000           566 ns/op
 </span><span class="cm">BenchmarkSyncStableKeysFound32-32            3000000           527 ns/op
 </span><span class="cm">BenchmarkSyncStableKeysFound64-32            2000000           873 ns/op
-</span><span class="cm">*/</span></code></pre></td></tr></table>
+</span><span class="cm">*/</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190125125715.png" alt="" /></p>
-
+</div><p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190125125715.png" alt=""></p>
 <p>正如你所看到的，在使用sync.RWMutex保护的常规map上我们有很好的性能表现。事情一直沿着很好的方向在发展，但是到我们开始使用4核时情况就变了。在4核时，不仅数据竞争开始变成问题，就连我们夸核的扩展因子也是一个问题了。如果你是看的红线，当我们的CPU到8核的时候，你就可以忘了这根线了。在这个点上使用RWMutex我们有太多的读竞争，以至于到32核时性能受到很大影响。</p>
-
 <p>蓝线表现的是sync.Map则展示了一个可预测的行为，因为我们持续的在扩展我们的核数。至此，我可以说基于我的初步测试和分析我们知道了sync.Map的发光点在哪儿。这个理想场景就是为它而建的。</p>
-
 <h1 id="补全len">补全Len</h1>
-
 <p>sync.Map没有提供获取元素个数的Len()方法，不过可以通过Range()实现。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -1857,13 +1759,13 @@ read的数据结构是：</p>
         
     <span class="p">}</span>
     <span class="k">return</span> <span class="nx">one</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<h1 id="警告-切记拷贝sync-map">警告:切记拷贝sync.Map</h1>
+</div><h1 id="警告切记拷贝syncmap">警告:切记拷贝sync.Map</h1>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -1918,17 +1820,15 @@ read的数据结构是：</p>
 			<span class="k">return</span> <span class="nx">key</span> <span class="o">==</span> <span class="nx">value</span>
 		<span class="p">})</span>
 	<span class="p">}</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>上述代码会报panic,原因在于创建完成的 sync.Map 是线程安全的，但是经过拷贝之后，两个 sync.Map 里面存储的是同一个 map（就是那个原生的，线程不安全的 map）， mutex 无法起到保护作用，就线程不安全了。</p>
-
+</div><p>上述代码会报panic,原因在于创建完成的 sync.Map 是线程安全的，但是经过拷贝之后，两个 sync.Map 里面存储的是同一个 map（就是那个原生的，线程不安全的 map）， mutex 无法起到保护作用，就线程不安全了。</p>
 <p>但是如果真的要拷贝这个 sync.Map 应该怎么办呢？ 那就只能再创建一个，然后 Range 老的 Map 一个个把 KV 拷进去了。</p>
-
-<p>参考:<br />
-<a href="https://colobu.com/2017/07/11/dive-into-sync-Map">https://colobu.com/2017/07/11/dive-into-sync-Map</a><br />
-<a href="https://segmentfault.com/a/1190000015242373">https://segmentfault.com/a/1190000015242373</a><br />
-<a href="https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/">https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/</a><br />
+<p>参考:<br>
+<a href="https://colobu.com/2017/07/11/dive-into-sync-Map">https://colobu.com/2017/07/11/dive-into-sync-Map</a><br>
+<a href="https://segmentfault.com/a/1190000015242373">https://segmentfault.com/a/1190000015242373</a><br>
+<a href="https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/">https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/</a><br>
 <a href="http://www.qiuxiaobing.cn/%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80/2018/03/09/go-sync-map.html">http://www.qiuxiaobing.cn/%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80/2018/03/09/go-sync-map.html</a>
 <a href="http://www.gogodjzhu.com/index.php/code/basic/397/">http://www.gogodjzhu.com/index.php/code/basic/397/</a>
 <a href="http://russellluo.com/2017/06/go-sync-map-diagram.html">http://russellluo.com/2017/06/go-sync-map-diagram.html</a></p>

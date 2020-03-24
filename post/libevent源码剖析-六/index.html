@@ -25,7 +25,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.55.6 with theme even" />
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
 
 
 <link rel="canonical" href="/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E5%85%AD/" />
@@ -47,21 +47,17 @@
 <meta property="og:description" content="前面已经对libevent的事件处理框架和event结构体做了描述，现在是时候剖析libevent对事件的详细处理流程了，本节将分析libe" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/libevent%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E5%85%AD/" />
-<meta property="article:published_time" content="2017-06-25T17:01:26&#43;00:00"/>
-<meta property="article:modified_time" content="2017-06-25T17:01:26&#43;00:00"/>
-
+<meta property="article:published_time" content="2017-06-25T17:01:26+00:00" />
+<meta property="article:modified_time" content="2017-06-25T17:01:26+00:00" />
 <meta itemprop="name" content="libevent源码剖析(六)">
 <meta itemprop="description" content="前面已经对libevent的事件处理框架和event结构体做了描述，现在是时候剖析libevent对事件的详细处理流程了，本节将分析libe">
-
-
 <meta itemprop="datePublished" content="2017-06-25T17:01:26&#43;00:00" />
 <meta itemprop="dateModified" content="2017-06-25T17:01:26&#43;00:00" />
-<meta itemprop="wordCount" content="3370">
+<meta itemprop="wordCount" content="3361">
 
 
 
-<meta itemprop="keywords" content="" />
-<meta name="twitter:card" content="summary"/>
+<meta itemprop="keywords" content="" /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="libevent源码剖析(六)"/>
 <meta name="twitter:description" content="前面已经对libevent的事件处理框架和event结构体做了描述，现在是时候剖析libevent对事件的详细处理流程了，本节将分析libe"/>
 
@@ -171,7 +167,7 @@
         <div class="post-category">
             <a href="/categories/libevent/"> Libevent </a>
             </div>
-          <span class="more-meta"> 约 3370 字 </span>
+          <span class="more-meta"> 约 3361 字 </span>
           <span class="more-meta"> 预计阅读 7 分钟 </span>
         
       </div>
@@ -181,30 +177,20 @@
   <h2 class="post-toc-title">文章目录</h2>
   <div class="post-toc-content always-active">
     <nav id="TableOfContents">
-<ul>
-<li><a href="#1-事件处理框架-event-base">1 事件处理框架-event_base</a></li>
-<li><a href="#2-创建和初始化event-base">2 创建和初始化event_base</a></li>
-<li><a href="#3-接口函数">3 接口函数</a>
-<ul>
-<li><a href="#1-注册事件">1）注册事件</a></li>
-<li><a href="#2-删除事件">2）删除事件：</a></li>
-</ul></li>
-<li><a href="#4-小结">4 小结</a></li>
-</ul>
+  <ul>
+    <li><a href="#1注册事件">1）注册事件</a></li>
+    <li><a href="#2删除事件">2）删除事件：</a></li>
+  </ul>
 </nav>
   </div>
 </div>
     <div class="post-content">
-      
-
-<p>前面已经对libevent的事件处理框架和event结构体做了描述，现在是时候剖析libevent对事件的详细处理流程了，本节将分析libevent的事件处理框架event_base和libevent注册、删除事件的具体流程，可结合前一节libevent对event的管理。</p>
-
-<h1 id="1-事件处理框架-event-base">1 事件处理框架-event_base</h1>
-
+      <p>前面已经对libevent的事件处理框架和event结构体做了描述，现在是时候剖析libevent对事件的详细处理流程了，本节将分析libevent的事件处理框架event_base和libevent注册、删除事件的具体流程，可结合前一节libevent对event的管理。</p>
+<h1 id="1-事件处理框架-event_base">1 事件处理框架-event_base</h1>
 <p>回想Reactor模式的几个基本组件，本节讲解的部分对应于Reactor框架组件。在libevent中，这就表现为event_base结构体，结构体声明如下，它位于event-internal.h文件中：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -239,30 +225,21 @@
  <span class="k">struct</span> <span class="n">timeval</span> <span class="n">event_tv</span><span class="p">;</span>  
  <span class="k">struct</span> <span class="n">min_heap</span> <span class="n">timeheap</span><span class="p">;</span>  
  <span class="k">struct</span> <span class="n">timeval</span> <span class="n">tv_cache</span><span class="p">;</span>  
-<span class="p">};</span>  </code></pre></td></tr></table>
+<span class="p">};</span>  
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>下面详细解释一下结构体中各字段的含义。</p>
-
+</div><p>下面详细解释一下结构体中各字段的含义。</p>
 <p>evsel和evbase这两个字段的设置可能会让人有些迷惑，这里你可以把evsel和evbase看作是类和静态函数的关系，比如添加事件时的调用行为：</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><span class="lnt">1
-</span></pre></td>
-<td class="lntd">
-<pre class="chroma">evsel-&gt;add(evbase, ev)</pre></td></tr></table>
-</div>
-</div>
+<pre><code>evsel-&gt;add(evbase, ev)
+</code></pre>
 <p>实际执行操作的是evbase；这相当于class::add(instance, ev)，instance就是class的一个对象实例。</p>
-
 <p>evsel指向了全局变量static const struct eventop *eventops[]中的一个；</p>
-
 <p>前面也说过，libevent将系统提供的I/O demultiplex机制统一封装成了eventop结构；因此eventops[]包含了select、poll、kequeue和epoll等等其中的若干个全局实例对象。
 evbase实际上是一个eventop实例对象；
 先来看看eventop结构体，它的成员是一系列的函数指针, 在event-internal.h文件中：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -283,36 +260,27 @@ evbase实际上是一个eventop实例对象；
 </span><span class="c1"></span>     <span class="kt">void</span> <span class="p">(</span><span class="o">*</span><span class="n">dealloc</span><span class="p">)(</span><span class="k">struct</span> <span class="n">event_base</span> <span class="o">*</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="p">);</span> <span class="c1">// 注销，释放资源
 </span><span class="c1"></span>     <span class="cm">/* set if we need to reinitialize the event base */</span>
      <span class="kt">int</span> <span class="n">need_reinit</span><span class="p">;</span>
-<span class="p">};</span></code></pre></td></tr></table>
+<span class="p">};</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>也就是说，在libevent中，每种I/O demultiplex机制的实现都必须提供这五个函数接口，来完成自身的初始化、销毁释放；对事件的注册、注销和分发。
+</div><p>也就是说，在libevent中，每种I/O demultiplex机制的实现都必须提供这五个函数接口，来完成自身的初始化、销毁释放；对事件的注册、注销和分发。
 比如对于epoll，libevent实现了5个对应的接口函数，并在初始化时并将eventop的5个函数指针指向这5个函数，那么程序就可以使用epoll作为I/O demultiplex机制了，这个在后面会再次提到。</p>
-
 <p>activequeues是一个二级指针，前面讲过libevent支持事件优先级，因此你可以把它看作是数组，其中的元素activequeues[priority]是一个链表，链表的每个节点指向一个优先级为priority的就绪事件event。</p>
-
 <p>eventqueue，链表，保存了所有的注册事件event的指针。</p>
-
 <p>sig是由来管理信号的结构体，将在后面信号处理时专门讲解；
 timeheap是管理定时事件的小根堆，将在后面定时事件处理时专门讲解；
 event_tv和tv_cache是libevent用于时间管理的变量，将在后面讲到；
 其它各个变量都能因名知意，就不再啰嗦了。</p>
-
-<h1 id="2-创建和初始化event-base">2 创建和初始化event_base</h1>
-
+<h1 id="2-创建和初始化event_base">2 创建和初始化event_base</h1>
 <p>创建一个event_base对象也既是创建了一个新的libevent实例，程序需要通过调用event_init()（内部调用event_base_new函数执行具体操作）函数来创建，该函数同时还对新生成的libevent实例进行了初始化。
 该函数首先为event_base实例申请空间，然后初始化timer mini-heap，选择并初始化合适的系统I/O 的demultiplexer机制，初始化各事件链表；</p>
-
 <p>函数还检测了系统的时间设置，为后面的时间管理打下基础。</p>
-
 <h1 id="3-接口函数">3 接口函数</h1>
-
 <p>前面提到Reactor框架的作用就是提供事件的注册、注销接口；根据系统提供的事件多路分发机制执行事件循环，当有事件进入“就绪”状态时，调用注册事件的回调函数来处理事件。</p>
-
 <p>Libevent中对应的接口函数主要就是：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt">1
+<pre class="chroma"><code><span class="lnt">1
 </span><span class="lnt">2
 </span><span class="lnt">3
 </span><span class="lnt">4
@@ -323,34 +291,22 @@ event_tv和tv_cache是libevent用于时间管理的变量，将在后面讲到�
 <span class="kt">int</span>  <span class="nf">event_del</span><span class="p">(</span><span class="k">struct</span> <span class="n">event</span> <span class="o">*</span><span class="n">ev</span><span class="p">);</span>  
 <span class="kt">int</span>  <span class="nf">event_base_loop</span><span class="p">(</span><span class="k">struct</span> <span class="n">event_base</span> <span class="o">*</span><span class="n">base</span><span class="p">,</span> <span class="kt">int</span> <span class="n">loops</span><span class="p">);</span>  
 <span class="kt">void</span> <span class="nf">event_active</span><span class="p">(</span><span class="k">struct</span> <span class="n">event</span> <span class="o">*</span><span class="n">event</span><span class="p">,</span> <span class="kt">int</span> <span class="n">res</span><span class="p">,</span> <span class="kt">short</span> <span class="n">events</span><span class="p">);</span>  
-<span class="kt">void</span> <span class="nf">event_process_active</span><span class="p">(</span><span class="k">struct</span> <span class="n">event_base</span> <span class="o">*</span><span class="n">base</span><span class="p">);</span>  </code></pre></td></tr></table>
+<span class="kt">void</span> <span class="nf">event_process_active</span><span class="p">(</span><span class="k">struct</span> <span class="n">event_base</span> <span class="o">*</span><span class="n">base</span><span class="p">);</span>  
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>本节将按介绍事件注册和删除的代码流程，libevent的事件循环框架将在下一节再具体描述。</p>
-
+</div><p>本节将按介绍事件注册和删除的代码流程，libevent的事件循环框架将在下一节再具体描述。</p>
 <p>对于定时事件，这些函数将调用timer heap管理接口执行插入和删除操作；对于I/O和Signal事件将调用eventopadd和delete接口函数执行插入和删除操作（eventop会对Signal事件调用Signal处理接口执行操作）；这些组件将在后面的内容描述。</p>
-
-<h2 id="1-注册事件">1）注册事件</h2>
-
+<h2 id="1注册事件">1）注册事件</h2>
 <p>函数原型：</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><span class="lnt">1
-</span><span class="lnt">2
-</span><span class="lnt">3
-</span></pre></td>
-<td class="lntd">
-<pre class="chroma">int event_add(struct event *ev, const struct timeval *tv)       
+<pre><code>int event_add(struct event *ev, const struct timeval *tv)		
 参数：ev：指向要注册的事件；
-tv：超时时间；</pre></td></tr></table>
-</div>
-</div>
+tv：超时时间；
+</code></pre>
 <p>函数将ev注册到ev-&gt;ev_base上，事件类型由ev-&gt;ev_events指明，如果注册成功，ev将被插入到已注册链表中；如果tv不是NULL，则会同时注册定时事件，将ev添加到timer堆上；</p>
-
 <p>如果其中有一步操作失败，那么函数保证没有事件会被注册，可以讲这相当于一个原子操作。这个函数也体现了libevent细节之处的巧妙设计，且仔细看程序代码，部分有省略，注释直接附在代码中。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -489,26 +445,18 @@ tv：超时时间；</pre></td></tr></table>
 </span><span class="c1"></span>  <span class="n">min_heap_push</span><span class="p">(</span><span class="o">&amp;</span><span class="n">base</span><span class="o">-&gt;</span><span class="n">timeheap</span><span class="p">,</span> <span class="n">ev</span><span class="p">);</span>  
   <span class="k">break</span><span class="p">;</span>  
  <span class="p">}</span>  
-<span class="p">}</span>  </code></pre></td></tr></table>
+<span class="p">}</span>  
+</code></pre></td></tr></table>
 </div>
-</div>
-<h2 id="2-删除事件">2）删除事件：</h2>
-
+</div><h2 id="2删除事件">2）删除事件：</h2>
 <p>函数原型为：</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><span class="lnt">1
-</span></pre></td>
-<td class="lntd">
-<pre class="chroma">int  event_del(struct event *ev);</pre></td></tr></table>
-</div>
-</div>
+<pre><code>int  event_del(struct event *ev);
+</code></pre>
 <p>该函数将删除事件ev，对于I/O事件，从I/O 的demultiplexer上将事件注销；对于Signal事件，将从Signal事件链表中删除；对于定时事件，将从堆上删除；</p>
-
 <p>删除事件的操作则不一定是原子的，比如删除时间事件之后，有可能从系统I/O机制中注销会失败。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-c" data-lang="c"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -569,14 +517,12 @@ tv：超时时间；</pre></td></tr></table>
 </span><span class="c1"></span>  <span class="k">return</span> <span class="p">(</span><span class="n">evsel</span><span class="o">-&gt;</span><span class="n">del</span><span class="p">(</span><span class="n">evbase</span><span class="p">,</span> <span class="n">ev</span><span class="p">));</span>  
  <span class="p">}</span>  
  <span class="k">return</span> <span class="p">(</span><span class="mi">0</span><span class="p">);</span>  
-<span class="p">}</span>  </code></pre></td></tr></table>
+<span class="p">}</span>  
+</code></pre></td></tr></table>
 </div>
-</div>
-<h1 id="4-小结">4 小结</h1>
-
+</div><h1 id="4-小结">4 小结</h1>
 <p>分析了event_base这一重要结构体，初步看到了libevent对系统的I/O demultiplex机制的封装event_op结构，并结合源代码分析了事件的注册和删除处理，下面将会接着分析事件管理框架中的主事件循环部分。</p>
-
-<p>转载：[<a href="http://blog.csdn.net/sparkliang/article/details/4985955](">http://blog.csdn.net/sparkliang/article/details/4985955](</a>)</p>
+<p>转载：<a href="">http://blog.csdn.net/sparkliang/article/details/4985955</a></p>
 
     </div>
 

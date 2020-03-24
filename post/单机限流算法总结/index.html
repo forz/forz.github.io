@@ -25,7 +25,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.55.6 with theme even" />
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
 
 
 <link rel="canonical" href="/post/%E5%8D%95%E6%9C%BA%E9%99%90%E6%B5%81%E7%AE%97%E6%B3%95%E6%80%BB%E7%BB%93/" />
@@ -47,21 +47,17 @@
 <meta property="og:description" content="限流 在开发中我们可能会遇到接口访问频次过高，这时候就需要做流量限制，你可能是用的 Nginx 这种 Web Server 来控制也可能是用了一些流行的类库实现。在分布式系统" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/%E5%8D%95%E6%9C%BA%E9%99%90%E6%B5%81%E7%AE%97%E6%B3%95%E6%80%BB%E7%BB%93/" />
-<meta property="article:published_time" content="2019-11-04T11:51:54&#43;00:00"/>
-<meta property="article:modified_time" content="2019-11-04T11:51:54&#43;00:00"/>
-
+<meta property="article:published_time" content="2019-11-04T11:51:54+00:00" />
+<meta property="article:modified_time" content="2019-11-04T11:51:54+00:00" />
 <meta itemprop="name" content="单机限流算法总结">
 <meta itemprop="description" content="限流 在开发中我们可能会遇到接口访问频次过高，这时候就需要做流量限制，你可能是用的 Nginx 这种 Web Server 来控制也可能是用了一些流行的类库实现。在分布式系统">
-
-
 <meta itemprop="datePublished" content="2019-11-04T11:51:54&#43;00:00" />
 <meta itemprop="dateModified" content="2019-11-04T11:51:54&#43;00:00" />
 <meta itemprop="wordCount" content="3192">
 
 
 
-<meta itemprop="keywords" content="限流," />
-<meta name="twitter:card" content="summary"/>
+<meta itemprop="keywords" content="限流," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="单机限流算法总结"/>
 <meta name="twitter:description" content="限流 在开发中我们可能会遇到接口访问频次过高，这时候就需要做流量限制，你可能是用的 Nginx 这种 Web Server 来控制也可能是用了一些流行的类库实现。在分布式系统"/>
 
@@ -181,65 +177,47 @@
   <h2 class="post-toc-title">文章目录</h2>
   <div class="post-toc-content always-active">
     <nav id="TableOfContents">
-<ul>
-<li><a href="#限流">限流</a></li>
-<li><a href="#计数器法">计数器法</a></li>
-<li><a href="#滑动窗口">滑动窗口</a></li>
-<li><a href="#漏桶算法">漏桶算法</a></li>
-<li><a href="#令牌桶算法">令牌桶算法</a></li>
-<li><a href="#算法比较">算法比较</a>
-<ul>
-<li><a href="#计数器和滑动窗口">计数器和滑动窗口</a></li>
-<li><a href="#漏桶和令牌桶">漏桶和令牌桶</a></li>
-</ul></li>
-</ul>
+  <ul>
+    <li><a href="#计数器和滑动窗口">计数器和滑动窗口</a></li>
+    <li><a href="#漏桶和令牌桶">漏桶和令牌桶</a></li>
+  </ul>
 </nav>
   </div>
 </div>
     <div class="post-content">
-      
-
-<h1 id="限流">限流</h1>
-
+      <h1 id="限流">限流</h1>
 <p>在开发中我们可能会遇到接口访问频次过高，这时候就需要做流量限制，你可能是用的 Nginx 这种 Web Server 来控制也可能是用了一些流行的类库实现。在分布式系统中更是如此，限流是高并发系统的一大杀器，在设计限流算法之前我们先来了解一下它们是什么。</p>
-
 <p>限流的英文是 Rate limit（速率限制），维基百科中的定义比较简单。我们编写的程序可以被外部调用，Web 应用通过浏览器或者其他方式的 HTTP 方式访问，接口的访问频率可能会非常快，如果我们没有对接口访问频次做限制可能会导致服务器无法承受过高的压力挂掉，这时候也可能会产生数据丢失。</p>
-
 <p>而限流算法就可以帮助我们去控制每个接口或程序的函数被调用频率，它有点儿像保险丝，防止系统因为超过访问频率或并发量而引起瘫痪。我们可能在调用某些第三方的接口的时候会看到类似这样的响应头：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><span class="lnt">1
+<pre class="chroma"><code><span class="lnt">1
 </span><span class="lnt">2
 </span><span class="lnt">3
-</span></pre></td>
+</span></code></pre></td>
 <td class="lntd">
-<pre class="chroma">X-RateLimit-Limit: 60         //每秒60次请求
+<pre class="chroma"><code class="language-fallback" data-lang="fallback">X-RateLimit-Limit: 60         //每秒60次请求
 X-RateLimit-Remaining: 23     //当前还剩下多少次
-X-RateLimit-Reset: 1540650789 //限制重置时间</pre></td></tr></table>
+X-RateLimit-Reset: 1540650789 //限制重置时间
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>上面的 HTTP Response 是通过响应头告诉调用方服务端的限流频次是怎样的，保证后端的接口访问上限。为了解决限流问题出现了很多的算法，它们都有不同的用途，通常的策略就是拒绝超出的请求，或者让超出的请求排队等待。</p>
-
+</div><p>上面的 HTTP Response 是通过响应头告诉调用方服务端的限流频次是怎样的，保证后端的接口访问上限。为了解决限流问题出现了很多的算法，它们都有不同的用途，通常的策略就是拒绝超出的请求，或者让超出的请求排队等待。</p>
 <h1 id="计数器法">计数器法</h1>
-
 <p>计数器是最简单的限流算法，思路是维护一个单位时间内的计数器 Counter，如判断单位时间已经过去，则将计数器归零。</p>
-
 <p>我们假设有个需求对于某个接口 /query 每分钟最多允许访问 200 次。</p>
-
 <ul>
 <li>可以在程序中设置一个变量 count，当过来一个请求我就将这个数 +1，同时记录请求时间。</li>
 <li>当下一个请求来的时候判断 count 的计数值是否超过设定的频次，以及当前请求的时间和第一次请求时间是否在 1 分钟内。
-
 <ul>
 <li>如果在 1 分钟内并且超过设定的频次则证明请求过多，后面的请求就拒绝掉。</li>
 <li>如果该请求与第一个请求的间隔时间大于 1 分钟，且 count 值还在限流范围内，就重置 count。</li>
-</ul></li>
 </ul>
-
+</li>
+</ul>
 <p>伪代码实现</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -278,49 +256,31 @@ X-RateLimit-Reset: 1540650789 //限制重置时间</pre></td></tr></table>
         <span class="nx">c</span><span class="p">.</span><span class="nx">Count</span> <span class="p">=</span> <span class="mi">0</span> <span class="c1">// 超时重置
 </span><span class="c1"></span>        <span class="k">return</span> <span class="kc">true</span>
     <span class="p">}</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>这种方法虽然简单，但也有个大问题就是没有很好的处理单位时间的边界。</p>
-
+</div><p>这种方法虽然简单，但也有个大问题就是没有很好的处理单位时间的边界。</p>
 <p>假设有个用户在第 59 秒的最后几毫秒瞬间发送 200 个请求，当 59 秒结束后 Counter 清零了，他在下一秒的时候又发送 200 个请求。那么在 1 秒钟内这个用户发送了 2 倍的请求，如下图：</p>
-
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191104154148.png" alt="" /></p>
-
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191104154148.png" alt=""></p>
 <p>这种方式的缺点在于它没有更细粒度的划分临界点，如果我们可以把这个时间窗口划分成 6 份，每一份代表 10 秒，当然你可以将它划分的更细。那么如何解决这里的临界问题呢？来看看下面的滑动窗口吧。</p>
-
 <h1 id="滑动窗口">滑动窗口</h1>
-
 <p>所谓 滑动窗口（Sliding window） 是一种流量控制技术，这个词出现在 TCP 协议中。我们来看看在限流中它是怎样表现的：</p>
-
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191104154252.png" alt="" /></p>
-
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191104154252.png" alt=""></p>
 <p>上图中我们用红色的虚线代表一个时间窗口（一分钟），每个时间窗口有 6 个格子，每个格子是 10 秒钟。每过 10 秒钟时间窗口向右移动一格，可以看红色箭头的方向。我们为每个格子都设置一个独立的计数器 Counter，假如一个请求在 0:45 访问了那么我们将第五个格子的计数器 +1（也是就是 0:40~0:50），在判断限流的时候需要把所有格子的计数加起来和设定的频次进行比较即可。</p>
-
 <p>那么滑动窗口如何解决我们上面遇到的问题呢？来看下面的图：</p>
-
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191104154327.png" alt="" /></p>
-
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191104154327.png" alt=""></p>
 <p>当用户在 0:59 秒钟发送了 200 个请求就会被第六个格子的计数器记录 +200，当下一秒的时候时间窗口向右移动了一个，此时计数器已经记录了该用户发送的 200 个请求，所以再发送的话就会触发限流，则拒绝新的请求。</p>
-
 <p>通过上面的分析相信你了解什么是滑动窗口了，回想一下其实计数器就是滑动窗口啊，只不过只有一个格子而已，所以我们想让限流做的更精确只需要划分更多的格子就可以了，真是秒啊！为了更精确我们也不知道到底该设置多少个格子，所以又出了 2 种流行的平滑限流算法分别是漏桶算法和令牌桶算法，继续往下看。</p>
-
 <h1 id="漏桶算法">漏桶算法</h1>
-
 <p>漏桶可以看作是一个带有常量服务时间的单服务器队列，如果漏桶（包缓存）溢出，那么数据包会被丢弃。 在网络中，漏桶算法可以控制端口的流量输出速率，平滑网络上的突发流量，实现流量整形，从而为网络提供一个稳定的流量。</p>
-
 <p>如图所示，把请求比作是水，水来了都先放进桶里，并以限定的速度出水，当水来得过猛而出水不够快时就会导致水直接溢出，即拒绝服务。</p>
-
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191104133642.png" alt="" /></p>
-
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191104133642.png" alt=""></p>
 <p>可以看出，漏桶算法可以很好的控制流量的访问速度，一旦超过该速度就拒绝服务。</p>
-
 <p>这张图中有 2 个变量，一个是桶的大小（capacity），另一个是水桶漏洞的大小（rate），那么我们可以写下如下代码来实现：</p>
-
 <p>伪代码实现</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -381,34 +341,26 @@ X-RateLimit-Reset: 1540650789 //限制重置时间</pre></td></tr></table>
         <span class="k">return</span> <span class="nx">b</span>
     <span class="p">}</span>
     <span class="k">return</span> <span class="nx">a</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>漏桶算法有以下特点：</p>
-
+</div><p>漏桶算法有以下特点：</p>
 <ul>
 <li>漏桶具有固定容量，出水速率是固定常量（流出请求）</li>
 <li>如果桶是空的，则不需流出水滴</li>
 <li>可以以任意速率流入水滴到漏桶（流入请求）</li>
 <li>如果流入水滴超出了桶的容量，则流入的水滴溢出（新请求被拒绝）</li>
 </ul>
-
 <p>漏桶限制的是常量流出速率（即流出速率是一个固定常量值），所以最大的速率就是出水的速率，不能出现突发流量。</p>
-
 <h1 id="令牌桶算法">令牌桶算法</h1>
-
 <p>令牌桶算法是网络流量整形（Traffic Shaping）和速率限制（Rate Limiting）中最常使用的一种算法。典型情况下，令牌桶算法用来控制发送到网络上的数据的数目，并允许突发数据的发送。</p>
-
 <p>令牌桶算法的原理是系统会以一个恒定的速度往桶里放入令牌，而如果请求需要被处理，则需要先从桶里获取一个令牌，当桶里没有令牌可取时，则拒绝服务。</p>
-
 <p>从原理上看，令牌桶算法和漏桶算法是相反的，一个“进水”，一个是“漏水”。一开始桶是空的，系统按固定的时间（rate）往桶里添加令牌，直到桶里的令牌数满，多余的请求会被丢弃。当请求来的时候，从桶里移除一个令牌，如果桶是空的则拒绝请求或者阻塞。</p>
-
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191029103028.png" alt="" /></p>
-
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191029103028.png" alt=""></p>
 <p>伪代码实现</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -455,41 +407,33 @@ X-RateLimit-Reset: 1540650789 //限制重置时间</pre></td></tr></table>
 </span><span class="c1"></span>        <span class="nx">t</span><span class="p">.</span><span class="nx">Tokens</span><span class="o">--</span>
         <span class="k">return</span> <span class="kc">true</span>
     <span class="p">}</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>令牌桶有以下特点：</p>
-
+</div><p>令牌桶有以下特点：</p>
 <ul>
 <li>令牌按固定的速率被放入令牌桶中</li>
 <li>桶中最多存放 B 个令牌，当桶满时，新添加的令牌被丢弃或拒绝</li>
 <li>如果桶中的令牌不足 N 个，则不会删除令牌，且请求将被限流（丢弃或阻塞等待）</li>
 </ul>
-
 <p>令牌桶限制的是平均流入速率（允许突发请求，只要有令牌就可以处理，支持一次拿3个令牌，4个令牌），并允许一定程度突发流量。</p>
-
 <h1 id="算法比较">算法比较</h1>
-
 <h2 id="计数器和滑动窗口">计数器和滑动窗口</h2>
-
 <p>计数器算法实现起来最简单，可以看成是滑动窗口的低精度实现。滑动窗口由于需要存储多份的计数器（每一个格子存一份），所以滑动窗口在实现上需要更多的存储空间。也就是说，如果滑动窗口的精度越高，需要的存储空间就越大。</p>
-
 <h2 id="漏桶和令牌桶">漏桶和令牌桶</h2>
-
 <p>漏桶算法与令牌桶算法在表面看起来类似，很容易将两者混淆。但事实上，这两者具有截然不同的特性，且为不同的目的而使用。漏桶算法与令牌桶算法的区别在于，漏桶算法能够强行限制数据的传输速率，令牌桶算法能够在限制数据的平均传输速率的同时还允许某种程度的突发传输:</p>
-
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191104154834.png" alt="" /></p>
-
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191104154834.png" alt=""></p>
 <ul>
-<li><p>漏桶:漏桶的出水速度是恒定的，那么意味着如果瞬时大流量的话，将有大部分请求被丢弃掉（也就是所谓的溢出）。</p></li>
-
-<li><p>令牌桶:生成令牌的速度是恒定的，而请求去拿令牌是没有速度限制的。这意味，面对瞬时大流量，该算法可以在短时间内请求拿到大量令牌，而且拿令牌的过程并不是消耗很大的事情。</p></li>
+<li>
+<p>漏桶:漏桶的出水速度是恒定的，那么意味着如果瞬时大流量的话，将有大部分请求被丢弃掉（也就是所谓的溢出）。</p>
+</li>
+<li>
+<p>令牌桶:生成令牌的速度是恒定的，而请求去拿令牌是没有速度限制的。这意味，面对瞬时大流量，该算法可以在短时间内请求拿到大量令牌，而且拿令牌的过程并不是消耗很大的事情。</p>
+</li>
 </ul>
-
 <p>需要注意的是，在某些情况下，漏桶算法不能够有效地使用网络资源，因为漏桶的漏出速率是固定的，所以即使网络中没有发生拥塞，漏桶算法也不能使某一个单独的数据流达到端口速率。因此，漏桶算法对于存在突发特性的流量来说缺乏效率。而令牌桶算法则能够满足这些具有突发特性的流量。</p>
-
-<p>参考:<br />
-<a href="https://www.jianshu.com/p/a59c13e70582">https://www.jianshu.com/p/a59c13e70582</a><br />
+<p>参考:<br>
+<a href="https://www.jianshu.com/p/a59c13e70582">https://www.jianshu.com/p/a59c13e70582</a><br>
 <a href="https://blog.biezhi.me/2018/10/rate-limit-algorithm.html">https://blog.biezhi.me/2018/10/rate-limit-algorithm.html</a></p>
 
     </div>

@@ -25,7 +25,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.55.6 with theme even" />
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
 
 
 <link rel="canonical" href="/post/go%E5%AE%9E%E7%8E%B0http%E9%95%BF%E8%BF%9E%E6%8E%A5%E5%92%8C%E7%9F%AD%E8%BF%9E%E6%8E%A5/" />
@@ -47,21 +47,17 @@
 <meta property="og:description" content="TCP的长连接与短连接 Server和Client建立通讯后，确保连接的及时断开就非常重要。否则，多个客户端长时间占用着连接不关闭，是非常可怕" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/go%E5%AE%9E%E7%8E%B0http%E9%95%BF%E8%BF%9E%E6%8E%A5%E5%92%8C%E7%9F%AD%E8%BF%9E%E6%8E%A5/" />
-<meta property="article:published_time" content="2018-12-13T15:33:35&#43;00:00"/>
-<meta property="article:modified_time" content="2018-12-13T15:33:35&#43;00:00"/>
-
+<meta property="article:published_time" content="2018-12-13T15:33:35+00:00" />
+<meta property="article:modified_time" content="2018-12-13T15:33:35+00:00" />
 <meta itemprop="name" content="Go实现HTTP长连接和短连接">
 <meta itemprop="description" content="TCP的长连接与短连接 Server和Client建立通讯后，确保连接的及时断开就非常重要。否则，多个客户端长时间占用着连接不关闭，是非常可怕">
-
-
 <meta itemprop="datePublished" content="2018-12-13T15:33:35&#43;00:00" />
 <meta itemprop="dateModified" content="2018-12-13T15:33:35&#43;00:00" />
 <meta itemprop="wordCount" content="2274">
 
 
 
-<meta itemprop="keywords" content="Go," />
-<meta name="twitter:card" content="summary"/>
+<meta itemprop="keywords" content="Go," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go实现HTTP长连接和短连接"/>
 <meta name="twitter:description" content="TCP的长连接与短连接 Server和Client建立通讯后，确保连接的及时断开就非常重要。否则，多个客户端长时间占用着连接不关闭，是非常可怕"/>
 
@@ -181,57 +177,40 @@
   <h2 class="post-toc-title">文章目录</h2>
   <div class="post-toc-content always-active">
     <nav id="TableOfContents">
-<ul>
-<li><a href="#tcp的长连接与短连接">TCP的长连接与短连接</a></li>
-<li><a href="#http-包如何使用-tcp-连接">HTTP 包如何使用 TCP 连接？</a></li>
-<li><a href="#go实现http短连接">Go实现HTTP短连接</a></li>
-<li><a href="#go实现http长连接">Go实现HTTP长连接</a>
-<ul>
-<li><a href="#setkeepalive">SetKeepAlive</a></li>
-<li><a href="#自行实现心跳协议">自行实现心跳协议</a></li>
-</ul></li>
-</ul>
+  <ul>
+    <li><a href="#setkeepalive">SetKeepAlive</a></li>
+    <li><a href="#自行实现心跳协议">自行实现心跳协议</a></li>
+  </ul>
 </nav>
   </div>
 </div>
     <div class="post-content">
-      
-
-<h1 id="tcp的长连接与短连接">TCP的长连接与短连接</h1>
-
+      <h1 id="tcp的长连接与短连接">TCP的长连接与短连接</h1>
 <p>Server和Client建立通讯后，确保连接的及时断开就非常重要。否则，多个客户端长时间占用着连接不关闭，是非常可怕的服务器资源浪费。会使得服务器可服务的客户端数量大幅度减少。</p>
-
 <p>而TCP频繁的建立连接，会有一些问题：</p>
-
 <ul>
 <li>三次握手建立连接、四次握手断开连接都会对性能有损耗；</li>
 <li>断开的连接断开不会立刻释放，会等待2MSL的时间，据我观察是1分钟；</li>
 <li>大量TIME_WAIT会占用内存，一个连接实测是3.155KB。而且占用太多，有可能会占满端口，一台服务器最多只能有6万多个端口；</li>
 </ul>
-
 <p>因此，针对短链接和长连接，根据业务的需求，配套不同的处理机制。</p>
-
 <p>短连接</p>
-
 <p>一般建立完连接，就立刻传输数据。传输完数据，连接就关闭。服务端根据需要，设定连接的时长。超过时间长度，就算客户端超时。立刻关闭连接。</p>
-
 <p>长连接</p>
-
 <p>建立连接后，传输数据，然后要保持连接，然后再次传输数据。直到连接关闭。</p>
-
 <p>Go里可以利用下面的函数简单地开启长连接</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+<pre class="chroma"><code><span class="lnt">1
 </span></code></pre></td>
 <td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">TCPConn</span><span class="p">)</span> <span class="nf">SetKeepAlive</span><span class="p">(</span><span class="nx">keepalive</span> <span class="kt">bool</span><span class="p">)</span> <span class="kt">error</span></code></pre></td></tr></table>
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">TCPConn</span><span class="p">)</span> <span class="nf">SetKeepAlive</span><span class="p">(</span><span class="nx">keepalive</span> <span class="kt">bool</span><span class="p">)</span> <span class="kt">error</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>socket读写可以通过 SetDeadline、SetReadDeadline、SetWriteDeadline设置阻塞的时间。</p>
+</div><p>socket读写可以通过 SetDeadline、SetReadDeadline、SetWriteDeadline设置阻塞的时间。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+<pre class="chroma"><code><span class="lnt">1
 </span><span class="lnt">2
 </span><span class="lnt">3
 </span><span class="lnt">4
@@ -244,15 +223,14 @@
 <span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">IPConn</span><span class="p">)</span> <span class="nf">SetReadDeadline</span><span class="p">(</span><span class="nx">t</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">)</span> <span class="kt">error</span>  
   
 <span class="kd">func</span> <span class="p">(</span><span class="o">*</span><span class="nx">IPConn</span><span class="p">)</span> <span class="nx">SetWriteDeadline</span>  
-<span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">IPConn</span><span class="p">)</span> <span class="nf">SetWriteDeadline</span><span class="p">(</span><span class="nx">t</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">)</span> <span class="kt">error</span> </code></pre></td></tr></table>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">IPConn</span><span class="p">)</span> <span class="nf">SetWriteDeadline</span><span class="p">(</span><span class="nx">t</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">)</span> <span class="kt">error</span> 
+</code></pre></td></tr></table>
 </div>
-</div>
-<h1 id="http-包如何使用-tcp-连接">HTTP 包如何使用 TCP 连接？</h1>
-
+</div><h1 id="http-包如何使用-tcp-连接">HTTP 包如何使用 TCP 连接？</h1>
 <p>http 服务器启动之后，会循环接受新请求，为每一个请求（连接）创建一个协程。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+<pre class="chroma"><code><span class="lnt">1
 </span><span class="lnt">2
 </span><span class="lnt">3
 </span><span class="lnt">4
@@ -263,13 +241,13 @@
 </span><span class="c1"></span><span class="k">for</span> <span class="p">{</span>
 	<span class="nx">rw</span><span class="p">,</span> <span class="nx">e</span> <span class="o">:=</span> <span class="nx">l</span><span class="p">.</span><span class="nf">Accept</span><span class="p">()</span>
 	<span class="k">go</span> <span class="nx">c</span><span class="p">.</span><span class="nf">serve</span><span class="p">()</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>下面是每个协程的执行的代码，我只摘录了一部分关键的逻辑。可以发现，serve方法里面还有一个for循环。</p>
+</div><p>下面是每个协程的执行的代码，我只摘录了一部分关键的逻辑。可以发现，serve方法里面还有一个for循环。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -304,15 +282,14 @@
 		
 		<span class="nx">serverHandler</span><span class="p">{</span><span class="nx">c</span><span class="p">.</span><span class="nx">server</span><span class="p">}.</span><span class="nf">ServeHTTP</span><span class="p">(</span><span class="nx">w</span><span class="p">,</span> <span class="nx">w</span><span class="p">.</span><span class="nx">req</span><span class="p">)</span>
 	<span class="p">}</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>这个循环是用来做什么的？其实也容易理解，如果是长连接，一个协程可以执行多次响应。如果只执行了一次，那就是短连接。长连接会在超时或者出错后退出循环，也就是关闭长连接。defer函数可以让协程结束之后关闭 TCP 连接。</p>
-
+</div><p>这个循环是用来做什么的？其实也容易理解，如果是长连接，一个协程可以执行多次响应。如果只执行了一次，那就是短连接。长连接会在超时或者出错后退出循环，也就是关闭长连接。defer函数可以让协程结束之后关闭 TCP 连接。</p>
 <p>readRequest函数用来解析 HTTP 协议。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -373,17 +350,15 @@
 	<span class="nx">req</span><span class="p">.</span><span class="nx">Method</span><span class="p">,</span> <span class="nx">req</span><span class="p">.</span><span class="nx">RequestURI</span><span class="p">,</span> <span class="nx">req</span><span class="p">.</span><span class="nx">Proto</span><span class="p">,</span> <span class="nx">ok</span> <span class="p">=</span> <span class="nf">parseRequestLine</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
 	
 	<span class="nx">mimeHeader</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">tp</span><span class="p">.</span><span class="nf">ReadMIMEHeader</span><span class="p">()</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>具体参与解析 HTTP 协议的部分是ReadRequest方法，而调用它之前，设置了读写超时时间。超时时间设置的是绝对时间。所以这里都是通过time.Now().Add(d)来设置的。不同的是写超时是defer执行，也就是函数返回后才执行。</p>
-
+</div><p>具体参与解析 HTTP 协议的部分是ReadRequest方法，而调用它之前，设置了读写超时时间。超时时间设置的是绝对时间。所以这里都是通过time.Now().Add(d)来设置的。不同的是写超时是defer执行，也就是函数返回后才执行。</p>
 <h1 id="go实现http短连接">Go实现HTTP短连接</h1>
-
 <p>如果做短连接，直接在Server端的连接上设置SetReadDeadline。当你设置的时限到达，无论客户端是否还在继续传递消息，服务端都不会再接收。并且已经关闭连接。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -428,29 +403,21 @@
         <span class="nf">Log</span><span class="p">(</span><span class="nx">conn</span><span class="p">.</span><span class="nf">RemoteAddr</span><span class="p">().</span><span class="nf">String</span><span class="p">(),</span> <span class="s">&#34;connect success!&#34;</span><span class="p">)</span>
         <span class="o">...</span>
     <span class="p">}</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>这就可以了。在这段代码中，每当10秒中的时限一道，连接就终止了。</p>
-
+</div><p>这就可以了。在这段代码中，每当10秒中的时限一道，连接就终止了。</p>
 <h1 id="go实现http长连接">Go实现HTTP长连接</h1>
-
 <h2 id="setkeepalive">SetKeepAlive</h2>
-
 <p>GO 可以通过 net.TCPConn 的 SetKeepAlive 来启用 TCP keepalive。在 OS X 和 Linux 系统上，当一个连接空间了2个小时时，会以75秒的间隔发送8个TCP keepalive探测包。换句话说， 在两小时10分钟后(7200+8*75)Read将会返回一个 io.EOF 错误.</p>
-
 <p>对于你的应用，这个超时间隔可能太长了。在这种情况下你可以调用SetKeepAlivePeriod方法。但这个方法在不同的操作系统上会有不同的表现。在OSX上它会更改发送探测包前连接的空间时间。在Linux上它会更改连接的空间时间与探测包的发送间隔。所以以30秒的参数调用 SetKeepAlivePeriod在OSX系统上会导致共10分30秒(30+8*75)的超时时间，但在linux上却是4分30秒(30+8*30).</p>
-
 <p>当然，可以设置 http.Transport 的 DisableKeepAlives 来禁用掉持久连接。</p>
-
 <h2 id="自行实现心跳协议">自行实现心跳协议</h2>
-
 <p>client每隔几分钟发送一个固定信息给服务端，服务端收到后回复一个固定信息如果服务端几分钟内没有收到客户端信息则视客户端断开。发包方可以是客户也可以是服务端..</p>
-
 <p>心跳包之所以叫心跳包是因为：它像心跳一样每隔固定时间发一次，以此来告诉服务器，这个客户端还活着。事实上这是为了保持长连接，至于这个包的内容，是没有什么特别规定的，不过一般都是很小的包，或者只包含包头的一个空包。心跳包主要也就是用于长连接的保活和断线处理。一般的应用下，判定时间在30-40秒比较不错。如果实在要求高，那就在6-9秒。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -551,13 +518,13 @@
 
 <span class="kd">func</span> <span class="nf">Log</span><span class="p">(</span><span class="nx">v</span> <span class="o">...</span><span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
 	<span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">v</span><span class="o">...</span><span class="p">)</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>这样，就可以成功实现对于长连接的处理了~~，我们可以这么进行测试：</p>
+</div><p>这样，就可以成功实现对于长连接的处理了~~，我们可以这么进行测试：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">1
+<pre class="chroma"><code><span class="lnt">1
 </span><span class="lnt">2
 </span><span class="lnt">3
 </span><span class="lnt">4
@@ -576,14 +543,13 @@
 
 	<span class="p">}</span>
 	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;send over&#34;</span><span class="p">)</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>可以发现，Sender函数中time.Sleep阻塞的时间设定的比Server中的timeout短的时候，Client端的信息可以自由的发送到循环结束，而当我们设定Sender函数的阻塞时间较长时，就只能发出第一次循环的信息。</p>
-
-<p>参考:<br />
-<a href="https://blog.csdn.net/lengyuezuixue/article/details/79235850">https://blog.csdn.net/lengyuezuixue/article/details/79235850</a><br />
-<a href="http://blog.cyeam.com/golang/2017/05/31/go-http-keepalive">http://blog.cyeam.com/golang/2017/05/31/go-http-keepalive</a><br />
+</div><p>可以发现，Sender函数中time.Sleep阻塞的时间设定的比Server中的timeout短的时候，Client端的信息可以自由的发送到循环结束，而当我们设定Sender函数的阻塞时间较长时，就只能发出第一次循环的信息。</p>
+<p>参考:<br>
+<a href="https://blog.csdn.net/lengyuezuixue/article/details/79235850">https://blog.csdn.net/lengyuezuixue/article/details/79235850</a><br>
+<a href="http://blog.cyeam.com/golang/2017/05/31/go-http-keepalive">http://blog.cyeam.com/golang/2017/05/31/go-http-keepalive</a><br>
 <a href="https://blog.csdn.net/u010824081/article/details/78108984">https://blog.csdn.net/u010824081/article/details/78108984</a></p>
 
     </div>

@@ -25,7 +25,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.55.6 with theme even" />
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
 
 
 <link rel="canonical" href="/post/%E5%B1%82%E7%BA%A7%E6%97%B6%E9%97%B4%E8%BD%AE%E7%9A%84golang%E5%AE%9E%E7%8E%B0/" />
@@ -47,21 +47,17 @@
 <meta property="og:description" content="引言 最近在工作中负责制定重构计划，需要将部分业务代码从 Python 迁移到 Golang。其中一些功能涉及到 Celery 延时任务，所以一直在思考 Golang 中处理延时任务的有" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/%E5%B1%82%E7%BA%A7%E6%97%B6%E9%97%B4%E8%BD%AE%E7%9A%84golang%E5%AE%9E%E7%8E%B0/" />
-<meta property="article:published_time" content="2019-10-23T17:21:10&#43;00:00"/>
-<meta property="article:modified_time" content="2019-10-23T17:21:10&#43;00:00"/>
-
+<meta property="article:published_time" content="2019-10-23T17:21:10+00:00" />
+<meta property="article:modified_time" content="2019-10-23T17:21:10+00:00" />
 <meta itemprop="name" content="层级时间轮的Golang实现">
 <meta itemprop="description" content="引言 最近在工作中负责制定重构计划，需要将部分业务代码从 Python 迁移到 Golang。其中一些功能涉及到 Celery 延时任务，所以一直在思考 Golang 中处理延时任务的有">
-
-
 <meta itemprop="datePublished" content="2019-10-23T17:21:10&#43;00:00" />
 <meta itemprop="dateModified" content="2019-10-23T17:21:10&#43;00:00" />
-<meta itemprop="wordCount" content="7745">
+<meta itemprop="wordCount" content="7750">
 
 
 
-<meta itemprop="keywords" content="Go,时间轮," />
-<meta name="twitter:card" content="summary"/>
+<meta itemprop="keywords" content="Go,时间轮," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="层级时间轮的Golang实现"/>
 <meta name="twitter:description" content="引言 最近在工作中负责制定重构计划，需要将部分业务代码从 Python 迁移到 Golang。其中一些功能涉及到 Celery 延时任务，所以一直在思考 Golang 中处理延时任务的有"/>
 
@@ -171,7 +167,7 @@
         <div class="post-category">
             <a href="/categories/go/"> Go </a>
             </div>
-          <span class="more-meta"> 约 7745 字 </span>
+          <span class="more-meta"> 约 7750 字 </span>
           <span class="more-meta"> 预计阅读 16 分钟 </span>
         
       </div>
@@ -181,112 +177,78 @@
   <h2 class="post-toc-title">文章目录</h2>
   <div class="post-toc-content always-active">
     <nav id="TableOfContents">
-<ul>
-<li><a href="#引言">引言</a></li>
-<li><a href="#理论">理论</a>
-<ul>
-<li><a href="#简单时间轮">简单时间轮</a></li>
-<li><a href="#层级时间轮">层级时间轮</a></li>
-<li><a href="#kafka-的变体实现">Kafka 的变体实现</a>
-<ul>
-<li><a href="#时间轮表示">时间轮表示</a></li>
-<li><a href="#时钟驱动方式">时钟驱动方式</a></li>
-</ul></li>
-</ul></li>
-<li><a href="#源码分析">源码分析</a>
-<ul>
-<li><a href="#utils">utils</a></li>
-<li><a href="#delayqueue">DelayQueue</a></li>
-<li><a href="#bucket">bucket</a></li>
-<li><a href="#timingwheel">timingwheel</a></li>
-<li><a href="#examples">examples</a></li>
-</ul></li>
-</ul>
+  <ul>
+    <li><a href="#简单时间轮">简单时间轮</a></li>
+    <li><a href="#层级时间轮">层级时间轮</a></li>
+    <li><a href="#kafka-的变体实现">Kafka 的变体实现</a>
+      <ul>
+        <li><a href="#时间轮表示">时间轮表示</a></li>
+        <li><a href="#时钟驱动方式">时钟驱动方式</a></li>
+      </ul>
+    </li>
+  </ul>
+
+  <ul>
+    <li><a href="#utils">utils</a></li>
+    <li><a href="#delayqueue">DelayQueue</a></li>
+    <li><a href="#bucket">bucket</a></li>
+    <li><a href="#timingwheel">timingwheel</a></li>
+    <li><a href="#examples">examples</a></li>
+  </ul>
 </nav>
   </div>
 </div>
     <div class="post-content">
-      
-
-<h1 id="引言">引言</h1>
-
+      <h1 id="引言">引言</h1>
 <p>最近在工作中负责制定重构计划，需要将部分业务代码从 Python 迁移到 Golang。其中一些功能涉及到 Celery 延时任务，所以一直在思考 Golang 中处理延时任务的有效方案。</p>
-
 <p>其实在软件系统中，“在一段时间后执行一个任务” 的需求比比皆是。比如：</p>
-
 <ul>
 <li>客户端发起 HTTP 请求后，如果在指定时间内没有收到服务器的响应，则自动断开连接。</li>
 </ul>
-
 <p>为了实现上述功能，通常我们会使用定时器 Timer：</p>
-
 <ol>
 <li>客户端发起请求后，立即创建（启动）一个 Timer：到期间隔为 d，到期后执行 “断开连接” 的操作。</li>
 <li>如果到期间隔 d 以内收到了服务器的响应，客户端就删除（停止）这个 Timer。</li>
 <li>如果一直没有收到响应，则 Timer 最终会到期，然后执行 “断开连接” 的操作。</li>
 </ol>
-
 <p>Golang 内置的 Timer是采用最小堆来实现的，创建和删除的时间复杂度都为 O(log n)。现代的 Web 服务动辄管理 100w+ 的连接，每个连接都会有很多超时任务（比如发送超时、心跳检测等），如果每个超时任务都对应一个 Timer，性能会比较低下。</p>
-
 <p>论文 Hashed and Hierarchical Timing Wheels提出了一种用于实现 Timer 的高效数据结构：时间轮。采用时间轮实现的 Timer，创建和删除的时间复杂度为 O(1)。</p>
-
 <p>常见的时间轮实现有两种：</p>
-
 <ul>
 <li>简单时间轮（Simple Timing Wheel）—— 比如 Netty4 的 HashedWheelTimer。</li>
 <li>层级时间轮（Hierarchical Timing Wheels）—— 比如 Kafka 的 Purgatory。</li>
 </ul>
-
 <p>下面我们来看看简单时间轮、层级时间轮、Kafka 的层级时间轮变体的实现原理，以及 Golang 实现中的一些要点。</p>
-
 <h1 id="理论">理论</h1>
-
 <h2 id="简单时间轮">简单时间轮</h2>
-
 <p>一个 <strong>简单时间轮</strong> 就是一个循环列表，列表中的每一格包含一个定时任务列表（双向链表）。一个时间单位为 u、大小为 n 的简单时间轮，可以包含的定时任务的最大到期间隔为 n*u。</p>
-
 <p>以 u 为 1ms、n 为 3 的简单时间轮为例，可以包含的定时任务的最大到期间隔为 3ms。</p>
-
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191023174824.png" alt="" /></p>
-
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191023174824.png" alt=""></p>
 <p>如上图所示，该简单时间轮的运行原理如下：</p>
-
 <ol>
 <li>初始时，假设当前时间（蓝色箭头）指向第 1 格（此时：到期间隔为 [0ms, 1ms) 的定时任务放第 1 格，[1ms, 2ms) 的放第 2 格，[2ms, 3ms) 的放第 3 格）。</li>
 <li>此时我们创建一个到期间隔为 1ms 的定时任务 task1，按规则该任务会被插入到第 2 格。</li>
 <li>随着时间的流逝，过了 1ms 后当前时间指向第 2 格，这一格包含的定时任务 task1 会被删除并执行。</li>
 <li>当前时间指向第 2 格（此时：到期间隔为 [0ms, 1ms) 的定时任务放第 2 格，[1ms, 2ms) 的放第 3 格，[2ms, 3ms) 的放第 1 格），我们继续创建一个到期间隔为 2ms 的定时任务 task2，按规则该任务被插入到第 1 格。</li>
 </ol>
-
 <p>简单时间轮的优点是实现简单，缺点是：</p>
-
 <ul>
 <li>一旦选定 n，就不能包含到期间隔超过 n*u 的定时任务。</li>
 <li>如果定时任务的到期时间跨度较大，就会选择较大的 n，在定时任务较少时会造成很大的空间浪费。</li>
 </ul>
-
 <p>有一些简单时间轮的变体实现，它们通过在定时任务中增加记录 round 轮次信息，可以有效弥补上述两个缺点。同样以上面 u 为 1ms、n 为 3 的简单时间轮为例，初始时间指向第 1 格；此时如果要创建到期时间为 4ms 的定时任务，可以在该任务中设置 round 为 1（4/3 取整），剩余到期时间用 4ms 减去 round*3ms 等于 1ms，因此放到第 2 格；等到当前时间指向第 2 格时，判断任务中的 round 大于 0，所以不会删除并执行该任务，而是对其 round 减一（于是 round 变为 0）；等到再过 3ms 后，当前时间再次指向第 2 格，判断任务中的 round 为 0，进而删除并执行该任务。</p>
-
 <p>然而，这些变体实现因为只使用了一个时间轮，所以仍然存在一个缺点：处理每一格的定时任务列表的时间复杂度是 O(n)，如果定时任务数量很大，分摊到每一格的定时任务列表就会很长，这样的处理性能显然是让人无法接受的。</p>
-
 <h2 id="层级时间轮">层级时间轮</h2>
-
 <p><strong>层级时间轮</strong> 通过使用多个时间轮，并且对每个时间轮采用不同的 u，可以有效地解决简单时间轮及其变体实现的问题。</p>
-
 <p>参考 Kafka 的 Purgatory中的层级时间轮实现：</p>
-
 <ul>
 <li>每一层时间轮的大小都固定为 n，第一层时间轮的时间单位为 u，那么第二层时间轮（我们称之为第一层时间轮的溢出时间轮 Overflow Wheel）的时间单位就为 n*u，以此类推。</li>
 <li>除了第一层时间轮是固定创建的，其他层的时间轮（均为溢出时间轮）都是按需创建的。</li>
 <li>原先插入到高层时间轮（溢出时间轮）的定时任务，随着时间的流逝，会被降级重新插入到低层时间轮中。</li>
 </ul>
-
 <p>以 u 为 1ms、n 为 3 的层级时间轮为例，第一层时间轮的时间单位为 1ms、大小为 3，第二层时间轮的时间单位为 3ms、大小为 3，以此类推。</p>
-
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191023174857.png" alt="" /></p>
-
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191023174857.png" alt=""></p>
 <p>如上图所示，该层级时间轮的运行原理如下：</p>
-
 <ol>
 <li>初始时，只有第一层（Level 1）时间轮，假设当前时间（蓝色箭头）指向第 1 格（此时：到期间隔为 [0ms, 1ms) 的定时任务放第 1 格，[1ms, 2ms) 的放第 2 格，[2ms, 3ms) 的放第 3 格）。</li>
 <li>此时我们创建一个到期间隔为 2ms 的定时任务 task1，按规则该任务会被插入到第一层时间轮的第 3 格。</li>
@@ -295,55 +257,35 @@
 <li>随着时间的流逝，又过了 1ms 后，第一层时间轮中的当期时间指向第 1 格，这一格中没有任务；此时，第二层当前时间指向第 2 格，这一格包含的任务 task2 会被删除并重新插入时间轮，因为剩余到期时间为 1ms，所以 task2 会被插入到第一层时间轮的第 2 格。</li>
 <li>随着时间的流逝，又过了 1ms 后，第一层时间轮中的当前时间指向第 2 格，这一格包含的定时任务 task2 会被删除并执行；此时，第二层时间轮的当前时间没有变化，依然指向第 2 格。</li>
 </ol>
-
 <h2 id="kafka-的变体实现">Kafka 的变体实现</h2>
-
 <p>在具体实现层面 Kafka Timer 实现源码，Kafka 的层级时间轮与上面描述的原理有一些差别。</p>
-
 <h3 id="时间轮表示">时间轮表示</h3>
-
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191023174920.png" alt="" /></p>
-
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191023174920.png" alt=""></p>
 <p>如上图所示，在时间轮的表示上面：</p>
-
 <ul>
 <li>使用大小为 wheelSize 的数组来表示一层时间轮，其中每一格是一个 bucket，每个 bucket 的时间单位为 tick。</li>
 <li>这个时间轮数组并没有模拟循环列表的行为（如图左所示），而是模拟了哈希表的行为。</li>
 </ul>
-
 <p>我们用数组模拟时间轮（数组的每个元素是一个列表头，添加任务就是往列表头后面挂任务而已），数组的大小代表时间的格子数，添加过程中我们会通过 过期时间/时间轮格子代表时间 % 时间轮格子总数 算出的格子位置，然后通过挂链的方法添加到时间轮格子当中。</p>
-
 <p>在这个过程中我们需要注意的是任务首先需要判断当前时间轮是否放的下，判断放得下的标准就是时间轮当前时间 + 一圈时间轮时间是否大于任务过期时间，如果大于就代表放的下，如果小于就代表无法放置那么就需要往上一层时间轮放置。</p>
-
 <h3 id="时钟驱动方式">时钟驱动方式</h3>
-
 <p>常规的时间轮实现中，会在一个线程中每隔一个时间单位 tick 就醒来一次，并驱动时钟走向下一格，然后检查这一格中是否包含定时任务。如果时间单位 tick 很小（比如 Kafka 中 tick 为 1ms）并且（在最低层时间轮的）定时任务很少，那么这种驱动方式将会非常低效。</p>
-
 <p>Kafka 的层级时间轮实现中，利用了 Java 内置的 DelayQueue 结构，将每一层时间轮中所有 “包含有定时任务的 bucket” 都加入到同一个 DelayQueue 中，然后 <strong>等到有 bucket 到期后再驱动时钟往前走</strong>，并逐个处理该 bucket 中的定时任务。</p>
-
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191023174942.png" alt="" /></p>
-
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191023174942.png" alt=""></p>
 <p>如上图所示：</p>
-
 <ol>
 <li>往层级时间轮中添加一个定时任务 task1 后，会将该任务所属的 bucket2 的到期时间设置为 task1 的到期时间 expiration（= 当前时间 currentTime + 定时任务到期间隔 duration），并将这个 bucket2 添加（Offer）到 DelayQueue 中。</li>
 <li>DelayQueue（内部有一个线程）会等待 “到期时间最早（earliest）的 bucket” 到期，图中等到的是排在队首的 bucket2，于是经由 poll 返回并删除这个 bucket2；随后，时间轮会将当前时间 currentTime 往前移动到 bucket2 的 expiration 所指向的时间（图中是 1ms 所在的位置）；最后，bucket2 中包含的 task1 会被删除并执行。</li>
 </ol>
-
 <p>上述 Kafka 层级时间轮的驱动方式是非常高效的。虽然 DelayQueue 中 offer（添加）和 poll（获取并删除）操作的时间复杂度为 O(log n)，但是相比定时任务的个数而言，bucket 的个数其实是非常小的（也就是 O(log n) 中的 n 很小），因此性能也是没有问题的。</p>
-
 <h1 id="源码分析">源码分析</h1>
-
 <p>代码源自RussellLuo的Github,链接为:<a href="https://github.com/RussellLuo/timingwheel">https://github.com/RussellLuo/timingwheel</a></p>
-
 <p>timingwheel中的 Golang 实现，基本上都是参考 Kafka 的层级时间轮的原理来实现的。</p>
-
 <h2 id="utils">utils</h2>
-
 <p>基础工具方法:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -381,6 +323,7 @@
 </span><span class="lnt">36
 </span><span class="lnt">37
 </span><span class="lnt">38
+</span><span class="lnt">39
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">timingwheel</span>
@@ -420,22 +363,20 @@
 		<span class="nf">cb</span><span class="p">()</span>
 		<span class="nx">w</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
 	<span class="p">}()</span>
-<span class="p">}</span></code></pre></td></tr></table>
-</div>
-</div>
-<h2 id="delayqueue">DelayQueue</h2>
+<span class="p">}</span>
 
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="delayqueue">DelayQueue</h2>
 <p>因为 Golang 中没有现成的 DelayQueue 结构，所以实现了一个 DelayQueue，其中：</p>
-
 <ul>
 <li>PriorityQueue —— 从 NSQ 借用过来的 优先级队列（基于最小堆实现）。</li>
 <li>DelayQueue —— Offer（添加 bucket）和 Poll（获取并删除 bucket）的运作方式，跟 Golang Timer 运行时中 addtimerLocked和 timerproc 的运作方式如出一辙，因此参考了其中的实现方式.</li>
 </ul>
-
 <p>先实现优先队列:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -529,6 +470,7 @@
 </span><span class="lnt">92
 </span><span class="lnt">93
 </span><span class="lnt">94
+</span><span class="lnt">95
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">delayqueue</span>
@@ -624,13 +566,14 @@
 </span><span class="c1"></span>	<span class="k">return</span> <span class="nx">item</span><span class="p">,</span> <span class="mi">0</span>
 <span class="p">}</span>
 
-<span class="o">//</span> <span class="nx">The</span> <span class="nx">end</span> <span class="nx">of</span> <span class="nx">PriorityQueue</span> <span class="nx">implementation</span><span class="p">.</span></code></pre></td></tr></table>
+<span class="c1">// The end of PriorityQueue implementation.
+</span><span class="c1"></span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>再实现延迟队列:</p>
+</div><p>再实现延迟队列:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">  1
+<pre class="chroma"><code><span class="lnt">  1
 </span><span class="lnt">  2
 </span><span class="lnt">  3
 </span><span class="lnt">  4
@@ -855,19 +798,16 @@
 <span class="nx">exit</span><span class="p">:</span>
 	<span class="c1">// Reset the states
 </span><span class="c1"></span>	<span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">dq</span><span class="p">.</span><span class="nx">sleeping</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+</code></pre></td></tr></table>
 </div>
-</div>
-<h2 id="bucket">bucket</h2>
-
+</div><h2 id="bucket">bucket</h2>
 <p>时间轮我们是用数组也就是buckets来实现的，也就是说一个数组代表时间轮。</p>
-
 <p>时间轮中每个格子用来保存任务的数据结构是TimeTaskList的数据结构，其实就是一个双向链表，然后每次在往某个时间轮格子里面放置任务也就是timerTaskEntry的时候就会挂置到TimeTaskList的这个对象当中去。</p>
-
 <p>所以说我们放置到DelayedQueue当中其实是TimeTaskList对象，这个对象包含了同一过期时间的所有任务而已。减少了DelayedQueue的大小。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">  1
+<pre class="chroma"><code><span class="lnt">  1
 </span><span class="lnt">  2
 </span><span class="lnt">  3
 </span><span class="lnt">  4
@@ -999,6 +939,7 @@
 </span><span class="lnt">130
 </span><span class="lnt">131
 </span><span class="lnt">132
+</span><span class="lnt">133
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">timingwheel</span>
@@ -1132,13 +1073,14 @@
 	<span class="nx">b</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
 
 	<span class="nx">b</span><span class="p">.</span><span class="nf">SetExpiration</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
 </div>
-</div>
-<h2 id="timingwheel">timingwheel</h2>
+</div><h2 id="timingwheel">timingwheel</h2>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt">  1
+<pre class="chroma"><code><span class="lnt">  1
 </span><span class="lnt">  2
 </span><span class="lnt">  3
 </span><span class="lnt">  4
@@ -1381,6 +1323,7 @@
 </span><span class="lnt">241
 </span><span class="lnt">242
 </span><span class="lnt">243
+</span><span class="lnt">244
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">timingwheel</span>
@@ -1625,13 +1568,14 @@
 	<span class="nx">tw</span><span class="p">.</span><span class="nf">addOrRun</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span>
 
 	<span class="k">return</span>
-<span class="p">}</span></code></pre></td></tr></table>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
 </div>
-</div>
-<h2 id="examples">examples</h2>
+</div><h2 id="examples">examples</h2>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="lnt"> 1
+<pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
 </span><span class="lnt"> 3
 </span><span class="lnt"> 4
@@ -1706,6 +1650,7 @@
 </span><span class="lnt">73
 </span><span class="lnt">74
 </span><span class="lnt">75
+</span><span class="lnt">76
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">timingwheel_test</span>
@@ -1782,11 +1727,12 @@
 	<span class="c1">// Output:
 </span><span class="c1"></span>	<span class="c1">// The timer fires
 </span><span class="c1"></span>	<span class="c1">// The timer fires
-</span><span class="c1"></span><span class="p">}</span></code></pre></td></tr></table>
+</span><span class="c1"></span><span class="p">}</span>
+
+</code></pre></td></tr></table>
 </div>
-</div>
-<p>参考:<br />
-<a href="http://russellluo.com/2018/10/golang-implementation-of-hierarchical-timing-wheels.html">http://russellluo.com/2018/10/golang-implementation-of-hierarchical-timing-wheels.html</a><br />
+</div><p>参考:<br>
+<a href="http://russellluo.com/2018/10/golang-implementation-of-hierarchical-timing-wheels.html">http://russellluo.com/2018/10/golang-implementation-of-hierarchical-timing-wheels.html</a><br>
 <a href="https://www.jianshu.com/p/87240220097b">https://www.jianshu.com/p/87240220097b</a></p>
 
     </div>
