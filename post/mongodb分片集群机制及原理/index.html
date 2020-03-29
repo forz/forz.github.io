@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>MongoDB分片集群机制及原理 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="为什么要使用分片集群？ 数据容量日益增大，访问性能日渐降低，怎么破？ 新品上线异常火爆，如何支撑更多的并发用户？ 单库已有10TB数据，恢复需要1" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
+
+
+<link rel="canonical" href="/post/mongodb%E5%88%86%E7%89%87%E9%9B%86%E7%BE%A4%E6%9C%BA%E5%88%B6%E5%8F%8A%E5%8E%9F%E7%90%86/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="MongoDB分片集群机制及原理" />
+<meta property="og:description" content="为什么要使用分片集群？ 数据容量日益增大，访问性能日渐降低，怎么破？ 新品上线异常火爆，如何支撑更多的并发用户？ 单库已有10TB数据，恢复需要1" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/mongodb%E5%88%86%E7%89%87%E9%9B%86%E7%BE%A4%E6%9C%BA%E5%88%B6%E5%8F%8A%E5%8E%9F%E7%90%86/" />
+<meta property="article:published_time" content="2020-03-29T16:14:17+00:00" />
+<meta property="article:modified_time" content="2020-03-29T16:14:17+00:00" />
+<meta itemprop="name" content="MongoDB分片集群机制及原理">
+<meta itemprop="description" content="为什么要使用分片集群？ 数据容量日益增大，访问性能日渐降低，怎么破？ 新品上线异常火爆，如何支撑更多的并发用户？ 单库已有10TB数据，恢复需要1">
+<meta itemprop="datePublished" content="2020-03-29T16:14:17&#43;00:00" />
+<meta itemprop="dateModified" content="2020-03-29T16:14:17&#43;00:00" />
+<meta itemprop="wordCount" content="2071">
+
+
+
+<meta itemprop="keywords" content="MongoDB," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="MongoDB分片集群机制及原理"/>
+<meta name="twitter:description" content="为什么要使用分片集群？ 数据容量日益增大，访问性能日渐降低，怎么破？ 新品上线异常火爆，如何支撑更多的并发用户？ 单库已有10TB数据，恢复需要1"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">MongoDB分片集群机制及原理</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2020-03-29 </span>
+        <div class="post-category">
+            <a href="/categories/mongodb/"> MongoDB </a>
+            </div>
+          <span class="more-meta"> 约 2071 字 </span>
+          <span class="more-meta"> 预计阅读 5 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#基于范围">基于范围</a></li>
+    <li><a href="#基于哈希">基于哈希</a></li>
+    <li><a href="#自定义zone">自定义Zone</a></li>
+    <li><a href="#小结">小结</a></li>
+  </ul>
+
+  <ul>
+    <li><a href="#如何用好分片集群">如何用好分片集群</a></li>
+    <li><a href="#需要多少分片">需要多少分片</a>
+      <ul>
+        <li><a href="#分片概念">分片概念</a></li>
+      </ul>
+    </li>
+    <li><a href="#选择合适片键">选择合适片键</a>
+      <ul>
+        <li><a href="#选择基数大的片键">选择基数大的片键</a></li>
+        <li><a href="#选择分布均匀的片键">选择分布均匀的片键</a></li>
+        <li><a href="#定向性好">定向性好</a></li>
+      </ul>
+    </li>
+    <li><a href="#足够的资源">足够的资源</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h1 id="为什么要使用分片集群">为什么要使用分片集群？</h1>
+<ul>
+<li>数据容量日益增大，访问性能日渐降低，怎么破？</li>
+<li>新品上线异常火爆，如何支撑更多的并发用户？</li>
+<li>单库已有10TB数据，恢复需要1一2天，如何加速？</li>
+<li>数据需要服务全球用户,如何让全球的用户全部快速,低延迟地访问数据?</li>
+</ul>
+<h1 id="分片集群">分片集群</h1>
+<p>完整的分片集群包括以下几个部分:</p>
+<ul>
+<li>路由节点(mongos):为应用程序提供集群的单一入口,转发应用端请求,选择合适的数据节点进行读写,合并多个数据节点的返回.
+<ul>
+<li>无状态</li>
+<li>建议至少2个,主要是做高可用,还可以做负载均衡.</li>
+</ul>
+</li>
+<li>配置节点(config):配置节点是标准的MongoDB复制集,,这三个节点的数据相同,提供集群元数据存储,分片数据分布的映射.</li>
+<li>数据节点(mongod):以复制集为单位,横向扩展,最大1024分片,分片之间数据不重复,所有分片在一起才完整工作.</li>
+</ul>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200329161816.png" alt=""></p>
+<p>分片集群特点:</p>
+<ul>
+<li>应用全透明,无特殊处理:分片集群的应用程序和单复制集的应用程序相同,不需要进行代码修改.</li>
+<li>数据自动均衡:自动检测各节点数据分布情况,如果不平衡,MongoDB自动将一分片的数据搬到另一分片.</li>
+<li>动态扩容，无须下线:不用一开始就构建分片集群,可以是复制集.当需要的时候,可以动态在线上增加新的复制集.</li>
+</ul>
+<h1 id="数据分布方式">数据分布方式</h1>
+<h2 id="基于范围">基于范围</h2>
+<p>选一个或几个组合字段,把字段的值的范围分成多个范围块,如chunk1,chunk2&hellip;.将这些chunk分配到不同的分片中.</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200329163228.png" alt=""></p>
+<p>优点:</p>
+<ul>
+<li>片键范围查询性能好.相邻的数据保存在同一节点中.读性能提高</li>
+</ul>
+<p>缺点:</p>
+<ul>
+<li>数据分布可能不均匀,容易有热点.比如以自增主键为片键,写操作总是最新的分片中.</li>
+</ul>
+<h2 id="基于哈希">基于哈希</h2>
+<p>如果不希望有热分片,热点写的话,可以使用哈希方式.</p>
+<p>将某个字段直接求哈希,放到对应的分片中.写操作可以随机分布到各个分片中.</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200329163311.png" alt=""></p>
+<p>优点:</p>
+<ul>
+<li>数据分布均匀,写优化.</li>
+</ul>
+<p>缺点:</p>
+<ul>
+<li>范围查询效率低.每次范围查询都需要跨大量分片.</li>
+</ul>
+<p>基于哈希的分片方式适合日志,物联网等高并发写入场景.</p>
+<h2 id="自定义zone">自定义Zone</h2>
+<p>如果数据有天然的地域性,某个区域的数据只用于某个区域的用户.这时可以给数据进行地域标签化.可以根据这些地域进行分片.</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200329163556.png" alt=""></p>
+<h2 id="小结">小结</h2>
+<p>分片集群可以有效解决性能瓶颈及系统扩容问题.
+分片额外消耗较多，管理复杂，尽量不要分片,最好是在复制集中进行优化,实在无法支持再进行分片.</p>
+<h1 id="分片集群设计">分片集群设计</h1>
+<h2 id="如何用好分片集群">如何用好分片集群</h2>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200329170044.png" alt=""></p>
+<h2 id="需要多少分片">需要多少分片</h2>
+<p>分片的基本标准：</p>
+<ul>
+<li>关于数据：数据量不超过3TB，尽可能保持在2TB一个片；</li>
+<li>关于索引：常用索引必须容纳进内存；</li>
+</ul>
+<p>按照以上标准初步确定分片后，还需要考虑业务压力，随着压力增大，CPU、RAM、磁盘中的任何一项出现瓶颈时，都可以通过添加更多分片来解决。</p>
+<p>下面有个公式可以简单计算分片的数量:</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200329172820.png" alt=""></p>
+<p>工作集包括热数据和索引所占的空间:</p>
+<ul>
+<li>索引通过index.stats可以得到</li>
+<li>热数据和应用场景有关.新闻的热数据是最近几天的新闻,电商的热数据是商品详情.</li>
+</ul>
+<p>单服务器内存容量:MongoDB默认用来做缓存的内存是物理内存的60%.</p>
+<h3 id="分片概念">分片概念</h3>
+<p>各种概念由小到大：</p>
+<ul>
+<li>片键shard key：文档中的一个字段或多个组合字段,是分片的准则.</li>
+<li>文档doc：包含shardkey的一行数据.MongoDB存储的基本单位.</li>
+<li>块Chunk ：包含n个文档,通常为64MB.包含文档数量取决于文档的大小.分片集群的均衡以块为单位.</li>
+<li>分片Shard：包含n个chunk</li>
+<li>集群Cluster：包含n个分片</li>
+</ul>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200329173510.png" alt=""></p>
+<h2 id="选择合适片键">选择合适片键</h2>
+<p>影响片键效率的主要因素：</p>
+<ul>
+<li>取值基数（Cardinality）</li>
+<li>取值分布</li>
+<li>分散写，集中读</li>
+<li>被尽可能多的业务场景用到</li>
+<li>避免单调递增或递减的片键</li>
+</ul>
+<h3 id="选择基数大的片键">选择基数大的片键</h3>
+<p>对于小基数的片键：</p>
+<ul>
+<li>因为备选值有限，那么块的总数量就有限；</li>
+<li>随着数据增多，块的大小会越来越大；</li>
+<li>太大的块，会导致水平扩展时移动块会非常困难。因为MongoDB以块为单位进行分片均衡.如果块过大,分片均衡困难.</li>
+</ul>
+<p>例如：存储一个高中的师生数据，以年龄（ 假设年龄范围为15~65岁）作为片键，那么</p>
+<ul>
+<li>15&lt;=年龄&lt;=65，且只为整数</li>
+<li>最多只会有51个chunk</li>
+</ul>
+<p>结论：取值基数要大！</p>
+<h3 id="选择分布均匀的片键">选择分布均匀的片键</h3>
+<p>对于分布不均匀的片键：</p>
+<ul>
+<li>造成某些块的数据量急剧增大</li>
+<li>这些块压力随之增大</li>
+<li>数据均衡以chunk为单位，所以系统无能为力</li>
+</ul>
+<p>例如：存储一个学校的师生数据，以年龄（假设年龄范围为15~65岁）作为片键，那么：</p>
+<ul>
+<li>15&lt;=年龄&lt;=65，且只为整数</li>
+<li>大部分人的年龄范围为15~18岁（学生）</li>
+<li>15、16、17、18四个chunk的数据量、访问压力远大于其他chunk</li>
+</ul>
+<p>结论：取值分布应尽可能均匀</p>
+<h3 id="定向性好">定向性好</h3>
+<p>考虑：</p>
+<p>4个分片的集群，你希望读某条特定的数据.如果你用片键作为条件查询，mongos可以直接定位到具体的分片如果你不用片键， mongos需要把查询发到4个分片等最后的一个分片响应，mongos才能响应应用端。</p>
+<p>结论：对主要查询要具有定向能力</p>
+<h2 id="足够的资源">足够的资源</h2>
+<p>mongos与config通常消耗很少的资源，可以选择低规格虚拟机；</p>
+<p>资源的重点在于shard服务器：</p>
+<ul>
+<li>需要足以容纳热数据索引的内存；</li>
+<li>正确创建索引后CPU通常不会成为瓶颈，除非涉及非常多的计算；</li>
+<li>磁盘尽量选用SSD。</li>
+</ul>
+<p>最后，实际测试是最好的检验，来看你的资源配置是否完备。</p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2020-03-29
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/mongodb/">MongoDB</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/mongodb%E5%A4%8D%E5%88%B6%E9%9B%86%E6%9C%BA%E5%88%B6%E5%8F%8A%E5%8E%9F%E7%90%86/">
+            <span class="next-text nav-default">MongoDB复制集机制及原理</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2020
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
