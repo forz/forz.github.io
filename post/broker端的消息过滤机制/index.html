@@ -53,7 +53,7 @@
 <meta itemprop="description" content="在Broker端进行消息过滤，可以减少无效消息发送到Consumer，少占用网络带宽从而提高吞吐量。Broker端有三种方式进行消息过滤。 消">
 <meta itemprop="datePublished" content="2020-04-22T22:56:38&#43;00:00" />
 <meta itemprop="dateModified" content="2020-04-22T22:56:38&#43;00:00" />
-<meta itemprop="wordCount" content="1615">
+<meta itemprop="wordCount" content="1765">
 
 
 
@@ -167,7 +167,7 @@
         <div class="post-category">
             <a href="/categories/rocketmq/"> rocketmq </a>
             </div>
-          <span class="more-meta"> 约 1615 字 </span>
+          <span class="more-meta"> 约 1765 字 </span>
           <span class="more-meta"> 预计阅读 4 分钟 </span>
         
       </div>
@@ -189,6 +189,7 @@
 <p>用Tag方式进行过滤的方法是传人感兴趣的Tag标签，Tag 标签是一个普通字符串，是在创建Message的时候添加的，一个Message只能有一个Tag。使用Tag方式过滤非常高效，Broker端可以在ConsumeQueue中做这种过滤，只从CommitLog里读取过滤后被命中的消息。看一下ConsumerQueue的存储格式.</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200422232516.png" alt=""></p>
 <p>ConsumeQueue的第三部分存储的是Tag对应的hashcode，是一个定长的字符串，通过Tag过滤的过程就是对比定长的hashcode。经过hashcode对比，符合要求的消息被从CommitLog读取出来，不用担心Hash冲突问题，消息在被消费前，会对比完整的Message Tag字符串，消除Hash冲突造成的误读。</p>
+<p>生产端:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt"> 1
@@ -233,11 +234,100 @@
 </span><span class="lnt">40
 </span><span class="lnt">41
 </span><span class="lnt">42
-</span><span class="lnt">43
 </span></code></pre></td>
 <td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go">
-<span class="kn">package</span> <span class="nx">main</span>
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;context&#34;</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;os&#34;</span>
+
+	<span class="s">&#34;github.com/apache/rocketmq-client-go/v2&#34;</span>
+	<span class="s">&#34;github.com/apache/rocketmq-client-go/v2/primitive&#34;</span>
+	<span class="s">&#34;github.com/apache/rocketmq-client-go/v2/producer&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">p</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">rocketmq</span><span class="p">.</span><span class="nf">NewProducer</span><span class="p">(</span>
+		<span class="nx">producer</span><span class="p">.</span><span class="nf">WithNameServer</span><span class="p">([]</span><span class="kt">string</span><span class="p">{</span><span class="s">&#34;127.0.0.1:9876&#34;</span><span class="p">}),</span>
+		<span class="nx">producer</span><span class="p">.</span><span class="nf">WithRetry</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span>
+	<span class="p">)</span>
+	<span class="nx">err</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Start</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;start producer error: %s&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">.</span><span class="nf">Error</span><span class="p">())</span>
+		<span class="nx">os</span><span class="p">.</span><span class="nf">Exit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">tags</span> <span class="o">:=</span> <span class="p">[]</span><span class="kt">string</span><span class="p">{</span><span class="s">&#34;TagA&#34;</span><span class="p">,</span> <span class="s">&#34;TagB&#34;</span><span class="p">,</span> <span class="s">&#34;TagC&#34;</span><span class="p">}</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">3</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">tag</span> <span class="o">:=</span> <span class="nx">tags</span><span class="p">[</span><span class="nx">i</span><span class="o">%</span><span class="mi">3</span><span class="p">]</span>
+		<span class="nx">msg</span> <span class="o">:=</span> <span class="nx">primitive</span><span class="p">.</span><span class="nf">NewMessage</span><span class="p">(</span><span class="s">&#34;test&#34;</span><span class="p">,</span>
+			<span class="p">[]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&#34;Hello RocketMQ Go Client!&#34;</span><span class="p">))</span>
+		<span class="nx">msg</span><span class="p">.</span><span class="nf">WithTag</span><span class="p">(</span><span class="nx">tag</span><span class="p">)</span>
+
+		<span class="nx">res</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">SendSync</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">Background</span><span class="p">(),</span> <span class="nx">msg</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;send message error: %s\n&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;send message success: result=%s\n&#34;</span><span class="p">,</span> <span class="nx">res</span><span class="p">.</span><span class="nf">String</span><span class="p">())</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="nx">err</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Shutdown</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;shutdown producer error: %s&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">.</span><span class="nf">Error</span><span class="p">())</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><p>消费端:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
 
 <span class="kn">import</span> <span class="p">(</span>
 	<span class="s">&#34;context&#34;</span>
