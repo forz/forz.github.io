@@ -53,7 +53,7 @@
 <meta itemprop="description" content="概述 消息消费以组的模式开展，一个消费组内可以包含多个消费者，每一个消费组可订阅多个主题，消费组之间有集群模式与广播模式两种消费模式。集群模式">
 <meta itemprop="datePublished" content="2020-04-20T15:51:58&#43;00:00" />
 <meta itemprop="dateModified" content="2020-04-20T15:51:58&#43;00:00" />
-<meta itemprop="wordCount" content="6851">
+<meta itemprop="wordCount" content="7372">
 
 
 
@@ -167,8 +167,8 @@
         <div class="post-category">
             <a href="/categories/rocketmq/"> rocketmq </a>
             </div>
-          <span class="more-meta"> 约 6851 字 </span>
-          <span class="more-meta"> 预计阅读 14 分钟 </span>
+          <span class="more-meta"> 约 7372 字 </span>
+          <span class="more-meta"> 预计阅读 15 分钟 </span>
         
       </div>
     </header>
@@ -187,6 +187,11 @@
       </ul>
     </li>
     <li><a href="#defaultmqpullconsumer">DefaultMQPullConsumer</a></li>
+  </ul>
+
+  <ul>
+    <li><a href="#普通消息">普通消息</a></li>
+    <li><a href="#顺序消息">顺序消息</a></li>
   </ul>
 
   <ul>
@@ -841,7 +846,262 @@
 <p>PushConsumer在启动的时候，会做各种配置检查，然后连接NameServer获取Topic信息，启动时如果遇到异常，比如无法连接NameServer，程序仍然可以正常启动不报错（日志里有WARN信息）。在单机环境下可以测试这种情况，启动DefaultMQPushConsumer时故意把NameServer地址填错，程序仍然可以正常启动，但是不会收到消息。</p>
 <p>为什么DefaultMQPushConsumer在无法连接NameServer时不直接报错退出呢？这和分布式系统的设计有关，RocketMQ集群可以有多个NameServer、Broker，某个机器出异常后整体服务依然可用。所以DefaultMQPushConsumer被设计成当发现某个连接异常时不立刻退出，而是不断尝试重新连接。可以进行这样一个测试，在DefaultMQPushConsumer正常运行的时候，手动kill掉Broker或NameServer，过一会儿再启动。会发现DefaultMQPushConsumer不会出错退出，在服务恢复后正常运行，在服务不可用的这段时间，仅仅会在日志里报异常信息。</p>
 <p>如果需要在DefaultMQPushConsumer启动的时候，及时暴露配置问题，该如何操作呢？可以调用： <code>fetchSubscribeMessageQueues（&quot;TopicName&quot;）</code>，这时如果配置信息写得不准确，或者当前服务不可用，这个语句会报异常。</p>
-<h1 id="提高处理能力">提高处理能力</h1>
+<h1 id="消息重试">消息重试</h1>
+<h2 id="普通消息">普通消息</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;context&#34;</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;os&#34;</span>
+	<span class="s">&#34;time&#34;</span>
+
+	<span class="s">&#34;github.com/apache/rocketmq-client-go/v2&#34;</span>
+	<span class="s">&#34;github.com/apache/rocketmq-client-go/v2/consumer&#34;</span>
+	<span class="s">&#34;github.com/apache/rocketmq-client-go/v2/primitive&#34;</span>
+<span class="p">)</span>
+
+<span class="c1">// use concurrent consumer model, when Subscribe function return consumer.ConsumeRetryLater, the message will be
+</span><span class="c1">// send to RocketMQ retry topic. we could set DelayLevelWhenNextConsume in ConsumeConcurrentlyContext, which used to
+</span><span class="c1">// indicate the delay of message re-send to origin topic from retry topic.
+</span><span class="c1">//
+</span><span class="c1">// in this example, we always set DelayLevelWhenNextConsume=1, means that the message will be sent to origin topic after
+</span><span class="c1">// 1s. in case of the unlimited retry, we will return consumer.ConsumeSuccess after ReconsumeTimes &gt; 5
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">c</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">rocketmq</span><span class="p">.</span><span class="nf">NewPushConsumer</span><span class="p">(</span>
+		<span class="nx">consumer</span><span class="p">.</span><span class="nf">WithGroupName</span><span class="p">(</span><span class="s">&#34;testGroup&#34;</span><span class="p">),</span>
+		<span class="nx">consumer</span><span class="p">.</span><span class="nf">WithNameServer</span><span class="p">([]</span><span class="kt">string</span><span class="p">{</span><span class="s">&#34;127.0.0.1:9876&#34;</span><span class="p">}),</span>
+		<span class="nx">consumer</span><span class="p">.</span><span class="nf">WithConsumerModel</span><span class="p">(</span><span class="nx">consumer</span><span class="p">.</span><span class="nx">Clustering</span><span class="p">),</span>
+	<span class="p">)</span>
+
+	<span class="c1">// The DelayLevel specify the waiting time that before next reconsume,
+</span><span class="c1"></span>	<span class="c1">// and it range is from 1 to 18 now.
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// The time of each level is the value of indexing of {level-1} in [1s, 5s, 10s, 30s,
+</span><span class="c1"></span>	<span class="c1">// 1m, 2m, 3m, 4m, 5m, 6m, 7m, 8m, 9m, 10m, 20m, 30m, 1h, 2h]
+</span><span class="c1"></span>	<span class="nx">delayLevel</span> <span class="o">:=</span> <span class="mi">1</span>
+	<span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Subscribe</span><span class="p">(</span><span class="s">&#34;TopicTest&#34;</span><span class="p">,</span> <span class="nx">consumer</span><span class="p">.</span><span class="nx">MessageSelector</span><span class="p">{},</span> <span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span>
+		<span class="nx">msgs</span> <span class="o">...*</span><span class="nx">primitive</span><span class="p">.</span><span class="nx">MessageExt</span><span class="p">)</span> <span class="p">(</span><span class="nx">consumer</span><span class="p">.</span><span class="nx">ConsumeResult</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;subscribe callback len: %d \n&#34;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">msgs</span><span class="p">))</span>
+
+		<span class="nx">concurrentCtx</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">primitive</span><span class="p">.</span><span class="nf">GetConcurrentlyCtx</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+		<span class="nx">concurrentCtx</span><span class="p">.</span><span class="nx">DelayLevelWhenNextConsume</span> <span class="p">=</span> <span class="nx">delayLevel</span> <span class="c1">// only run when return consumer.ConsumeRetryLater
+</span><span class="c1"></span>
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">msg</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">msgs</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">msg</span><span class="p">.</span><span class="nx">ReconsumeTimes</span> <span class="p">&gt;</span> <span class="mi">5</span> <span class="p">{</span>
+				<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;msg ReconsumeTimes &gt; 5. msg: %v&#34;</span><span class="p">,</span> <span class="nx">msg</span><span class="p">)</span>
+				<span class="k">return</span> <span class="nx">consumer</span><span class="p">.</span><span class="nx">ConsumeSuccess</span><span class="p">,</span> <span class="kc">nil</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+				<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;subscribe callback: %v \n&#34;</span><span class="p">,</span> <span class="nx">msg</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="k">return</span> <span class="nx">consumer</span><span class="p">.</span><span class="nx">ConsumeRetryLater</span><span class="p">,</span> <span class="kc">nil</span>
+	<span class="p">})</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">err</span><span class="p">.</span><span class="nf">Error</span><span class="p">())</span>
+	<span class="p">}</span>
+	<span class="c1">// Note: start after subscribe
+</span><span class="c1"></span>	<span class="nx">err</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Start</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">err</span><span class="p">.</span><span class="nf">Error</span><span class="p">())</span>
+		<span class="nx">os</span><span class="p">.</span><span class="nf">Exit</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Hour</span><span class="p">)</span>
+	<span class="nx">err</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Shutdown</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;shundown Consumer error: %s&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">.</span><span class="nf">Error</span><span class="p">())</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="顺序消息">顺序消息</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;context&#34;</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;os&#34;</span>
+	<span class="s">&#34;time&#34;</span>
+
+	<span class="s">&#34;github.com/apache/rocketmq-client-go/v2&#34;</span>
+	<span class="s">&#34;github.com/apache/rocketmq-client-go/v2/consumer&#34;</span>
+	<span class="s">&#34;github.com/apache/rocketmq-client-go/v2/primitive&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">c</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">rocketmq</span><span class="p">.</span><span class="nf">NewPushConsumer</span><span class="p">(</span>
+		<span class="nx">consumer</span><span class="p">.</span><span class="nf">WithGroupName</span><span class="p">(</span><span class="s">&#34;testGroup&#34;</span><span class="p">),</span>
+		<span class="nx">consumer</span><span class="p">.</span><span class="nf">WithNameServer</span><span class="p">([]</span><span class="kt">string</span><span class="p">{</span><span class="s">&#34;127.0.0.1:9876&#34;</span><span class="p">}),</span>
+		<span class="nx">consumer</span><span class="p">.</span><span class="nf">WithConsumerModel</span><span class="p">(</span><span class="nx">consumer</span><span class="p">.</span><span class="nx">Clustering</span><span class="p">),</span>
+		<span class="nx">consumer</span><span class="p">.</span><span class="nf">WithConsumeFromWhere</span><span class="p">(</span><span class="nx">consumer</span><span class="p">.</span><span class="nx">ConsumeFromFirstOffset</span><span class="p">),</span>
+		<span class="nx">consumer</span><span class="p">.</span><span class="nf">WithConsumerOrder</span><span class="p">(</span><span class="kc">true</span><span class="p">),</span>
+		<span class="nx">consumer</span><span class="p">.</span><span class="nf">WithMaxReconsumeTimes</span><span class="p">(</span><span class="mi">5</span><span class="p">),</span>
+	<span class="p">)</span>
+
+	<span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Subscribe</span><span class="p">(</span><span class="s">&#34;TopicTest&#34;</span><span class="p">,</span> <span class="nx">consumer</span><span class="p">.</span><span class="nx">MessageSelector</span><span class="p">{},</span> <span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span>
+		<span class="nx">msgs</span> <span class="o">...*</span><span class="nx">primitive</span><span class="p">.</span><span class="nx">MessageExt</span><span class="p">)</span> <span class="p">(</span><span class="nx">consumer</span><span class="p">.</span><span class="nx">ConsumeResult</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">orderlyCtx</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">primitive</span><span class="p">.</span><span class="nf">GetOrderlyCtx</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;orderly context: %v\n&#34;</span><span class="p">,</span> <span class="nx">orderlyCtx</span><span class="p">)</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;subscribe orderly callback len: %d \n&#34;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">msgs</span><span class="p">))</span>
+
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">msg</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">msgs</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">msg</span><span class="p">.</span><span class="nx">ReconsumeTimes</span> <span class="p">&gt;</span> <span class="mi">5</span> <span class="p">{</span>
+				<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;msg ReconsumeTimes &gt; 5. msg: %v&#34;</span><span class="p">,</span> <span class="nx">msg</span><span class="p">)</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+				<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;subscribe orderly callback: %v \n&#34;</span><span class="p">,</span> <span class="nx">msg</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="k">return</span> <span class="nx">consumer</span><span class="p">.</span><span class="nx">SuspendCurrentQueueAMoment</span><span class="p">,</span> <span class="kc">nil</span>
+
+	<span class="p">})</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">err</span><span class="p">.</span><span class="nf">Error</span><span class="p">())</span>
+	<span class="p">}</span>
+	<span class="c1">// Note: start after subscribe
+</span><span class="c1"></span>	<span class="nx">err</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Start</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">err</span><span class="p">.</span><span class="nf">Error</span><span class="p">())</span>
+		<span class="nx">os</span><span class="p">.</span><span class="nf">Exit</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Hour</span><span class="p">)</span>
+	<span class="nx">err</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Shutdown</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;shundown Consumer error: %s&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">.</span><span class="nf">Error</span><span class="p">())</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><h1 id="提高处理能力">提高处理能力</h1>
 <p>当Consumer的处理速度跟不上消息的产生速度，会造成越来越多的消息积压，这个时候首先查看消费逻辑本身有没有优化空间，除此之外还有三种方法可以提高Consumer的处理能力。</p>
 <h2 id="提高消费并行度">提高消费并行度</h2>
 <p>在同一个ConsumerGroup下（ Clustering方式），可以通过增加Consumer实例的数量来提高并行度，通过加机器，或者在已有机器中启动多个Consumer进程都可以增加Consumer实例数。注意总的Consumer数量不要超过Topic下Read Queue数量，超过的Consumer实例接收不到消息。此外，通过提高单个Consumer实例中的并行处理的线程数，可以在同一个Consumer内增加并行度来提高吞吐量（设置方法是修改consumeThreadMin和consume ThreadMax）。（</p>
