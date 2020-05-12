@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>MongoDB查询性能分析 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="评估查询的性能 inventory包含以下文档的集合： 1 2 3 4 5 6 7 8 9 10 { &amp;#34;_id&amp;#34; : 1, &amp;#34;item&amp;#34; : &amp;#34;f1&amp;#34;, type: &amp;#34;food&amp;#34;, quantity: 500 } { &amp;#34;_id&amp;#34; : 2, &amp;#34;item&amp;#34; : &amp;#34;f2&amp;#34;, type: &amp;#34;food&amp;#34;, quantity: 100 } { &amp;#34;_id&amp;#34; : 3, &amp;#34;item&amp;#34; : &amp;#34;p1&amp;#34;, type: &amp;#34;paper&amp;#34;, quantity:" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
+
+
+<link rel="canonical" href="/post/mongodb%E6%9F%A5%E8%AF%A2%E6%80%A7%E8%83%BD%E5%88%86%E6%9E%90/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="MongoDB查询性能分析" />
+<meta property="og:description" content="评估查询的性能 inventory包含以下文档的集合： 1 2 3 4 5 6 7 8 9 10 { &#34;_id&#34; : 1, &#34;item&#34; : &#34;f1&#34;, type: &#34;food&#34;, quantity: 500 } { &#34;_id&#34; : 2, &#34;item&#34; : &#34;f2&#34;, type: &#34;food&#34;, quantity: 100 } { &#34;_id&#34; : 3, &#34;item&#34; : &#34;p1&#34;, type: &#34;paper&#34;, quantity:" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/mongodb%E6%9F%A5%E8%AF%A2%E6%80%A7%E8%83%BD%E5%88%86%E6%9E%90/" />
+<meta property="article:published_time" content="2020-05-12T13:55:28+00:00" />
+<meta property="article:modified_time" content="2020-05-12T13:55:28+00:00" />
+<meta itemprop="name" content="MongoDB查询性能分析">
+<meta itemprop="description" content="评估查询的性能 inventory包含以下文档的集合： 1 2 3 4 5 6 7 8 9 10 { &#34;_id&#34; : 1, &#34;item&#34; : &#34;f1&#34;, type: &#34;food&#34;, quantity: 500 } { &#34;_id&#34; : 2, &#34;item&#34; : &#34;f2&#34;, type: &#34;food&#34;, quantity: 100 } { &#34;_id&#34; : 3, &#34;item&#34; : &#34;p1&#34;, type: &#34;paper&#34;, quantity:">
+<meta itemprop="datePublished" content="2020-05-12T13:55:28&#43;00:00" />
+<meta itemprop="dateModified" content="2020-05-12T13:55:28&#43;00:00" />
+<meta itemprop="wordCount" content="2068">
+
+
+
+<meta itemprop="keywords" content="MongoDB," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="MongoDB查询性能分析"/>
+<meta name="twitter:description" content="评估查询的性能 inventory包含以下文档的集合： 1 2 3 4 5 6 7 8 9 10 { &#34;_id&#34; : 1, &#34;item&#34; : &#34;f1&#34;, type: &#34;food&#34;, quantity: 500 } { &#34;_id&#34; : 2, &#34;item&#34; : &#34;f2&#34;, type: &#34;food&#34;, quantity: 100 } { &#34;_id&#34; : 3, &#34;item&#34; : &#34;p1&#34;, type: &#34;paper&#34;, quantity:"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">MongoDB查询性能分析</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2020-05-12 </span>
+        <div class="post-category">
+            <a href="/categories/mongodb/"> MongoDB </a>
+            </div>
+          <span class="more-meta"> 约 2068 字 </span>
+          <span class="more-meta"> 预计阅读 5 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents"></nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h1 id="评估查询的性能">评估查询的性能</h1>
+<p>inventory包含以下文档的集合：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-json" data-lang="json"><span class="p">{</span> <span class="nt">&#34;_id&#34;</span> <span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="nt">&#34;item&#34;</span> <span class="p">:</span> <span class="s2">&#34;f1&#34;</span><span class="p">,</span> <span class="err">type:</span> <span class="nt">&#34;food&#34;</span><span class="p">,</span> <span class="err">quantity:</span> <span class="err">500</span> <span class="p">}</span>
+<span class="p">{</span> <span class="nt">&#34;_id&#34;</span> <span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="nt">&#34;item&#34;</span> <span class="p">:</span> <span class="s2">&#34;f2&#34;</span><span class="p">,</span> <span class="err">type:</span> <span class="nt">&#34;food&#34;</span><span class="p">,</span> <span class="err">quantity:</span> <span class="err">100</span> <span class="p">}</span>
+<span class="p">{</span> <span class="nt">&#34;_id&#34;</span> <span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="nt">&#34;item&#34;</span> <span class="p">:</span> <span class="s2">&#34;p1&#34;</span><span class="p">,</span> <span class="err">type:</span> <span class="nt">&#34;paper&#34;</span><span class="p">,</span> <span class="err">quantity:</span> <span class="err">200</span> <span class="p">}</span>
+<span class="p">{</span> <span class="nt">&#34;_id&#34;</span> <span class="p">:</span> <span class="mi">4</span><span class="p">,</span> <span class="nt">&#34;item&#34;</span> <span class="p">:</span> <span class="s2">&#34;p2&#34;</span><span class="p">,</span> <span class="err">type:</span> <span class="nt">&#34;paper&#34;</span><span class="p">,</span> <span class="err">quantity:</span> <span class="err">150</span> <span class="p">}</span>
+<span class="p">{</span> <span class="nt">&#34;_id&#34;</span> <span class="p">:</span> <span class="mi">5</span><span class="p">,</span> <span class="nt">&#34;item&#34;</span> <span class="p">:</span> <span class="s2">&#34;f3&#34;</span><span class="p">,</span> <span class="err">type:</span> <span class="nt">&#34;food&#34;</span><span class="p">,</span> <span class="err">quantity:</span> <span class="err">300</span> <span class="p">}</span>
+<span class="p">{</span> <span class="nt">&#34;_id&#34;</span> <span class="p">:</span> <span class="mi">6</span><span class="p">,</span> <span class="nt">&#34;item&#34;</span> <span class="p">:</span> <span class="s2">&#34;t1&#34;</span><span class="p">,</span> <span class="err">type:</span> <span class="nt">&#34;toys&#34;</span><span class="p">,</span> <span class="err">quantity:</span> <span class="err">500</span> <span class="p">}</span>
+<span class="p">{</span> <span class="nt">&#34;_id&#34;</span> <span class="p">:</span> <span class="mi">7</span><span class="p">,</span> <span class="nt">&#34;item&#34;</span> <span class="p">:</span> <span class="s2">&#34;a1&#34;</span><span class="p">,</span> <span class="err">type:</span> <span class="nt">&#34;apparel&#34;</span><span class="p">,</span> <span class="err">quantity:</span> <span class="err">250</span> <span class="p">}</span>
+<span class="p">{</span> <span class="nt">&#34;_id&#34;</span> <span class="p">:</span> <span class="mi">8</span><span class="p">,</span> <span class="nt">&#34;item&#34;</span> <span class="p">:</span> <span class="s2">&#34;a2&#34;</span><span class="p">,</span> <span class="err">type:</span> <span class="nt">&#34;apparel&#34;</span><span class="p">,</span> <span class="err">quantity:</span> <span class="err">400</span> <span class="p">}</span>
+<span class="p">{</span> <span class="nt">&#34;_id&#34;</span> <span class="p">:</span> <span class="mi">9</span><span class="p">,</span> <span class="nt">&#34;item&#34;</span> <span class="p">:</span> <span class="s2">&#34;t2&#34;</span><span class="p">,</span> <span class="err">type:</span> <span class="nt">&#34;toys&#34;</span><span class="p">,</span> <span class="err">quantity:</span> <span class="err">50</span> <span class="p">}</span>
+<span class="p">{</span> <span class="nt">&#34;_id&#34;</span> <span class="p">:</span> <span class="mi">10</span><span class="p">,</span> <span class="nt">&#34;item&#34;</span> <span class="p">:</span> <span class="s2">&#34;f4&#34;</span><span class="p">,</span> <span class="err">type:</span> <span class="nt">&#34;food&#34;</span><span class="p">,</span> <span class="err">quantity:</span> <span class="err">75</span> <span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h1 id="查询与无索引">查询与无索引</h1>
+<p>以下查询检索该quantity字段的值介于100和之间200（含）的文档 ：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="nf">db.inventory.find</span><span class="p">(</span> <span class="p">{</span> <span class="n">quantity</span><span class="o">:</span> <span class="p">{</span> <span class="o">$</span><span class="n">gte</span><span class="o">:</span> <span class="m">100</span><span class="p">,</span> <span class="o">$</span><span class="n">lte</span><span class="o">:</span> <span class="m">200</span> <span class="p">}</span> <span class="p">}</span> <span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>该查询返回以下文档：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="p">{</span> <span class="s">&#34;_id&#34;</span> <span class="o">:</span> <span class="m">2</span><span class="p">,</span> <span class="s">&#34;item&#34;</span> <span class="o">:</span> <span class="s">&#34;f2&#34;</span><span class="p">,</span> <span class="s">&#34;type&#34;</span> <span class="o">:</span> <span class="s">&#34;food&#34;</span><span class="p">,</span> <span class="s">&#34;quantity&#34;</span> <span class="o">:</span> <span class="m">100</span> <span class="p">}</span>
+<span class="p">{</span> <span class="s">&#34;_id&#34;</span> <span class="o">:</span> <span class="m">3</span><span class="p">,</span> <span class="s">&#34;item&#34;</span> <span class="o">:</span> <span class="s">&#34;p1&#34;</span><span class="p">,</span> <span class="s">&#34;type&#34;</span> <span class="o">:</span> <span class="s">&#34;paper&#34;</span><span class="p">,</span> <span class="s">&#34;quantity&#34;</span> <span class="o">:</span> <span class="m">200</span> <span class="p">}</span>
+<span class="p">{</span> <span class="s">&#34;_id&#34;</span> <span class="o">:</span> <span class="m">4</span><span class="p">,</span> <span class="s">&#34;item&#34;</span> <span class="o">:</span> <span class="s">&#34;p2&#34;</span><span class="p">,</span> <span class="s">&#34;type&#34;</span> <span class="o">:</span> <span class="s">&#34;paper&#34;</span><span class="p">,</span> <span class="s">&#34;quantity&#34;</span> <span class="o">:</span> <span class="m">150</span> <span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>要查看所选的查询计划，请将  <code>cursor.explain(&quot;executionStats&quot;) </code>游标方法链接到find命令的末尾：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="nf">db.inventory.find</span><span class="p">(</span>
+   <span class="p">{</span> <span class="n">quantity</span><span class="o">:</span> <span class="p">{</span> <span class="o">$</span><span class="n">gte</span><span class="o">:</span> <span class="m">100</span><span class="p">,</span> <span class="o">$</span><span class="n">lte</span><span class="o">:</span> <span class="m">200</span> <span class="p">}</span> <span class="p">}</span>
+<span class="p">)</span><span class="nf">.explain</span><span class="p">(</span><span class="s">&#34;executionStats&#34;</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>explain（）返回以下结果：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="p">{</span>
+   <span class="s">&#34;queryPlanner&#34;</span> <span class="o">:</span> <span class="p">{</span>
+         <span class="s">&#34;plannerVersion&#34;</span> <span class="o">:</span> <span class="m">1</span><span class="p">,</span>
+         <span class="kc">...</span>
+         <span class="s">&#34;winningPlan&#34;</span> <span class="o">:</span> <span class="p">{</span>
+            <span class="s">&#34;stage&#34;</span> <span class="o">:</span> <span class="s">&#34;COLLSCAN&#34;</span><span class="p">,</span>
+            <span class="kc">...</span>
+         <span class="p">}</span>
+   <span class="p">},</span>
+   <span class="s">&#34;executionStats&#34;</span> <span class="o">:</span> <span class="p">{</span>
+      <span class="s">&#34;executionSuccess&#34;</span> <span class="o">:</span> <span class="n">true</span><span class="p">,</span>
+      <span class="s">&#34;nReturned&#34;</span> <span class="o">:</span> <span class="m">3</span><span class="p">,</span>
+      <span class="s">&#34;executionTimeMillis&#34;</span> <span class="o">:</span> <span class="m">0</span><span class="p">,</span>
+      <span class="s">&#34;totalKeysExamined&#34;</span> <span class="o">:</span> <span class="m">0</span><span class="p">,</span>
+      <span class="s">&#34;totalDocsExamined&#34;</span> <span class="o">:</span> <span class="m">10</span><span class="p">,</span>
+      <span class="s">&#34;executionStages&#34;</span> <span class="o">:</span> <span class="p">{</span>
+         <span class="s">&#34;stage&#34;</span> <span class="o">:</span> <span class="s">&#34;COLLSCAN&#34;</span><span class="p">,</span>
+         <span class="kc">...</span>
+      <span class="p">},</span>
+      <span class="kc">...</span>
+   <span class="p">},</span>
+   <span class="kc">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>queryPlanner.winningPlan.stage显示 COLLSCAN以指示收集扫描。集合扫描表明，mongod必须逐个文档扫描整个集合文档以识别结果。这通常是一项昂贵的操作，并且可能导致查询缓慢。</li>
+<li>executionStats.nReturned显示3表示查询匹配并返回三个文档。</li>
+<li>executionStats.totalKeysExamined显示0 以指示这是查询未使用索引。</li>
+<li>executionStats.totalDocsExamined显示10 以指示MongoDB必须扫描十个文档（即集合中的所有文档）才能找到三个匹配的文档。</li>
+</ul>
+<p>匹配文档数和已检查文档数之间的差异可能表明，为了提高效率，查询可能会受益于索引的使用。</p>
+<h1 id="索引查询">索引查询</h1>
+<p>要支持对该quantity字段的查询，请在该字段上添加一个索引 quantity：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="nf">db.inventory.createIndex</span><span class="p">(</span> <span class="p">{</span> <span class="n">quantity</span><span class="o">:</span> <span class="m">1</span> <span class="p">}</span> <span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>要查看查询计划统计信息，请使用以下 explain(&ldquo;executionStats&rdquo;)方法：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="nf">db.inventory.find</span><span class="p">(</span>
+   <span class="p">{</span> <span class="n">quantity</span><span class="o">:</span> <span class="p">{</span> <span class="o">$</span><span class="n">gte</span><span class="o">:</span> <span class="m">100</span><span class="p">,</span> <span class="o">$</span><span class="n">lte</span><span class="o">:</span> <span class="m">200</span> <span class="p">}</span> <span class="p">}</span>
+<span class="p">)</span><span class="nf">.explain</span><span class="p">(</span><span class="s">&#34;executionStats&#34;</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>该explain()方法返回以下结果：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="p">{</span>
+   <span class="s">&#34;queryPlanner&#34;</span> <span class="o">:</span> <span class="p">{</span>
+         <span class="s">&#34;plannerVersion&#34;</span> <span class="o">:</span> <span class="m">1</span><span class="p">,</span>
+         <span class="kc">...</span>
+         <span class="s">&#34;winningPlan&#34;</span> <span class="o">:</span> <span class="p">{</span>
+               <span class="s">&#34;stage&#34;</span> <span class="o">:</span> <span class="s">&#34;FETCH&#34;</span><span class="p">,</span>
+               <span class="s">&#34;inputStage&#34;</span> <span class="o">:</span> <span class="p">{</span>
+                  <span class="s">&#34;stage&#34;</span> <span class="o">:</span> <span class="s">&#34;IXSCAN&#34;</span><span class="p">,</span>
+                  <span class="s">&#34;keyPattern&#34;</span> <span class="o">:</span> <span class="p">{</span>
+                     <span class="s">&#34;quantity&#34;</span> <span class="o">:</span> <span class="m">1</span>
+                  <span class="p">},</span>
+                  <span class="kc">...</span>
+               <span class="p">}</span>
+         <span class="p">},</span>
+         <span class="s">&#34;rejectedPlans&#34;</span> <span class="o">:</span> <span class="n">[</span> <span class="n">]</span>
+   <span class="p">},</span>
+   <span class="s">&#34;executionStats&#34;</span> <span class="o">:</span> <span class="p">{</span>
+         <span class="s">&#34;executionSuccess&#34;</span> <span class="o">:</span> <span class="n">true</span><span class="p">,</span>
+         <span class="s">&#34;nReturned&#34;</span> <span class="o">:</span> <span class="m">3</span><span class="p">,</span>
+         <span class="s">&#34;executionTimeMillis&#34;</span> <span class="o">:</span> <span class="m">0</span><span class="p">,</span>
+         <span class="s">&#34;totalKeysExamined&#34;</span> <span class="o">:</span> <span class="m">3</span><span class="p">,</span>
+         <span class="s">&#34;totalDocsExamined&#34;</span> <span class="o">:</span> <span class="m">3</span><span class="p">,</span>
+         <span class="s">&#34;executionStages&#34;</span> <span class="o">:</span> <span class="p">{</span>
+            <span class="kc">...</span>
+         <span class="p">},</span>
+         <span class="kc">...</span>
+   <span class="p">},</span>
+   <span class="kc">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>queryPlanner.winningPlan.inputStage.stage显示IXSCAN以指示索引的使用。</li>
+<li>executionStats.nReturned 显示3表示查询匹配并返回三个文档。</li>
+<li>executionStats.totalKeysExamined显示3 以指示MongoDB扫描了三个索引条目。检查的键数与返回的文档数相匹配，这意味着mongod只需检查索引键即可返回结果。在 mongod没有扫描所有的文件，只有三个匹配文档不得不被拉入内存中。这导致非常有效的查询。</li>
+<li>executionStats.totalDocsExamined屏幕显示3 MongoDB扫描了三个文档。</li>
+</ul>
+<p>没有索引，查询将扫描整个10 文档集合以返回3匹配的文档。该查询还必须扫描每个文档的整体，可能会将它们拉入内存。这导致昂贵且可能缓慢的查询操作。</p>
+<p>当使用索引运行时，查询会扫描3索引条目和3文档以返回3匹配的文档，从而产生非常高效的查询。</p>
+<h1 id="比较索引表现">比较索引表现</h1>
+<p>若要手动比较使用多个索引的查询的性能，可以将该hint() 方法与该explain() 方法结合使用。</p>
+<p>考虑以下查询：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="nf">db.inventory.find</span><span class="p">(</span> <span class="p">{</span>
+   <span class="n">quantity</span><span class="o">:</span> <span class="p">{</span>
+      <span class="o">$</span><span class="n">gte</span><span class="o">:</span> <span class="m">100</span><span class="p">,</span> <span class="o">$</span><span class="n">lte</span><span class="o">:</span> <span class="m">300</span>
+   <span class="p">},</span>
+   <span class="n">type</span><span class="o">:</span> <span class="s">&#34;food&#34;</span>
+<span class="p">}</span> <span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>该查询返回以下文档：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-json" data-lang="json"><span class="p">{</span> <span class="nt">&#34;_id&#34;</span> <span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="nt">&#34;item&#34;</span> <span class="p">:</span> <span class="s2">&#34;f2&#34;</span><span class="p">,</span> <span class="nt">&#34;type&#34;</span> <span class="p">:</span> <span class="s2">&#34;food&#34;</span><span class="p">,</span> <span class="nt">&#34;quantity&#34;</span> <span class="p">:</span> <span class="mi">100</span> <span class="p">}</span>
+<span class="p">{</span> <span class="nt">&#34;_id&#34;</span> <span class="p">:</span> <span class="mi">5</span><span class="p">,</span> <span class="nt">&#34;item&#34;</span> <span class="p">:</span> <span class="s2">&#34;f3&#34;</span><span class="p">,</span> <span class="nt">&#34;type&#34;</span> <span class="p">:</span> <span class="s2">&#34;food&#34;</span><span class="p">,</span> <span class="nt">&#34;quantity&#34;</span> <span class="p">:</span> <span class="mi">300</span> <span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>要支持查询，请添加复合索引。对于复合索引，字段的顺序很重要。</p>
+<p>例如，添加以下两个复合索引。第一个索引按quantity字段顺序排序，然后按 type字段排序。第二个索引按顺序排序type，然后按quantity字段排序。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="nf">db.inventory.createIndex</span><span class="p">(</span> <span class="p">{</span> <span class="n">quantity</span><span class="o">:</span> <span class="m">1</span><span class="p">,</span> <span class="n">type</span><span class="o">:</span> <span class="m">1</span> <span class="p">}</span> <span class="p">)</span>
+<span class="nf">db.inventory.createIndex</span><span class="p">(</span> <span class="p">{</span> <span class="n">type</span><span class="o">:</span> <span class="m">1</span><span class="p">,</span> <span class="n">quantity</span><span class="o">:</span> <span class="m">1</span> <span class="p">}</span> <span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>评估第一个索引对查询的影响：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="nf">db.inventory.find</span><span class="p">(</span>
+   <span class="p">{</span> <span class="n">quantity</span><span class="o">:</span> <span class="p">{</span> <span class="o">$</span><span class="n">gte</span><span class="o">:</span> <span class="m">100</span><span class="p">,</span> <span class="o">$</span><span class="n">lte</span><span class="o">:</span> <span class="m">300</span> <span class="p">},</span> <span class="n">type</span><span class="o">:</span> <span class="s">&#34;food&#34;</span> <span class="p">}</span>
+<span class="p">)</span><span class="nf">.hint</span><span class="p">({</span> <span class="n">quantity</span><span class="o">:</span> <span class="m">1</span><span class="p">,</span> <span class="n">type</span><span class="o">:</span> <span class="m">1</span> <span class="p">})</span><span class="nf">.explain</span><span class="p">(</span><span class="s">&#34;executionStats&#34;</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>该explain()方法返回以下输出：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-json" data-lang="json"><span class="p">{</span>
+   <span class="nt">&#34;queryPlanner&#34;</span> <span class="p">:</span> <span class="p">{</span>
+      <span class="err">...</span>
+      <span class="nt">&#34;winningPlan&#34;</span> <span class="p">:</span> <span class="p">{</span>
+         <span class="nt">&#34;stage&#34;</span> <span class="p">:</span> <span class="s2">&#34;FETCH&#34;</span><span class="p">,</span>
+         <span class="nt">&#34;inputStage&#34;</span> <span class="p">:</span> <span class="p">{</span>
+            <span class="nt">&#34;stage&#34;</span> <span class="p">:</span> <span class="s2">&#34;IXSCAN&#34;</span><span class="p">,</span>
+            <span class="nt">&#34;keyPattern&#34;</span> <span class="p">:</span> <span class="p">{</span>
+               <span class="nt">&#34;quantity&#34;</span> <span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+               <span class="nt">&#34;type&#34;</span> <span class="p">:</span> <span class="mi">1</span>
+            <span class="p">},</span>
+            <span class="err">...</span>
+            <span class="p">}</span>
+         <span class="p">}</span>
+      <span class="p">},</span>
+      <span class="nt">&#34;rejectedPlans&#34;</span> <span class="p">:</span> <span class="p">[</span> <span class="p">]</span>
+   <span class="p">}</span><span class="err">,</span>
+   <span class="s2">&#34;executionStats&#34;</span> <span class="err">:</span> <span class="p">{</span>
+      <span class="nt">&#34;executionSuccess&#34;</span> <span class="p">:</span> <span class="kc">true</span><span class="p">,</span>
+      <span class="nt">&#34;nReturned&#34;</span> <span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+      <span class="nt">&#34;executionTimeMillis&#34;</span> <span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+      <span class="nt">&#34;totalKeysExamined&#34;</span> <span class="p">:</span> <span class="mi">5</span><span class="p">,</span>
+      <span class="nt">&#34;totalDocsExamined&#34;</span> <span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+      <span class="nt">&#34;executionStages&#34;</span> <span class="p">:</span> <span class="p">{</span>
+      <span class="err">...</span>
+      <span class="p">}</span>
+   <span class="p">}</span><span class="err">,</span>
+   <span class="err">...</span>
+<span class="err">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>MongoDB扫描了5个索引键（executionStats.totalKeysExamined）以返回2个匹配的文档（executionStats.nReturned）。</p>
+<p>评估第二个索引对查询的影响：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="nf">db.inventory.find</span><span class="p">(</span>
+   <span class="p">{</span> <span class="n">quantity</span><span class="o">:</span> <span class="p">{</span> <span class="o">$</span><span class="n">gte</span><span class="o">:</span> <span class="m">100</span><span class="p">,</span> <span class="o">$</span><span class="n">lte</span><span class="o">:</span> <span class="m">300</span> <span class="p">},</span> <span class="n">type</span><span class="o">:</span> <span class="s">&#34;food&#34;</span> <span class="p">}</span>
+<span class="p">)</span><span class="nf">.hint</span><span class="p">({</span> <span class="n">type</span><span class="o">:</span> <span class="m">1</span><span class="p">,</span> <span class="n">quantity</span><span class="o">:</span> <span class="m">1</span> <span class="p">})</span><span class="nf">.explain</span><span class="p">(</span><span class="s">&#34;executionStats&#34;</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>该explain()方法返回以下输出：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-json" data-lang="json"><span class="p">{</span>
+   <span class="nt">&#34;queryPlanner&#34;</span> <span class="p">:</span> <span class="p">{</span>
+      <span class="err">...</span>
+      <span class="nt">&#34;winningPlan&#34;</span> <span class="p">:</span> <span class="p">{</span>
+         <span class="nt">&#34;stage&#34;</span> <span class="p">:</span> <span class="s2">&#34;FETCH&#34;</span><span class="p">,</span>
+         <span class="nt">&#34;inputStage&#34;</span> <span class="p">:</span> <span class="p">{</span>
+            <span class="nt">&#34;stage&#34;</span> <span class="p">:</span> <span class="s2">&#34;IXSCAN&#34;</span><span class="p">,</span>
+            <span class="nt">&#34;keyPattern&#34;</span> <span class="p">:</span> <span class="p">{</span>
+               <span class="nt">&#34;type&#34;</span> <span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+               <span class="nt">&#34;quantity&#34;</span> <span class="p">:</span> <span class="mi">1</span>
+            <span class="p">},</span>
+            <span class="err">...</span>
+         <span class="p">}</span>
+      <span class="p">},</span>
+      <span class="nt">&#34;rejectedPlans&#34;</span> <span class="p">:</span> <span class="p">[</span> <span class="p">]</span>
+   <span class="p">},</span>
+   <span class="nt">&#34;executionStats&#34;</span> <span class="p">:</span> <span class="p">{</span>
+      <span class="nt">&#34;executionSuccess&#34;</span> <span class="p">:</span> <span class="kc">true</span><span class="p">,</span>
+      <span class="nt">&#34;nReturned&#34;</span> <span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+      <span class="nt">&#34;executionTimeMillis&#34;</span> <span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+      <span class="nt">&#34;totalKeysExamined&#34;</span> <span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+      <span class="nt">&#34;totalDocsExamined&#34;</span> <span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+      <span class="nt">&#34;executionStages&#34;</span> <span class="p">:</span> <span class="p">{</span>
+         <span class="err">...</span>
+      <span class="p">}</span>
+   <span class="p">},</span>
+   <span class="err">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>MongoDB扫描了2个索引键（executionStats.totalKeysExamined）以返回2个匹配的文档（executionStats.nReturned）。</p>
+<p>对于此示例查询，复合索引{ type: 1, quantity: 1 }比复合索引{ quantity: 1, type: 1 }效率更高。</p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2020-05-12
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/mongodb/">MongoDB</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/mongodb%E7%9A%84findandmodify/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">MongoDB的findAndModify</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/mongodb%E4%BC%98%E5%8C%96%E6%9F%A5%E8%AF%A2%E6%80%A7%E8%83%BD/">
+            <span class="next-text nav-default">MongoDB优化查询性能</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2020
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
