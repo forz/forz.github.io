@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>设计实现高性能本地内存缓存 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="前言 本地内存缓存是一个在基础软件架构中非常常见的基础设施，也正因其过于常见，以至于平时很少去思考它是如何实现的。在尚未设计缓存系统前，完全没" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
+
+
+<link rel="canonical" href="/post/%E8%AE%BE%E8%AE%A1%E5%AE%9E%E7%8E%B0%E9%AB%98%E6%80%A7%E8%83%BD%E6%9C%AC%E5%9C%B0%E5%86%85%E5%AD%98%E7%BC%93%E5%AD%98/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="设计实现高性能本地内存缓存" />
+<meta property="og:description" content="前言 本地内存缓存是一个在基础软件架构中非常常见的基础设施，也正因其过于常见，以至于平时很少去思考它是如何实现的。在尚未设计缓存系统前，完全没" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/%E8%AE%BE%E8%AE%A1%E5%AE%9E%E7%8E%B0%E9%AB%98%E6%80%A7%E8%83%BD%E6%9C%AC%E5%9C%B0%E5%86%85%E5%AD%98%E7%BC%93%E5%AD%98/" />
+<meta property="article:published_time" content="2020-07-24T15:57:15+00:00" />
+<meta property="article:modified_time" content="2020-07-24T15:57:15+00:00" />
+<meta itemprop="name" content="设计实现高性能本地内存缓存">
+<meta itemprop="description" content="前言 本地内存缓存是一个在基础软件架构中非常常见的基础设施，也正因其过于常见，以至于平时很少去思考它是如何实现的。在尚未设计缓存系统前，完全没">
+<meta itemprop="datePublished" content="2020-07-24T15:57:15&#43;00:00" />
+<meta itemprop="dateModified" content="2020-07-24T15:57:15&#43;00:00" />
+<meta itemprop="wordCount" content="4922">
+
+
+
+<meta itemprop="keywords" content="cache," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="设计实现高性能本地内存缓存"/>
+<meta name="twitter:description" content="前言 本地内存缓存是一个在基础软件架构中非常常见的基础设施，也正因其过于常见，以至于平时很少去思考它是如何实现的。在尚未设计缓存系统前，完全没"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">设计实现高性能本地内存缓存</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2020-07-24 </span>
+        <div class="post-category">
+            <a href="/categories/cache/"> cache </a>
+            </div>
+          <span class="more-meta"> 约 4922 字 </span>
+          <span class="more-meta"> 预计阅读 10 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#简易的-map">简易的 Map</a></li>
+    <li><a href="#线程安全的-safemap">线程安全的 SafeMap</a></li>
+    <li><a href="#分段锁的-safemap">分段锁的 SafeMap</a></li>
+    <li><a href="#读写分段锁的-safemap">读写分段锁的 SafeMap</a></li>
+    <li><a href="#使用线程-id-实现无锁">使用线程 ID 实现无锁</a></li>
+    <li><a href="#使用-syncmap-实现无锁">使用 sync.Map 实现无锁</a></li>
+    <li><a href="#设计">设计</a></li>
+  </ul>
+
+  <ul>
+    <li><a href="#环形缓冲ringbuffer">环形缓冲：RingBuffer</a></li>
+    <li><a href="#线程安全支持syncpool">线程安全支持：sync.Pool</a></li>
+    <li><a href="#设计-1">设计</a></li>
+  </ul>
+
+  <ul>
+    <li><a href="#驱逐策略">驱逐策略</a></li>
+    <li><a href="#频率计数器count-min-sketch">频率计数器：Count-Min Sketch</a></li>
+    <li><a href="#设计-2">设计</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h1 id="前言">前言</h1>
+<p>本地内存缓存是一个在基础软件架构中非常常见的基础设施，也正因其过于常见，以至于平时很少去思考它是如何实现的。在尚未设计缓存系统前，完全没想到原来要需要考虑如此多复杂的事情。本文将由浅入深介绍如何设计一个现代的高性能内存缓存系统。</p>
+<h1 id="什么时候需要本地内存缓存">什么时候需要本地内存缓存</h1>
+<p>在大部分业务系统中，都会使用诸如 Redis、Memcached 等远程缓存，一方面可以避免自身进程内存占用过大而导致的 OOM 或 GC 问题，另一方面也可以实现多个进程共享同一份一致的缓存数据。但对于某些底层服务（例如数据库服务），远程缓存的网络延迟是不可接受的，这就势必需要引入本地内存缓存。</p>
+<h1 id="本地内存缓存的特点">本地内存缓存的特点</h1>
+<p>本地内存缓存可被视作一个基于本地内存的 「KeyValue 数据库」。但相比较于传统数据库而言，它对一致性的要求十分宽松：</p>
+<ol>
+<li>对于更新与删除的操作，需要保证强一致性</li>
+<li>对于插入操作可以容忍少量丢失</li>
+<li>对于读取操作可以容忍少量 Miss</li>
+</ol>
+<p>与磁盘数据库的另一个不同之处在于，磁盘数据库的设计有一个前提假设是磁盘是可以随需要而不断扩容的，倘若一个磁盘数据库因磁盘占满而崩溃主要责任是在使用方。而内存缓存则没有这么宽容的假设可以建立，它必须考虑到内存是昂贵且有限的这一事实。</p>
+<p>除此之外，由于本地内存缓存处于业务进程当中，所以其需要考虑更多业务向的问题，比如：</p>
+<ol>
+<li>由于自身大量老生代的内存占用，是否会对所处进程产生 GC 问题。</li>
+<li>当多线程场景下，如何同时解决线程安全、数据竞争、高吞吐等问题。</li>
+<li>需要能够适应一些非随机的访问统计规律，例如 Zipf。</li>
+</ol>
+<p>综上所述，我们可以归纳出对一个优秀的本地内存缓存系统的要求：</p>
+<ol>
+<li>线程安全</li>
+<li>高吞吐</li>
+<li>高命中率</li>
+<li>支持内存限制</li>
+</ol>
+<h1 id="实现路径">实现路径</h1>
+<p>在实现一个完整的缓存系统前，我们需要将目标一步步拆解。</p>
+<p>首先为了实现缓存逻辑，我们必须有一个类 Map 的 KeyValue 数据结构，同时它必须是线程安全的。为了支持内存限制，我们必须要能够驱逐一些 key，所以需要实现一个驱逐器。为了实现驱逐的同时维持高命中率，我们还需要告诉驱逐器每个 key 的访问记录，让它能够从中分析出哪些 key 可以被驱逐。综上分析，我们可以整理出一个大概的 Roadmap：</p>
+<ol>
+<li>实现一个线程安全的 Map 数据结构：存储缓存内容</li>
+<li>实现一个访问记录队列：存储访问记录</li>
+<li>实现一个驱逐器：管理缓存内容</li>
+</ol>
+<p>本文所有代码均使用 Golang 编写。</p>
+<h1 id="线程安全的-map">线程安全的 Map</h1>
+<h2 id="简易的-map">简易的 Map</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">cache</span> <span class="o">:=</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">{}</span>
+<span class="nx">cache</span><span class="p">[</span><span class="s">&#34;a&#34;</span><span class="p">]</span> <span class="p">=</span> <span class="s">&#34;b&#34;</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在 key 数量固定且极少的情况下，我们一般会用原生 Map 直接实现一个最简单缓存。但 Golang 原生 Map 并不是线程安全的，当多个 goroutine 同时读写该对象时，会发生冲突。</p>
+<h2 id="线程安全的-safemap">线程安全的 SafeMap</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">SafeMap</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">lock</span>  <span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
+    <span class="nx">store</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">SafeMap</span><span class="p">)</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">k</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">string</span> <span class="p">{</span>
+    <span class="nx">m</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="k">defer</span> <span class="nx">m</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="nx">m</span><span class="p">.</span><span class="nx">store</span><span class="p">[</span><span class="nx">k</span><span class="p">]</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">SafeMap</span><span class="p">)</span> <span class="nf">Set</span><span class="p">(</span><span class="nx">k</span><span class="p">,</span> <span class="nx">v</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">m</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="k">defer</span> <span class="nx">m</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+    <span class="nx">m</span><span class="p">.</span><span class="nx">store</span><span class="p">[</span><span class="nx">k</span><span class="p">]</span> <span class="p">=</span> <span class="nx">v</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这是一个最简单的线程安全 Map 实现。对于访问量很小的系统，这已经能够成为一个非常方便快速的实现了，但需要注意的是，这个 Map 是被该进程下的所有线程所共享的，任何一个修改都需要去竞争得到一个锁，如果套用数据库领域的概念，这个锁就是数据库级别的锁，显然对于并发量大的时候是不适合的，会成为整个系统的瓶颈。</p>
+<h2 id="分段锁的-safemap">分段锁的 SafeMap</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">SafeMap</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">locks</span> <span class="p">[]</span><span class="o">*</span><span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
+    <span class="nx">store</span> <span class="p">[]</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">NewSafeMap</span><span class="p">()</span> <span class="nx">SafeMap</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nx">SafeMap</span><span class="p">{</span>
+        <span class="nx">locks</span><span class="p">:</span> <span class="p">[]</span><span class="o">*</span><span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span><span class="p">{{},</span> <span class="p">{},</span> <span class="p">{}},</span>
+        <span class="nx">store</span><span class="p">:</span> <span class="p">[]</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">{{},</span> <span class="p">{},</span> <span class="p">{}},</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">hash</span><span class="p">(</span><span class="nx">k</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
+    <span class="nx">h</span> <span class="o">:=</span> <span class="nx">fnv</span><span class="p">.</span><span class="nf">New32a</span><span class="p">()</span>
+    <span class="nx">h</span><span class="p">.</span><span class="nf">Write</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">k</span><span class="p">))</span>
+    <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="nx">h</span><span class="p">.</span><span class="nf">Sum32</span><span class="p">())</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">SafeMap</span><span class="p">)</span> <span class="nf">GetLock</span><span class="p">(</span><span class="nx">k</span> <span class="kt">string</span><span class="p">)</span> <span class="o">*</span><span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span> <span class="p">{</span>
+    <span class="nx">idx</span> <span class="o">:=</span> <span class="nf">hash</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span> <span class="o">%</span> <span class="nb">len</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">locks</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">m</span><span class="p">.</span><span class="nx">locks</span><span class="p">[</span><span class="nx">idx</span><span class="p">]</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">SafeMap</span><span class="p">)</span> <span class="nf">GetStore</span><span class="p">(</span><span class="nx">k</span> <span class="kt">string</span><span class="p">)</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span> <span class="p">{</span>
+    <span class="nx">idx</span> <span class="o">:=</span> <span class="nf">hash</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span> <span class="o">%</span> <span class="nb">len</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">locks</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">m</span><span class="p">.</span><span class="nx">store</span><span class="p">[</span><span class="nx">idx</span><span class="p">]</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">SafeMap</span><span class="p">)</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">k</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">string</span> <span class="p">{</span>
+    <span class="nx">lock</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetLock</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span>
+    <span class="nx">lock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="k">defer</span> <span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetStore</span><span class="p">(</span><span class="nx">k</span><span class="p">)[</span><span class="nx">k</span><span class="p">]</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">SafeMap</span><span class="p">)</span> <span class="nf">Set</span><span class="p">(</span><span class="nx">k</span><span class="p">,</span> <span class="nx">v</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">lock</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetLock</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span>
+    <span class="nx">lock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="k">defer</span> <span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+    <span class="nx">m</span><span class="p">.</span><span class="nf">GetStore</span><span class="p">(</span><span class="nx">k</span><span class="p">)[</span><span class="nx">k</span><span class="p">]</span> <span class="p">=</span> <span class="nx">v</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>一个很自然的想法是将 key 进行分桶，从而分散对锁的竞争。这种方法类似于将「数据库锁」打散成「表锁」。到这一步，我们基本已经完成了一个最简单的高并发缓存。</p>
+<h2 id="读写分段锁的-safemap">读写分段锁的 SafeMap</h2>
+<p>考虑到缓存系统读远大于写，我们可以对上述 Map 的互斥锁 Mutex 改为 RWMutex ，从而使得读时并不互斥，改善读性能。</p>
+<h2 id="使用线程-id-实现无锁">使用线程 ID 实现无锁</h2>
+<p>需要注意的是，上述 Map 中，我们使用的分桶方法是利用 key 做随机哈希，这种做法只能缓解锁竞争的问题，却无法根治。那么是否有办法根治这里的锁竞争呢？</p>
+<p>办法和代价都是有的。如果我们可以让某一块内存只被某个线程访问，那么就可以完全避免这些线程之间的锁竞争，从而实现无锁。假设每一个线程都有一个线程ID，我们可以按线程ID去分段，每个线程独占一个 SafeMap。</p>
+<p>这样做虽然避免了锁，但也同时造成了数据「膨胀」。如果同一个 key 被N个线程 Set 了多次，此时内存中就多了 N 份同样的数据。如果它只被 Set 了一次，也将导致其他线程没法取得这个数据，从而出现非常高的 Miss 率。但对于那些极其热门的少量 key，这种方式的确可以作为一种优化选择。</p>
+<p>令人遗憾的是，在 Golang 中，由于 GPM 调度模型的存在，在 Runtime 中屏蔽了线程所有相关信息，所以我们是没有正常的办法获得「线程ID」的信息，因而此文暂不考虑上述方案。</p>
+<h2 id="使用-syncmap-实现无锁">使用 sync.Map 实现无锁</h2>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200724172834.png" alt=""></p>
+<p>准确来说，sync.Map 并不是完全的「无锁」，只是一个在绝大部分读场景是无锁的线程安全 Map。具体原理可以参见相关文档。但由于其底层实现并未采取分段锁的方法，所以写的时候会有一个 dirty 上的全局锁，进而会影响到高并发写时的性能。所以对于不在乎写性能同时写也相对不密集的时候，该数据结构是非常理想的选择。</p>
+<h2 id="设计">设计</h2>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200724172922.png" alt=""></p>
+<h1 id="访问记录队列">访问记录队列</h1>
+<p>对于访问记录的读写，同样牵涉到多线程同时操作同一个内存地址的情况。但我们对其一致性会比缓存内容存储更低，尤其是在高并发数据的假设下，少量的数据丢失并不会影响最终判断结果。</p>
+<p>与缓存内容存储的场景不同的是，对于访问记录，每次 Get/Set 的时候都会需要进行一次写入操作，所以它的写速度要求远高于前面的缓存内存存储。更为关键的是，即便是在如此高密度的写情况下，它也同样需要保证线程安全。</p>
+<p>虽然上述要求看似十分复杂，我们依然可以试着通过几个方面的分析，来拆解这个问题。</p>
+<p>在性能方面，我们需要保证该数据结构写入时是无锁的，因为一旦有锁，前面做的降低锁颗粒度优化都会被这个有锁的结构给拖累。</p>
+<p>在写入方式方面，由于我们可以接受少量数据丢失，并且我们没有非常实时的要求，所以我们可以接受异步的写入。</p>
+<p>在存储内容方面，我们只需要存储 Key 数据。</p>
+<p>根据上述分析，我们不难发现我们需要的是一个基于内存的线程安全的无锁 Lossy 队列。但似乎并没有现成的这种数据结构实现，所以我们可以退一步将这个问题变成，先实现一个 Lossy 队列，再在此基础上，实现线程安全的功能。</p>
+<h2 id="环形缓冲ringbuffer">环形缓冲：RingBuffer</h2>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200724174504.png" alt=""></p>
+<p>RingBuffer 是一个非常简单的环形缓冲队列，由一个数组，加上一个读指针和写指针构成。读指针永远只能读到写指针前的数据。</p>
+<h2 id="线程安全支持syncpool">线程安全支持：sync.Pool</h2>
+<p>Golang 自带的 sync.Pool 可以非常好地和 Ring Buffer 协同工作，实现在近乎无锁的情况下，构造出一个线程安全的高吞吐缓冲队列。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200724174539.png" alt=""></p>
+<p>sync.Pool 会在每个线程中维护一个 private 的 Pool（无锁），以及一个可以被其他线程 shared的 Pool（有锁），细节原理可以参考相关文档。在高并发场景下，它基本能够保证每个线程都能够获得一个线程私有的 RingBuffer 对象，从而不需要对其加锁。但 sync.Pool 有一个缺点是在 GC 时会被释放掉，此时会丢失缓冲区内的数据。不过由于我们的前提假设是高并发场景，故而可以推导出数据的丢失量较之于全局是微乎其微的。然而在低并发场景下，这种做法有可能导致缓冲区一直被 GC 清理掉而丧失大部分统计数据。</p>
+<p>这里对 RingBuffer 做了一些简单的改动，当缓冲区写满后，会将数据交给驱逐器统计，然后清空缓冲区。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;sync&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">type</span> <span class="nx">ringStripe</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">store</span>    <span class="p">[]</span><span class="kt">uint64</span>
+    <span class="nx">capacity</span> <span class="kt">uint64</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">newRingStripe</span><span class="p">(</span><span class="nx">capacity</span> <span class="kt">uint64</span><span class="p">)</span> <span class="o">*</span><span class="nx">ringStripe</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">ringStripe</span><span class="p">{</span>
+        <span class="nx">store</span><span class="p">:</span>    <span class="nb">make</span><span class="p">([]</span><span class="kt">uint64</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">capacity</span><span class="p">),</span>
+        <span class="nx">capacity</span><span class="p">:</span> <span class="nx">capacity</span><span class="p">,</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">ringStripe</span><span class="p">)</span> <span class="nf">PushOrReturn</span><span class="p">(</span><span class="nx">item</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">[]</span><span class="kt">uint64</span> <span class="p">{</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nx">store</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">store</span><span class="p">,</span> <span class="nx">item</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">uint64</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">store</span><span class="p">))</span> <span class="o">&gt;=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">capacity</span> <span class="p">{</span>
+        <span class="nx">ret</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">store</span><span class="p">[:]</span>
+        <span class="nx">s</span><span class="p">.</span><span class="nx">store</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">uint64</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">capacity</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nx">ret</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">ringBuffer</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">stripes</span> <span class="p">[]</span><span class="o">*</span><span class="nx">ringStripe</span>
+    <span class="nx">pool</span>    <span class="o">*</span><span class="nx">sync</span><span class="p">.</span><span class="nx">Pool</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">newRingBuffer</span><span class="p">(</span><span class="nx">capacity</span> <span class="kt">uint64</span><span class="p">)</span> <span class="o">*</span><span class="nx">ringBuffer</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">ringBuffer</span><span class="p">{</span>
+        <span class="nx">pool</span><span class="p">:</span> <span class="o">&amp;</span><span class="nx">sync</span><span class="p">.</span><span class="nx">Pool</span><span class="p">{</span>
+            <span class="nx">New</span><span class="p">:</span> <span class="kd">func</span><span class="p">()</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="nf">newRingStripe</span><span class="p">(</span><span class="nx">capacity</span><span class="p">)</span>
+            <span class="p">},</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">ringBuffer</span><span class="p">)</span> <span class="nf">PushOrReturn</span><span class="p">(</span><span class="nx">item</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">[]</span><span class="kt">uint64</span> <span class="p">{</span>
+    <span class="nx">stripe</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nf">Get</span><span class="p">().(</span><span class="o">*</span><span class="nx">ringStripe</span><span class="p">)</span>
+    <span class="k">defer</span> <span class="nx">b</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nf">Put</span><span class="p">(</span><span class="nx">stripe</span><span class="p">)</span>
+	
+    <span class="nx">got</span> <span class="o">:=</span> <span class="nx">stripe</span><span class="p">.</span><span class="nf">PushOrReturn</span><span class="p">(</span><span class="nx">item</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">got</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="设计-1">设计</h2>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200724175004.png" alt=""></p>
+<h1 id="驱逐器">驱逐器</h1>
+<h2 id="驱逐策略">驱逐策略</h2>
+<p>通过不停读访问记录环形缓冲队列，我们能够拿到用户的访问记录。此时我们有两种驱逐策略：</p>
+<ul>
+<li>FIFO:先进先出，在这种淘汰算法中，先进入缓存的会先被淘汰。这种可谓是最简单的了，但是会导致我们命中率很低。试想一下我们如果有个访问频率很高的数据是所有数据第一个访问的，而那些不是很高的是后面再访问的，那这样就会把我们的首个数据但是他的访问频率很高给挤出。</li>
+<li>LRU:最近最少使用算法。在这种算法中避免了上面的问题，每次访问数据都会将其放在我们的队尾，如果需要淘汰数据，就只需要淘汰队首即可。但是这个依然有个问题，如果有个数据在1个小时的前59分钟访问了1万次(可见这是个热点数据),再后一分钟没有访问这个数据，但是有其他的数据访问，就导致了我们这个热点数据被淘汰。</li>
+<li>LFU:最近最少频率使用。在这种算法中又对上面进行了优化，利用额外的空间记录每个数据的使用频率，然后选出频率最低进行淘汰。这样就避免了LRU不能处理时间段的问题。</li>
+</ul>
+<p>LRU 的问题在于，如果在某个数据在前9分钟访问了1万次，最近1分钟没有访问，那么依然会认为该 key 并不热门而有可能被驱逐。</p>
+<p>LFU 的问题在于，经常会有一些数据在某时刻非常极其热门，但之后一直没人访问，例如因为某些原因被隐藏的用户动态这类场景。另外，LFU 的频率信息在缓存失效后依旧会存在内存中。</p>
+<p>值得注意的一点是，缓存系统的驱逐往往是由于写入而引起的，换句话说，是为了在缓存中，给更加重要的 key 腾出空间，才驱逐出那些没它重要的 key。那么问题来了，无论是 LRU 还是 LFU 的写入过程中，都有一个假设是新来的 key 一定是更重要的，以至于我必须牺牲掉某个已有的 key。但这个假设很可能是不成立的。而且这种方式很容易导致一些冷门数据在短时间过热导致缓存系统迅速驱逐出了原先的那些热门数据。为了解决上述问题，于是就有了 TinyLFU。</p>
+<p>TinyLFU 利用 LFU 作为写入过滤器，只有当新来的 key 的频率大于需要被驱逐的 key 时，此时才会执行写入，否则只进行频率信息的累加。也就是说所有新的 key 都会有一个被预热的过程才能够「够格」被写入缓存中。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200724175525.png" alt=""></p>
+<p>但此时会存在的一个问题是，当有突发性的稀疏流量（sparse bursts）进来时，他们会由于一直无法建立足够的频率使得自己被缓存系统而接纳，从而导致击穿了缓存。为了解决这个问题，于是又有了 W-TinyLFU。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200724175533.png" alt=""></p>
+<p>W-TinyLFU 算法吸收了上述算法的优点，在 TinyLFU 前面放了一个基于 LRU 的 Window Cache，从而可以使得前面提到的突发性稀疏流量会缓存在 Window Cache 里，只有在 Window Cache 里被淘汰的缓存才会过继给后面的 TinyLFU。至于最后的 Main Cache，虽然 W-TinyLFU 使用了分段式 LRU 来实现，但我们也可以根据实际情况修改使其符合我们需要的场景。</p>
+<p>TinyLFU &amp;&amp; W-TinyLFU 算法是由 Gil Einziger、Roy Friedman 和 Ben Manes 三人在 15 年共同写的论文：TinyLFU: A Highly Efficient Cache Admission Policy 所提出来的，后来 Ben Manes 还依照这个算法写了一个 Java 领域备受欢迎的缓存系统 Caffeine。</p>
+<p>为了简化本文的实现，我们暂时先不实现 W-TinyLFU 算法，而是实现一个简单的 LFU 驱逐策略。因此我们需要一个能够用来记录访问频率的数据结构。同时由于我们需要存储所有 key 的信息，所以还需要这个数据结构能够有效减少 key 的存储体积。</p>
+<p>即便有了上面的频率计数器，为了找到那个需要被驱逐的 LFU key，我们似乎需要遍历所有 key。所以我们不得不再引入一个驱逐候选列表来帮助我们提前排序好需要驱逐的 key。</p>
+<p>综上，我们还需要再实现：</p>
+<ul>
+<li>能够有效压缩数据大小的频率计数器</li>
+<li>预先排序的驱逐候选池</li>
+</ul>
+<h2 id="频率计数器count-min-sketch">频率计数器：Count-Min Sketch</h2>
+<p>Count-Min 算法和布隆过滤器类似，核心思想还是通过将相同 Hash 值的数据共享同一份存储空间，以减小整体体积。h1~hd 代表不同的 Hash 算法，这里的 value 代表我们要存储的 key，横坐标表示 Hash 后的值，对哈希值对应每个网格进行 +1 操作。当需要计算某个 key 的估计值时，取对应所有网格数值的最小值。</p>
+<p>为了避免一些短时间热度的 key 一直残留在缓存中，每隔一个时间间隔，还需要将所有网格计数器衰减一半。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200724180654.png" alt=""></p>
+<h2 id="设计-2">设计</h2>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200724180817.png" alt=""></p>
+<h1 id="总结">总结</h1>
+<p>经过一系列的步骤，我们终于实现了一个满足我们要求的现代内存缓存系统。可以看到，在缓存系统的设计中，对性能影响最大的是缓存的存储层，需要非常小心地进行锁的设计和优化。而对于缓存系统命中率影响最大，同时也是实现算法上最复杂的还是淘汰策略的选择。现代的许多内存缓存系统所选择的淘汰策略各有不同，许多都在现有的算法基础上做过一些自己的修改。即便一些缓存系统在 Benchmark 中非常优秀，但如果其测试数据访问模式与你的实际使用场景并不一致，它的数据对你的参考意义也并不大。所以依旧需要针对性地进行模拟压测才能够知道什么样的缓存系统适合你业务的场景。</p>
+<p>参考:<br>
+<a href="https://blog.joway.io/posts/modern-memory-cache/">设计实现高性能本地内存缓存</a><br>
+<a href="https://juejin.im/post/5b7593496fb9a009b62904fa">你应该知道的缓存进化史</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2020-07-24
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/cache/">cache</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/go%E4%B8%AD%E7%9A%84%E7%BC%93%E5%AD%98%E7%8E%B0%E7%8A%B6/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Go中的缓存现状</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/gocache%E4%B8%80%E4%B8%AA%E5%8A%9F%E8%83%BD%E9%BD%90%E5%85%A8%E4%B8%94%E6%98%93%E4%BA%8E%E6%89%A9%E5%B1%95%E7%9A%84go%E7%BC%93%E5%AD%98%E5%BA%93/">
+            <span class="next-text nav-default">Gocache:一个功能齐全且易于扩展的Go缓存库</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2020
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
