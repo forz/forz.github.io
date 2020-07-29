@@ -17,7 +17,7 @@
 
 
 <meta name="author"
-  content="Forz" /><meta name="description" content="" /><meta name="keywords"
+  content="Forz" /><meta name="description" content="设计BigCache的初衷 bigcache的作者也不是想当然的开发一个库，而且项目遇到了需求。需求如下： 支持http协议 支持 10K RPS (5k 写，5k 读" /><meta name="keywords"
   content="Hugo, theme, even" />
 
 
@@ -44,22 +44,22 @@
 
 
 <meta property="og:title" content="Bigcache优化技巧" />
-<meta property="og:description" content="" />
+<meta property="og:description" content="设计BigCache的初衷 bigcache的作者也不是想当然的开发一个库，而且项目遇到了需求。需求如下： 支持http协议 支持 10K RPS (5k 写，5k 读" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/bigcache%E4%BC%98%E5%8C%96%E6%8A%80%E5%B7%A7/" />
 <meta property="article:published_time" content="2020-07-26T15:19:19+00:00" />
 <meta property="article:modified_time" content="2020-07-26T15:19:19+00:00" />
 <meta itemprop="name" content="Bigcache优化技巧">
-<meta itemprop="description" content="">
+<meta itemprop="description" content="设计BigCache的初衷 bigcache的作者也不是想当然的开发一个库，而且项目遇到了需求。需求如下： 支持http协议 支持 10K RPS (5k 写，5k 读">
 <meta itemprop="datePublished" content="2020-07-26T15:19:19&#43;00:00" />
 <meta itemprop="dateModified" content="2020-07-26T15:19:19&#43;00:00" />
-<meta itemprop="wordCount" content="0">
+<meta itemprop="wordCount" content="4627">
 
 
 
-<meta itemprop="keywords" content="Go,bigcache," /><meta name="twitter:card" content="summary"/>
+<meta itemprop="keywords" content="Go,cache," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Bigcache优化技巧"/>
-<meta name="twitter:description" content=""/>
+<meta name="twitter:description" content="设计BigCache的初衷 bigcache的作者也不是想当然的开发一个库，而且项目遇到了需求。需求如下： 支持http协议 支持 10K RPS (5k 写，5k 读"/>
 
 <!--[if lte IE 9]>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
@@ -165,10 +165,10 @@
       <div class="post-meta">
         <span class="post-time"> 2020-07-26 </span>
         <div class="post-category">
-            <a href="/categories/bigcache/"> bigcache </a>
+            <a href="/categories/cache/"> cache </a>
             </div>
-          <span class="more-meta"> 约 0 字 </span>
-          <span class="more-meta"> 预计阅读 0 分钟 </span>
+          <span class="more-meta"> 约 4627 字 </span>
+          <span class="more-meta"> 预计阅读 10 分钟 </span>
         
       </div>
     </header>
@@ -180,7 +180,430 @@
   </div>
 </div>
     <div class="post-content">
-      
+      <h1 id="设计bigcache的初衷">设计BigCache的初衷</h1>
+<p>bigcache的作者也不是想当然的开发一个库，而且项目遇到了需求。需求如下：</p>
+<ul>
+<li>支持http协议</li>
+<li>支持 10K RPS (5k 写，5k 读)</li>
+<li>cache对象至少保持10分钟</li>
+<li>相应时间平均 5ms, p99.9 10毫秒， p99.999 400毫秒</li>
+<li>其它HTTP的一些需求</li>
+</ul>
+<p>为了满足这些需求,要求开发的cache库要保证：</p>
+<ul>
+<li>即使有百万的缓存对象也要非常快</li>
+<li>支持大并发访问</li>
+<li>一定时间后支持剔除</li>
+</ul>
+<p>作者考察了一番缓存框架比如memcached、redis、couchbase等，发觉都不太满足需求，因为这些都是独立的程序，访问它们需要网络的开销，延时无法保障，作者需要一个进程内的基于内存的cache库。虽然Go生态圈有众多的cache库如 LRU groups cache, go-cache, ttlcache, freecache,但是只有freecache满足需求，不过作者最后还是决定自己取开发一个cache库。</p>
+<p>以上是bigcache诞生的背景，接下来我们欣赏一下bigcache和其它库优美的设计。</p>
+<h1 id="处理大并发访问">处理大并发访问</h1>
+<p>cache就像一个大的hashtable, 可不可以使用一个<code>map[string][]byte + sync.RWMutex</code> 实现满足需求的cache呢？</p>
+<p>sync.RWMutex虽然对读写进行了优化，但是对于并发的读，最终还是把写变成了串行，一旦写的并发量大的时候，即使写不同的key, 对应的goroutine也会block住，只允许一个写执行，这是一个瓶颈，并且不可控。</p>
+<p>解决并发的问题有一个方法叫做 shard (分片), 每个分片一把锁。 很多大并发场景下为了减小并发的压力都会采用这种方法，大的场景比如数据库的分片，小的场景就如刚才的场景。 Java 8 之前的ConcurrentMap就是采用分片(segment)的方式减少竞争, Go也有一个类似思想设计的map库:concurrent-map。</p>
+<p>对于每一个缓存对象，根据它的key计算它的哈希值: hash(key) % N, N是分片数量。 理想情况下N个 goroutine 每次请求正好平均落在各自的分片上，这样就不会有竞争了，即使有多个goroutine落在同一个分片上，如果hash比较平均的话，单个shard的压力也会比较小。</p>
+<p>竞争小了有什么好处？ 延迟可以大大提高，因为等待获取锁的时间变小了。</p>
+<p>当然这里有一些要考虑的地方：</p>
+<p>1、N的选择</p>
+<p>既然分片可以很好的降低锁的竞争，那么N是不是越大越好呢？当然不是，如果N非常大，比如每个缓存对象一个锁，那么会带来很多额外的不必要的开销。可以选择一个不太大的值，在性能和花销上寻找一个平衡。</p>
+<p>另外, N是2的幂， 比如16、32、64。这样设计的好处就是计算余数可以使用位运算快速计算。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">BigCache</span><span class="p">)</span> <span class="nf">getShard</span><span class="p">(</span><span class="nx">hashedKey</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">(</span><span class="nx">shard</span> <span class="o">*</span><span class="nx">cacheShard</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">c</span><span class="p">.</span><span class="nx">shards</span><span class="p">[</span><span class="nx">hashedKey</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">shardMask</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>因为对于2的幂N，对于任意的x, 下面的公式成立:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">x</span> <span class="nx">mod</span> <span class="nx">N</span> <span class="p">=</span> <span class="p">(</span><span class="nx">x</span> <span class="o">&amp;</span> <span class="p">(</span><span class="nx">N</span> <span class="err">−</span> <span class="mi">1</span><span class="p">))</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>所以只需要使用一次按位AND (&amp;)就可以求得它的余数。</p>
+<p>2、选择hash算法</p>
+<p>以前已经有非常多的哈希算法，最近几年也出现了一些新的哈希算法，也被人使用Go语言来实现。</p>
+<p>很显然，一个优秀的哈希算法要保证:</p>
+<ul>
+<li>哈希值应该比较随机 (质量)</li>
+<li>哈希速度比较快 (速度)</li>
+<li>尽量不产生额外的内存分配,避免对垃圾回收产生压力 (耗费资源少)</li>
+</ul>
+<p>项目hash-bench对常用的几种Hash算法进行了比较。</p>
+<p>bigcache提供了一个默认的Hash的实现，采用fnv64a算法。这个算法的好处是采用位运算的方式在栈上进行运算，避免在堆上分配。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">fnv64a</span> <span class="kd">struct</span><span class="p">{}</span>
+<span class="kd">const</span> <span class="p">(</span>
+	<span class="c1">// offset64 FNVa offset basis. See https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function#FNV-1a_hash
+</span><span class="c1"></span>	<span class="nx">offset64</span> <span class="p">=</span> <span class="mi">14695981039346656037</span>
+	<span class="c1">// prime64 FNVa prime value. See https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function#FNV-1a_hash
+</span><span class="c1"></span>	<span class="nx">prime64</span> <span class="p">=</span> <span class="mi">1099511628211</span>
+<span class="p">)</span>
+<span class="c1">// Sum64 gets the string and returns its uint64 hash value.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">f</span> <span class="nx">fnv64a</span><span class="p">)</span> <span class="nf">Sum64</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">uint64</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">hash</span> <span class="kt">uint64</span> <span class="p">=</span> <span class="nx">offset64</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">key</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">hash</span> <span class="p">^=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">key</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+		<span class="nx">hash</span> <span class="o">*=</span> <span class="nx">prime64</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">hash</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h1 id="忽略内存开销">忽略内存开销</h1>
+<p>对于Go语言中的map, 垃圾回收器在 mark和scan阶段检查map中的每一个元素, 如果缓存中包含数百万的缓存对象，垃圾回收器对这些对象的无意义的检查导致不必要的时间开销。</p>
+<p>bigcache的作者做了测试。他们测试了简单的HTTP/JSON序列化(不会访问cache)。 在cache为空的时候1万的QPS的耗时大约10毫秒。当cache填满的时候， P99的请求都会超过1秒。监控显示堆中包含4千万的对象， GC过程中的 mark 和 scan 也需要4秒。</p>
+<p>我们可以很容易测试这种状况，比如下面的代码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+<span class="kn">import</span> <span class="s">&#34;time&#34;</span>
+<span class="kd">type</span> <span class="nx">Item</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">A</span> <span class="kt">string</span>
+	<span class="nx">B</span> <span class="kt">string</span>
+	<span class="nx">C</span> <span class="kt">string</span>
+	<span class="nx">D</span> <span class="kt">string</span>
+	<span class="nx">E</span> <span class="kt">string</span>
+	<span class="nx">F</span> <span class="kt">string</span>
+	<span class="nx">G</span> <span class="nx">G</span>
+<span class="p">}</span>
+<span class="kd">type</span> <span class="nx">G</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">H</span> <span class="kt">int</span>
+	<span class="nx">I</span> <span class="kt">int</span>
+	<span class="nx">K</span> <span class="kt">int</span>
+	<span class="nx">L</span> <span class="kt">int</span>
+	<span class="nx">M</span> <span class="kt">int</span>
+	<span class="nx">N</span> <span class="kt">int</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">m</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">int</span><span class="p">]</span><span class="o">*</span><span class="nx">Item</span><span class="p">,</span> <span class="mi">10</span><span class="o">*</span><span class="mi">1024</span><span class="o">*</span><span class="mi">1024</span><span class="p">)</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">1024</span><span class="o">*</span><span class="mi">1024</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">m</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">Item</span><span class="p">{}</span>
+	<span class="p">}</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nb">delete</span><span class="p">(</span><span class="nx">m</span><span class="p">,</span> <span class="nx">i</span><span class="p">)</span>
+		<span class="nx">m</span><span class="p">[</span><span class="mi">1024</span><span class="o">*</span><span class="mi">1024</span><span class="o">+</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">Item</span><span class="p">{}</span>
+		<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="mi">10</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>只有一个map对象，里面包含一百万的元素，每10毫秒删一个放一个。</p>
+<p>并发量相当小，并且单个的goroutine也没有竞争，但是由于元素的数量巨大，垃圾回收在mark/scan阶段需要花费上百毫秒进行标记和遍历。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200726153701.png" alt=""></p>
+<p>那么如何解决这个问题呢？</p>
+<p>我们知道垃圾回收器检查的是堆上的资源，如果不把对象放在堆上，不就解决这个问题了吗？还真有这样的项目offheap，它提供了定制的Malloc() 和 Free()，但是你的缓存需要基于这些方法定制。当然一些基于垃圾回收的编程语言为了减少垃圾回收的时间，都会提供相应的库，比如Java: ChronicleMap, Part 1: Go Off-Heap。堆外内存很容易产生内存泄漏。</p>
+<p>第二种方式是使用freecache。freecache通过减少指针的数量以零GC开销实现map。它将键和值保存在ringbuffer中，并使用索引查找对象。</p>
+<p>第三种优化方法是和Go 1.5中一个修复有关(#9477), 这个issue还是描述了包含大量对象的map的垃圾回收时的耗时问题，Go的开发者优化了垃圾回收时对于map的处理，如果map对象中的key和value不包含指针，那么垃圾回收器就会对它们进行优化：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-fallback" data-lang="fallback">runtime: do not scan maps when k/v do not contain pointers
+
+Currently we scan maps even if k/v does not contain pointers.
+This is required because overflow buckets are hanging off the main table.
+This change introduces a separate array that contains pointers to all
+overflow buckets and keeps them alive. Buckets themselves are marked
+as containing no pointers and are not scanned by GC (if k/v does not
+contain pointers).
+
+This brings maps in line with slices and chans -- GC does not scan
+their contents if elements do not contain pointers.
+
+Currently scanning of a map[int]int with 2e8 entries (~8GB heap)
+takes ~8 seconds. With this change scanning takes negligible time.
+
+https://go-review.googlesource.com/c/go/+/3288
+</code></pre></td></tr></table>
+</div>
+</div><p>所以如果我们的对象不包含指针，虽然也是分配在堆上，但是垃圾回收可以无视它们。</p>
+<p>如果我们把map定义成<code>map[int]int</code>，就会发现gc的耗时就会将下来了。</p>
+<p>遗憾的是，我们没办法要求用户的缓存对象只能包含int、bool这样的基本数据类型。</p>
+<p>具体做法为：</p>
+<ul>
+<li>
+<p>map的key为存入缓存中的key经过hash函数后得到的值。</p>
+</li>
+<li>
+<p>map的value比较值得一说，BigCache并不是直接把存入缓存的value作为map的value，而是将存入缓存的value序列化成二进制的<code>[]byte</code>，然后将序列化后的<code>[]byte</code>追加到一个全局的<code>[]byte</code>中（一个shard包含一个全局<code>[]byte</code>）。map中存储的是该序列化后数据在全局<code>[]byte</code>中的下标。</p>
+</li>
+</ul>
+<p>使用全局的<code>[]byte</code>是非常聪明的做法，因为这样做，只会给GC增加了一个额外对象，由于字节切片除了自身对象并不包含其他指针数据，所以GC对于整个对象的标记时间是O(1)的。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">cacheShard</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">hashmap</span>     <span class="kd">map</span><span class="p">[</span><span class="kt">uint64</span><span class="p">]</span><span class="kt">uint32</span>
+	<span class="nx">entries</span>     <span class="nx">queue</span><span class="p">.</span><span class="nx">BytesQueue</span>
+	<span class="nx">lock</span>        <span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>
+	<span class="nx">entryBuffer</span> <span class="p">[]</span><span class="kt">byte</span>
+	<span class="nx">onRemove</span>    <span class="nx">onRemoveCallback</span>
+	<span class="nx">isVerbose</span>    <span class="kt">bool</span>
+	<span class="nx">statsEnabled</span> <span class="kt">bool</span>
+	<span class="nx">logger</span>       <span class="nx">Logger</span>
+	<span class="nx">clock</span>        <span class="nx">clock</span>
+	<span class="nx">lifeWindow</span>   <span class="kt">uint64</span>
+	<span class="nx">hashmapStats</span> <span class="kd">map</span><span class="p">[</span><span class="kt">uint64</span><span class="p">]</span><span class="kt">uint32</span>
+	<span class="nx">stats</span>        <span class="nx">Stats</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">cacheShard</span><span class="p">)</span> <span class="nf">set</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">hashedKey</span> <span class="kt">uint64</span><span class="p">,</span> <span class="nx">entry</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">currentTimestamp</span> <span class="o">:=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">clock</span><span class="p">.</span><span class="nf">epoch</span><span class="p">())</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="c1">// 查找是否已经存在了对应的缓存对象，如果存在，将它的值置为空
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">previousIndex</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">hashmap</span><span class="p">[</span><span class="nx">hashedKey</span><span class="p">];</span> <span class="nx">previousIndex</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">previousEntry</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">entries</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="nx">previousIndex</span><span class="p">));</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nf">resetKeyFromEntry</span><span class="p">(</span><span class="nx">previousEntry</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+    <span class="c1">// 触发是否要移除最老的缓存对象
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">oldestEntry</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">entries</span><span class="p">.</span><span class="nf">Peek</span><span class="p">();</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nf">onEvict</span><span class="p">(</span><span class="nx">oldestEntry</span><span class="p">,</span> <span class="nx">currentTimestamp</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">removeOldestEntry</span><span class="p">)</span>
+	<span class="p">}</span>
+    <span class="c1">// 将对象放入到一个字节数组中，如果已有的字节数组(slice)可以放得下此对象，则重用，否则新建一个字节数组
+</span><span class="c1"></span>	<span class="nx">w</span> <span class="o">:=</span> <span class="nf">wrapEntry</span><span class="p">(</span><span class="nx">currentTimestamp</span><span class="p">,</span> <span class="nx">hashedKey</span><span class="p">,</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">entry</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">entryBuffer</span><span class="p">)</span>
+	<span class="k">for</span> <span class="p">{</span>
+        <span class="c1">// 尝试放入到字节队列中，成功则加入到map中
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">index</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">entries</span><span class="p">.</span><span class="nf">Push</span><span class="p">(</span><span class="nx">w</span><span class="p">);</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">hashmap</span><span class="p">[</span><span class="nx">hashedKey</span><span class="p">]</span> <span class="p">=</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">index</span><span class="p">)</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+			<span class="k">return</span> <span class="kc">nil</span>
+        <span class="p">}</span>
+        <span class="c1">// 如果空间不足，移除最老的元素
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nf">removeOldestEntry</span><span class="p">(</span><span class="nx">NoSpace</span><span class="p">)</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+			<span class="k">return</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;entry is bigger than max shard size&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">wrapEntry</span><span class="p">(</span><span class="nx">timestamp</span> <span class="kt">uint64</span><span class="p">,</span> <span class="nx">hash</span> <span class="kt">uint64</span><span class="p">,</span> <span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">entry</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">buffer</span> <span class="o">*</span><span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">[]</span><span class="kt">byte</span> <span class="p">{</span>
+	<span class="nx">keyLength</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+	<span class="nx">blobLength</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">entry</span><span class="p">)</span> <span class="o">+</span> <span class="nx">headersSizeInBytes</span> <span class="o">+</span> <span class="nx">keyLength</span>
+	<span class="k">if</span> <span class="nx">blobLength</span> <span class="p">&gt;</span> <span class="nb">len</span><span class="p">(</span><span class="o">*</span><span class="nx">buffer</span><span class="p">)</span> <span class="p">{</span>
+		<span class="o">*</span><span class="nx">buffer</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">blobLength</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">blob</span> <span class="o">:=</span> <span class="o">*</span><span class="nx">buffer</span>
+	<span class="nx">binary</span><span class="p">.</span><span class="nx">LittleEndian</span><span class="p">.</span><span class="nf">PutUint64</span><span class="p">(</span><span class="nx">blob</span><span class="p">,</span> <span class="nx">timestamp</span><span class="p">)</span>
+	<span class="nx">binary</span><span class="p">.</span><span class="nx">LittleEndian</span><span class="p">.</span><span class="nf">PutUint64</span><span class="p">(</span><span class="nx">blob</span><span class="p">[</span><span class="nx">timestampSizeInBytes</span><span class="p">:],</span> <span class="nx">hash</span><span class="p">)</span>
+	<span class="nx">binary</span><span class="p">.</span><span class="nx">LittleEndian</span><span class="p">.</span><span class="nf">PutUint16</span><span class="p">(</span><span class="nx">blob</span><span class="p">[</span><span class="nx">timestampSizeInBytes</span><span class="o">+</span><span class="nx">hashSizeInBytes</span><span class="p">:],</span> <span class="nb">uint16</span><span class="p">(</span><span class="nx">keyLength</span><span class="p">))</span>
+	<span class="nb">copy</span><span class="p">(</span><span class="nx">blob</span><span class="p">[</span><span class="nx">headersSizeInBytes</span><span class="p">:],</span> <span class="nx">key</span><span class="p">)</span>
+	<span class="nb">copy</span><span class="p">(</span><span class="nx">blob</span><span class="p">[</span><span class="nx">headersSizeInBytes</span><span class="o">+</span><span class="nx">keyLength</span><span class="p">:],</span> <span class="nx">entry</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">blob</span><span class="p">[:</span><span class="nx">blobLength</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>queue.BytesQueue是一个字节数组，可以做到按需分配。当加入一个[]byte时，它会把数据copy到尾部。</p>
+<p>值得注意的是删除缓存元素的时候bigcache只是把它从的索引从<code>map[uint64]uint32</code>中删除了，并把它在queue.BytesQueue队列中的长度置为0。那么删除操作会不会在queue.BytesQueue中造成很多的“虫洞”？从它的实现上来看，会, 而且这些&quot;虫洞&quot;不会被整理，也不会被移除。因为它的底层是使用一个字节数组实现的，&ldquo;虫洞&quot;的移除是一个耗时的操作，会导致锁的持有时间过长。 那么寻找合适的&quot;虫洞&quot;重用呢？虽然遍历的方法寻找&quot;虫洞&quot;也是一个比较耗时的操作，我觉得这里有优化的空间。</p>
+<p>bigcache只能等待清理最老的元素的时候把这些&quot;虫洞&quot;删除掉。</p>
+<h1 id="剔除">剔除</h1>
+<p>从缓存中移除元素的最简单方法是将其与 FIFO 队列一起使用。将记录添加到高速缓存后，将执行两个附加操作：</p>
+<ul>
+<li>包含 key 和创建时间戳的记录被添加到队列的末尾。</li>
+<li>从队列中读取最早的记录。将其创建时间戳与当前时间进行比较。如果晚于收回时间，则将队列中的元素及其在缓存中的对应记录一起删除。</li>
+</ul>
+<p>由于在写入缓存期间已获取了锁，因此顺带执行移除操作。</p>
+<p>对于 bigcache来说，剔除还有意义吗？或许有。如果我们不想使用某个key的缓存对象，我们可以把它删除。</p>
+<p>首先，在增加一个元素之前，会检查最老的元素要不要删除。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="k">if</span> <span class="nx">oldestEntry</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">entries</span><span class="p">.</span><span class="nf">Peek</span><span class="p">();</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nf">onEvict</span><span class="p">(</span><span class="nx">oldestEntry</span><span class="p">,</span> <span class="nx">currentTimestamp</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">removeOldestEntry</span><span class="p">)</span>
+   <span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>其次，在添加一个元素失败后，会清理空间删除最老的元素。</p>
+<p>同时， 还会专门有一个定时的清理goroutine, 负责移除过期数据。</p>
+<p>另外需要注意的是缓存对象没有读取的时候刷新过期时间的功能，所以放入的缓存对象最终免不了过期的命运。</p>
+<p>另外所有的缓存对象的lifewindow都是一样的，比如30分钟、两小时。</p>
+<p>所以，如果你真的使用bigcache, 还是得需要注意它的这些设计，看看这些设计是否和你的场景相吻合。</p>
+<h1 id="fastcache">fastcache</h1>
+<p>bigcache在特定时候还是有问题，就是当queue.BytesQueue的容量不够的时候，它会进行扩展，扩展是一个很重的操作，它会复制原来的数据到新的字节数组上。</p>
+<p>fasthttp 的作者采用类似bigcache的思想实现了fastcache，他使用<code>chunks [][]byte</code>替换<code>queue.BytesQueue</code>，chunk是一个 ring buffer, 每个chunk 64KB。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">bucket</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">mu</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>
+	<span class="c1">// chunks is a ring buffer with encoded (k, v) pairs.
+</span><span class="c1"></span>	<span class="c1">// It consists of 64KB chunks.
+</span><span class="c1"></span>	<span class="nx">chunks</span> <span class="p">[][]</span><span class="kt">byte</span>
+	<span class="c1">// m maps hash(k) to idx of (k, v) pair in chunks.
+</span><span class="c1"></span>	<span class="nx">m</span> <span class="kd">map</span><span class="p">[</span><span class="kt">uint64</span><span class="p">]</span><span class="kt">uint64</span>
+	<span class="c1">// idx points to chunks for writing the next (k, v) pair.
+</span><span class="c1"></span>	<span class="nx">idx</span> <span class="kt">uint64</span>
+	<span class="c1">// gen is the generation of chunks.
+</span><span class="c1"></span>	<span class="nx">gen</span> <span class="kt">uint64</span>
+	<span class="nx">getCalls</span>    <span class="kt">uint64</span>
+	<span class="nx">setCalls</span>    <span class="kt">uint64</span>
+	<span class="nx">misses</span>      <span class="kt">uint64</span>
+	<span class="nx">collisions</span>  <span class="kt">uint64</span>
+	<span class="nx">corruptions</span> <span class="kt">uint64</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>虽然<code>chunks [][]byte</code>也包含很多的chunk, 但是由于chunk的size比较大，所以可以大大缩小垃圾回收需要mark/scan的对象的数量。带来的好处就是扩容的时候只需要增加更多的chunk即可。</p>
+<p>删除还是一样，只是从map中删除，不会从chunks中删除。</p>
+<p>fastcache没有过期的概念，所以缓存对象不会被过期剔除.</p>
+<p>参考:<br>
+<a href="https://colobu.com/2019/11/18/how-is-the-bigcache-is-fast/">妙到颠毫: bigcache优化技巧</a><br>
+<a href="https://pengrl.com/p/35302/">[译] Go开源项目BigCache如何加速并发访问以及避免高额的GC开销</a></p>
+
     </div>
 
     <div class="post-copyright">
@@ -201,12 +624,16 @@
 <footer class="post-footer">
       <div class="post-tags">
           <a href="/tags/go/">Go</a>
-          <a href="/tags/bigcache/">bigcache</a>
+          <a href="/tags/cache/">cache</a>
           </div>
       <nav class="post-nav">
-        
-        <a class="next" href="/post/go%E4%B8%AD%E7%9A%84%E7%BC%93%E5%AD%98%E7%8E%B0%E7%8A%B6/">
-            <span class="next-text nav-default">Go中的缓存现状</span>
+        <a class="prev" href="/post/%E7%BC%93%E5%AD%98%E9%A9%B1%E9%80%90%E7%AE%97%E6%B3%95w-tinylfu/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">缓存驱逐算法:W-TinyLFU</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/go%E4%B8%AD%E5%A6%82%E4%BD%95%E5%AE%9E%E7%8E%B0%E9%AB%98%E6%80%A7%E8%83%BD%E6%9C%AC%E5%9C%B0%E7%BC%93%E5%AD%98/">
+            <span class="next-text nav-default">Go中如何实现高性能本地缓存</span>
             <span class="next-text nav-mobile">下一篇</span>
             <i class="iconfont icon-right"></i>
           </a>

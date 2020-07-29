@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Go中如何实现高性能本地缓存 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="前言 在大部分业务系统中，都会使用诸如 Redis、Memcached 等远程缓存，一方面可以避免自身进程内存占用过大而导致的 OOM 或 GC 问题，另一方面" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
+
+
+<link rel="canonical" href="/post/go%E4%B8%AD%E5%A6%82%E4%BD%95%E5%AE%9E%E7%8E%B0%E9%AB%98%E6%80%A7%E8%83%BD%E6%9C%AC%E5%9C%B0%E7%BC%93%E5%AD%98/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Go中如何实现高性能本地缓存" />
+<meta property="og:description" content="前言 在大部分业务系统中，都会使用诸如 Redis、Memcached 等远程缓存，一方面可以避免自身进程内存占用过大而导致的 OOM 或 GC 问题，另一方面" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/go%E4%B8%AD%E5%A6%82%E4%BD%95%E5%AE%9E%E7%8E%B0%E9%AB%98%E6%80%A7%E8%83%BD%E6%9C%AC%E5%9C%B0%E7%BC%93%E5%AD%98/" />
+<meta property="article:published_time" content="2020-07-24T18:29:28+00:00" />
+<meta property="article:modified_time" content="2020-07-24T18:29:28+00:00" />
+<meta itemprop="name" content="Go中如何实现高性能本地缓存">
+<meta itemprop="description" content="前言 在大部分业务系统中，都会使用诸如 Redis、Memcached 等远程缓存，一方面可以避免自身进程内存占用过大而导致的 OOM 或 GC 问题，另一方面">
+<meta itemprop="datePublished" content="2020-07-24T18:29:28&#43;00:00" />
+<meta itemprop="dateModified" content="2020-07-24T18:29:28&#43;00:00" />
+<meta itemprop="wordCount" content="6204">
+
+
+
+<meta itemprop="keywords" content="cache,GO," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Go中如何实现高性能本地缓存"/>
+<meta name="twitter:description" content="前言 在大部分业务系统中，都会使用诸如 Redis、Memcached 等远程缓存，一方面可以避免自身进程内存占用过大而导致的 OOM 或 GC 问题，另一方面"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Go中如何实现高性能本地缓存</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2020-07-24 </span>
+        <div class="post-category">
+            <a href="/categories/cache/"> cache </a>
+            </div>
+          <span class="more-meta"> 约 6204 字 </span>
+          <span class="more-meta"> 预计阅读 13 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#go-map-与-syncmutex-的结合使用">Go map 与 sync.Mutex 的结合使用</a></li>
+    <li><a href="#go-maps-与-分段锁">Go maps 与 分段锁</a></li>
+    <li><a href="#使用-syncmap-实现无锁">使用 sync.Map 实现无锁</a></li>
+    <li><a href="#lru-缓存">LRU 缓存</a></li>
+    <li><a href="#分片-lru-缓存">分片 LRU 缓存</a></li>
+  </ul>
+
+  <ul>
+    <li><a href="#环形缓冲ringbuffer">环形缓冲：RingBuffer</a></li>
+    <li><a href="#线程安全支持syncpool">线程安全支持：sync.Pool</a></li>
+    <li><a href="#设计">设计</a></li>
+  </ul>
+
+  <ul>
+    <li><a href="#驱逐策略">驱逐策略</a></li>
+    <li><a href="#频率计数器count-min-sketch">频率计数器：Count-Min Sketch</a></li>
+  </ul>
+
+  <ul>
+    <li><a href="#bigcache">BigCache</a></li>
+    <li><a href="#freecache">FreeCache</a></li>
+    <li><a href="#groupcache">GroupCache</a></li>
+    <li><a href="#性能对比">性能对比</a>
+      <ul>
+        <li><a href="#只读情况">只读情况</a></li>
+        <li><a href="#只写情况">只写情况</a></li>
+        <li><a href="#读写情况-25-写75-读-">读写情况 (25% 写，75% 读 )</a></li>
+        <li><a href="#命中率比较">命中率比较</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h1 id="前言">前言</h1>
+<p>在大部分业务系统中，都会使用诸如 Redis、Memcached 等远程缓存，一方面可以避免自身进程内存占用过大而导致的 OOM 或 GC 问题，另一方面也可以实现多个进程共享同一份一致的缓存数据。但对于某些底层服务（例如数据库服务），远程缓存的网络延迟是不可接受的，这就势必需要引入本地内存缓存。</p>
+<h1 id="缓存框架的必备需求">缓存框架的必备需求</h1>
+<p>本地内存缓存可被视作一个基于本地内存的 「KeyValue 数据库」。但相比较于传统数据库而言，它对一致性的要求十分宽松：</p>
+<ol>
+<li>对于更新与删除的操作，需要保证强一致性</li>
+<li>对于插入操作可以容忍少量丢失</li>
+<li>对于读取操作可以容忍少量 Miss</li>
+</ol>
+<p>与磁盘数据库的另一个不同之处在于，磁盘数据库的设计有一个前提假设是磁盘是可以随需要而不断扩容的，倘若一个磁盘数据库因磁盘占满而崩溃主要责任是在使用方。而内存缓存则没有这么宽容的假设可以建立，它必须考虑到内存是昂贵且有限的这一事实。</p>
+<p>除此之外，由于本地内存缓存处于业务进程当中，所以其需要考虑更多业务向的问题，比如：</p>
+<ol>
+<li>由于自身大量老生代的内存占用，是否会对所处进程产生 GC 问题。</li>
+<li>当多线程场景下，如何同时解决线程安全、数据竞争、高吞吐等问题。</li>
+<li>需要能够适应一些非随机的访问统计规律，例如 Zipf。</li>
+</ol>
+<p>综上所述，我们可以归纳出对一个优秀的本地内存缓存系统的要求：</p>
+<ol>
+<li>并发线程安全</li>
+<li>内存限制 ( 限制最大的可使用空间 )</li>
+<li>在多核和多 Goroutines 之间更好的扩展</li>
+<li>在非随机key的情况下，很好地扩展 (eg. Zipf)</li>
+<li>更高的缓存命中率</li>
+</ol>
+<h1 id="本地缓存的组成">本地缓存的组成</h1>
+<p>在实现一个完整的缓存系统前，我们需要将目标一步步拆解。</p>
+<p>首先为了实现缓存逻辑，我们必须有一个类 Map 的 KeyValue 数据结构，同时它必须是线程安全的。为了支持内存限制，我们必须要能够驱逐一些 key，所以需要实现一个驱逐器。为了实现驱逐的同时维持高命中率，我们还需要告诉驱逐器每个 key 的访问记录，让它能够从中分析出哪些 key 可以被驱逐。综上分析，我们可以整理出一个大概的 Roadmap：</p>
+<ol>
+<li>实现一个线程安全的 Map 数据结构：存储缓存内容</li>
+<li>实现一个访问记录队列：存储访问记录</li>
+<li>实现一个驱逐器：管理缓存内容</li>
+</ol>
+<h1 id="线程安全的-map">线程安全的 Map</h1>
+<h2 id="go-map-与-syncmutex-的结合使用">Go map 与 sync.Mutex 的结合使用</h2>
+<p>直接用 Go 的 map 来做缓存，这种方法当然简单实在，加上 sync.Mutex 可以避免并发的问题。</p>
+<p>但首先它不会限制内存的使用，其次，goroutine 一旦多了，所有 goroutine 都在等锁释放，性能下降了。</p>
+<p>map 存储 keys 也是有限制的，当 map 中 keys 数量超过千万级，有可能造成性能瓶颈。是当 map 中存在大量 keys 时，GC 扫描 map 产生的停顿将不能忽略。</p>
+<p>好消息是 2015 年 Go 开发者已经对 map 中无指针的情况进行了优化：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200726171700.png" alt=""></p>
+<p>我们参考其中的代码，写个GC 测试程序验证下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+  <span class="s">&#34;fmt&#34;</span>
+  <span class="s">&#34;os&#34;</span>
+  <span class="s">&#34;runtime&#34;</span>
+  <span class="s">&#34;time&#34;</span>
+<span class="p">)</span>
+
+<span class="c1">// Results of this program on my machine:
+</span><span class="c1">//
+</span><span class="c1">// for t in 1 2 3 4 5; do go run maps.go $t; done
+</span><span class="c1">//
+</span><span class="c1">// Higher parallelism does help, to some extent:
+</span><span class="c1">//
+</span><span class="c1">// for t in 1 2 3 4 5; do GOMAXPROCS=8 go run maps.go $t; done
+</span><span class="c1">//
+</span><span class="c1">// Output(go 1.14):
+</span><span class="c1">// With map[int32]*int32, GC took 456.159324ms
+</span><span class="c1">// With map[int32]int32, GC took 10.644116ms
+</span><span class="c1">// With map shards ([]map[int32]*int32), GC took 383.296446ms
+</span><span class="c1">// With map shards ([]map[int32]int32), GC took 1.023655ms
+</span><span class="c1">// With a plain slice ([]main.t), GC took 172.776µs
+</span><span class="c1"></span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+  <span class="kd">const</span> <span class="nx">N</span> <span class="p">=</span> <span class="mf">5e7</span> <span class="c1">// 5000w
+</span><span class="c1"></span>
+  <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">2</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;usage: %s [1 2 3 4]\n(number selects the test)\n&#34;</span><span class="p">,</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="k">return</span>
+  <span class="p">}</span>
+
+  <span class="k">switch</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="p">{</span>
+  <span class="k">case</span> <span class="s">&#34;1&#34;</span><span class="p">:</span>
+    <span class="c1">// Big map with a pointer in the value
+</span><span class="c1"></span>    <span class="nx">m</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">int32</span><span class="p">]</span><span class="o">*</span><span class="kt">int32</span><span class="p">)</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+      <span class="nx">n</span> <span class="o">:=</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span>
+      <span class="nx">m</span><span class="p">[</span><span class="nx">n</span><span class="p">]</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">n</span>
+    <span class="p">}</span>
+    <span class="nx">runtime</span><span class="p">.</span><span class="nf">GC</span><span class="p">()</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;With %T, GC took %s\n&#34;</span><span class="p">,</span> <span class="nx">m</span><span class="p">,</span> <span class="nf">timeGC</span><span class="p">())</span>
+    <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="c1">// Preserve m until here, hopefully
+</span><span class="c1"></span>  <span class="k">case</span> <span class="s">&#34;2&#34;</span><span class="p">:</span>
+    <span class="c1">// Big map, no pointer in the value
+</span><span class="c1"></span>    <span class="nx">m</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">int32</span><span class="p">]</span><span class="kt">int32</span><span class="p">)</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+      <span class="nx">n</span> <span class="o">:=</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span>
+      <span class="nx">m</span><span class="p">[</span><span class="nx">n</span><span class="p">]</span> <span class="p">=</span> <span class="nx">n</span>
+    <span class="p">}</span>
+    <span class="nx">runtime</span><span class="p">.</span><span class="nf">GC</span><span class="p">()</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;With %T, GC took %s\n&#34;</span><span class="p">,</span> <span class="nx">m</span><span class="p">,</span> <span class="nf">timeGC</span><span class="p">())</span>
+    <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+  <span class="k">case</span> <span class="s">&#34;3&#34;</span><span class="p">:</span>
+    <span class="c1">// Split the map into 100 shards
+</span><span class="c1"></span>    <span class="nx">shards</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">map</span><span class="p">[</span><span class="kt">int32</span><span class="p">]</span><span class="o">*</span><span class="kt">int32</span><span class="p">,</span> <span class="mi">100</span><span class="p">)</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">shards</span> <span class="p">{</span>
+      <span class="nx">shards</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">int32</span><span class="p">]</span><span class="o">*</span><span class="kt">int32</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+      <span class="nx">n</span> <span class="o">:=</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span>
+      <span class="nx">shards</span><span class="p">[</span><span class="nx">i</span><span class="o">%</span><span class="mi">100</span><span class="p">][</span><span class="nx">n</span><span class="p">]</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">n</span>
+    <span class="p">}</span>
+    <span class="nx">runtime</span><span class="p">.</span><span class="nf">GC</span><span class="p">()</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;With map shards (%T), GC took %s\n&#34;</span><span class="p">,</span> <span class="nx">shards</span><span class="p">,</span> <span class="nf">timeGC</span><span class="p">())</span>
+    <span class="nx">_</span> <span class="p">=</span> <span class="nx">shards</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+  <span class="k">case</span> <span class="s">&#34;4&#34;</span><span class="p">:</span>
+    <span class="c1">// Split the map into 100 shards
+</span><span class="c1"></span>    <span class="nx">shards</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">map</span><span class="p">[</span><span class="kt">int32</span><span class="p">]</span><span class="kt">int32</span><span class="p">,</span> <span class="mi">100</span><span class="p">)</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">shards</span> <span class="p">{</span>
+      <span class="nx">shards</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">int32</span><span class="p">]</span><span class="kt">int32</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+      <span class="nx">n</span> <span class="o">:=</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span>
+      <span class="nx">shards</span><span class="p">[</span><span class="nx">i</span><span class="o">%</span><span class="mi">100</span><span class="p">][</span><span class="nx">n</span><span class="p">]</span> <span class="p">=</span> <span class="nx">n</span>
+    <span class="p">}</span>
+    <span class="nx">runtime</span><span class="p">.</span><span class="nf">GC</span><span class="p">()</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;With map shards (%T), GC took %s\n&#34;</span><span class="p">,</span> <span class="nx">shards</span><span class="p">,</span> <span class="nf">timeGC</span><span class="p">())</span>
+    <span class="nx">_</span> <span class="p">=</span> <span class="nx">shards</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+  <span class="k">case</span> <span class="s">&#34;5&#34;</span><span class="p">:</span>
+    <span class="c1">// A slice, just for comparison to show that
+</span><span class="c1"></span>    <span class="c1">// merely holding onto millions of int32s is fine
+</span><span class="c1"></span>    <span class="c1">// if they&#39;re in a slice.
+</span><span class="c1"></span>    <span class="kd">type</span> <span class="nx">t</span> <span class="kd">struct</span> <span class="p">{</span>
+      <span class="nx">p</span><span class="p">,</span> <span class="nx">q</span> <span class="kt">int32</span>
+    <span class="p">}</span>
+    <span class="kd">var</span> <span class="nx">s</span> <span class="p">[]</span><span class="nx">t</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+      <span class="nx">n</span> <span class="o">:=</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span>
+      <span class="nx">s</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">s</span><span class="p">,</span> <span class="nx">t</span><span class="p">{</span><span class="nx">n</span><span class="p">,</span> <span class="nx">n</span><span class="p">})</span>
+    <span class="p">}</span>
+    <span class="nx">runtime</span><span class="p">.</span><span class="nf">GC</span><span class="p">()</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;With a plain slice (%T), GC took %s\n&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">,</span> <span class="nf">timeGC</span><span class="p">())</span>
+    <span class="nx">_</span> <span class="p">=</span> <span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">timeGC</span><span class="p">()</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span> <span class="p">{</span>
+  <span class="nx">start</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">()</span>
+  <span class="nx">runtime</span><span class="p">.</span><span class="nf">GC</span><span class="p">()</span>
+  <span class="k">return</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Since</span><span class="p">(</span><span class="nx">start</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>代码中一共测试了 5 种情况，写入5000w的 keys 后，主动触发 2 次 GC 来测量耗时：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-fallback" data-lang="fallback">[1] With map[int32]*int32, GC took 456.159324ms
+[2] With map[int32]int32, GC took 10.644116ms
+[3] With map shards ([]map[int32]*int32), GC took 383.296446ms
+[4] With map shards ([]map[int32]int32), GC took 1.023655ms
+[5] With a plain slice ([]main.t), GC took 172.776µs
+</code></pre></td></tr></table>
+</div>
+</div><p>可以看到，当 map 中没有指针时，扫描停顿时间大约在 10ms 左右，而包含指针int32时则会扩大 45 倍。</p>
+<p>不满足 上面的 2,3,4 条</p>
+<h2 id="go-maps-与-分段锁">Go maps 与 分段锁</h2>
+<p>这个方式的原理与上面的一样，但是锁的粒度更小:假设基础数组包含1024个元素分段锁实际上将其转换为包含64个元素的16个不同子数组，例如{0，63}，{64，127}等。每个子数组都有自己的锁，因此修改{0，63}子数组不会影响{64，127}子数组,一个线程可以写入第一个子数组，而另一个线程写入第二个子数组。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">SafeMap</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">locks</span> <span class="p">[]</span><span class="o">*</span><span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
+    <span class="nx">store</span> <span class="p">[]</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">NewSafeMap</span><span class="p">()</span> <span class="nx">SafeMap</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nx">SafeMap</span><span class="p">{</span>
+        <span class="nx">locks</span><span class="p">:</span> <span class="p">[]</span><span class="o">*</span><span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span><span class="p">{{},</span> <span class="p">{},</span> <span class="p">{}},</span>
+        <span class="nx">store</span><span class="p">:</span> <span class="p">[]</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">{{},</span> <span class="p">{},</span> <span class="p">{}},</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">hash</span><span class="p">(</span><span class="nx">k</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
+    <span class="nx">h</span> <span class="o">:=</span> <span class="nx">fnv</span><span class="p">.</span><span class="nf">New32a</span><span class="p">()</span>
+    <span class="nx">h</span><span class="p">.</span><span class="nf">Write</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">k</span><span class="p">))</span>
+    <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="nx">h</span><span class="p">.</span><span class="nf">Sum32</span><span class="p">())</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">SafeMap</span><span class="p">)</span> <span class="nf">GetLock</span><span class="p">(</span><span class="nx">k</span> <span class="kt">string</span><span class="p">)</span> <span class="o">*</span><span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span> <span class="p">{</span>
+    <span class="nx">idx</span> <span class="o">:=</span> <span class="nf">hash</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span> <span class="o">%</span> <span class="nb">len</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">locks</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">m</span><span class="p">.</span><span class="nx">locks</span><span class="p">[</span><span class="nx">idx</span><span class="p">]</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">SafeMap</span><span class="p">)</span> <span class="nf">GetStore</span><span class="p">(</span><span class="nx">k</span> <span class="kt">string</span><span class="p">)</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span> <span class="p">{</span>
+    <span class="nx">idx</span> <span class="o">:=</span> <span class="nf">hash</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span> <span class="o">%</span> <span class="nb">len</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">locks</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">m</span><span class="p">.</span><span class="nx">store</span><span class="p">[</span><span class="nx">idx</span><span class="p">]</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">SafeMap</span><span class="p">)</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">k</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">string</span> <span class="p">{</span>
+    <span class="nx">lock</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetLock</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span>
+    <span class="nx">lock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="k">defer</span> <span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetStore</span><span class="p">(</span><span class="nx">k</span><span class="p">)[</span><span class="nx">k</span><span class="p">]</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">SafeMap</span><span class="p">)</span> <span class="nf">Set</span><span class="p">(</span><span class="nx">k</span><span class="p">,</span> <span class="nx">v</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">lock</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetLock</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span>
+    <span class="nx">lock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="k">defer</span> <span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+    <span class="nx">m</span><span class="p">.</span><span class="nf">GetStore</span><span class="p">(</span><span class="nx">k</span><span class="p">)[</span><span class="nx">k</span><span class="p">]</span> <span class="p">=</span> <span class="nx">v</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>一个很自然的想法是将 key 进行分桶，从而分散对锁的竞争。这种方法类似于将「数据库锁」打散成「表锁」。到这一步，我们基本已经完成了一个最简单的高并发缓存。</p>
+<p>很多程序员错误的认为，降低锁的粒度可以很好地避免竞争，特别是在分片数超过程序的线程数时 (GOMAXPROCS)</p>
+<p>在我们尝试编写一个简单的内存限制缓存的时候，我们也是这样做的。为了保证内存可以在释放之后还给操作系统。我们定期扫描我们的分片，然后释放掉创建的 map，方便以后被再次使用。这种粗浅的方式却很有效，并且性能优于 LRU( 后面会解释 ), 但是也有很多不足。</p>
+<ol>
+<li>Go 请求内存很容易，但释放给操作系统却很难。当碎片被清空的同时，goroutines 去访问 key 的时候，会开始分配内存空间，此时之前的内存空间并没有被完全释放，这导致内存的激增，甚至会触发 OOM 错误。</li>
+<li>我们没有意识到，访问的模式还受 Zipf 定律的束缚。最常访问的几个 key 仍然存在几个锁，因此产生 Goroutines 的竞争问题。这种方式不满足多核之间的扩展的需求。</li>
+</ol>
+<p>考虑到缓存系统读远大于写，我们可以对上述 Map 的互斥锁 Mutex 改为 RWMutex ，从而使得读时并不互斥，改善读性能。</p>
+<p>不满足 上面的 2,4 条</p>
+<h2 id="使用-syncmap-实现无锁">使用 sync.Map 实现无锁</h2>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200724172834.png" alt=""></p>
+<p>准确来说，sync.Map 并不是完全的「无锁」，只是一个在绝大部分读场景是无锁的线程安全 Map。具体原理可以参见相关文档。但由于其底层实现并未采取分段锁的方法，所以写的时候会有一个 dirty 上的全局锁，进而会影响到高并发写时的性能。所以对于不在乎写性能同时写也相对不密集的时候，该数据结构是非常理想的选择。</p>
+<h2 id="lru-缓存">LRU 缓存</h2>
+<p>groupcache 中的 lru 实现非常经典：一条限制了长度的链表记录了对应的 key 的新旧情况，然后一个 map 记录了对应的 key-value 对。通过限制链表长度来限制内存使用存在不足。当然还对这个 lru 做了二次开发——加了锁。然后发现，这种双链表的 lru 实现每次读都要写一次链表（更新记录的新旧情况）带来了大量的 contention,同样地会引入竞争的问题。</p>
+<p>这个缓存的大小同样也依赖于缓存的条数，而不是他们消耗的内存量。在 Go 的堆上面计算复杂的数据结构所消耗的内存大小是非常麻烦的，几乎不可能实现。我们尝试了很多方式，但是都无法奏效。缓存被放入之后，大小也在不停地变化 ( 我们计划之后避免这种情况 )</p>
+<p>我们无法预估缓存会引起多少的竞争。在使用了近一年的情况下，我们意识到缓存上面的竞争有多严重，删除掉这块之后，我们的缓存效率提高了 10 倍。</p>
+<p>在这块的实现上，每次读取缓存会更新链表中的相对位置。因此每个访问都在等待一个互斥锁。此外 LRU 的速度比 Map 要慢，而且在反复的进行指针的释放，维护一个 map 和一个双向链表。尽管我们在惰性加载上面不断地优化，但依然遭受到严重竞争的影响。</p>
+<p>不满足 3,4</p>
+<h2 id="分片-lru-缓存">分片 LRU 缓存</h2>
+<p>我们没有实际的去尝试，但是依据我们的经验，这只会是一个暂时的解决方法，而且并不能很好地扩展。( 不过在下面的测试里面，我们依然实现了这个解决方案 )</p>
+<p>不满足 4</p>
+<h1 id="访问记录队列">访问记录队列</h1>
+<p>对于访问记录的读写，同样牵涉到多线程同时操作同一个内存地址的情况。但我们对其一致性会比缓存内容存储更低，尤其是在高并发数据的假设下，少量的数据丢失并不会影响最终判断结果。</p>
+<p>与缓存内容存储的场景不同的是，对于访问记录，每次 Get/Set 的时候都会需要进行一次写入操作，所以它的写速度要求远高于前面的缓存内存存储。更为关键的是，即便是在如此高密度的写情况下，它也同样需要保证线程安全。</p>
+<p>虽然上述要求看似十分复杂，我们依然可以试着通过几个方面的分析，来拆解这个问题。</p>
+<p>在性能方面，我们需要保证该数据结构写入时是无锁的，因为一旦有锁，前面做的降低锁颗粒度优化都会被这个有锁的结构给拖累。</p>
+<p>在写入方式方面，由于我们可以接受少量数据丢失，并且我们没有非常实时的要求，所以我们可以接受异步的写入。</p>
+<p>在存储内容方面，我们只需要存储 Key 数据。</p>
+<p>根据上述分析，我们不难发现我们需要的是一个基于内存的线程安全的无锁 Lossy 队列。但似乎并没有现成的这种数据结构实现，所以我们可以退一步将这个问题变成，先实现一个 Lossy 队列，再在此基础上，实现线程安全的功能。</p>
+<h2 id="环形缓冲ringbuffer">环形缓冲：RingBuffer</h2>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200724174504.png" alt=""></p>
+<p>RingBuffer 是一个非常简单的环形缓冲队列，由一个数组，加上一个读指针和写指针构成。读指针永远只能读到写指针前的数据。</p>
+<h2 id="线程安全支持syncpool">线程安全支持：sync.Pool</h2>
+<p>Golang 自带的 sync.Pool 可以非常好地和 Ring Buffer 协同工作，实现在近乎无锁的情况下，构造出一个线程安全的高吞吐缓冲队列。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200724174539.png" alt=""></p>
+<p>sync.Pool 会在每个线程中维护一个 private 的 Pool（无锁），以及一个可以被其他线程 shared的 Pool（有锁），细节原理可以参考相关文档。在高并发场景下，它基本能够保证每个线程都能够获得一个线程私有的 RingBuffer 对象，从而不需要对其加锁。但 sync.Pool 有一个缺点是在 GC 时会被释放掉，此时会丢失缓冲区内的数据。不过由于我们的前提假设是高并发场景，故而可以推导出数据的丢失量较之于全局是微乎其微的。然而在低并发场景下，这种做法有可能导致缓冲区一直被 GC 清理掉而丧失大部分统计数据。</p>
+<p>这里对 RingBuffer 做了一些简单的改动，当缓冲区写满后，会将数据交给驱逐器统计，然后清空缓冲区。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;sync&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">type</span> <span class="nx">ringStripe</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">store</span>    <span class="p">[]</span><span class="kt">uint64</span>
+    <span class="nx">capacity</span> <span class="kt">uint64</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">newRingStripe</span><span class="p">(</span><span class="nx">capacity</span> <span class="kt">uint64</span><span class="p">)</span> <span class="o">*</span><span class="nx">ringStripe</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">ringStripe</span><span class="p">{</span>
+        <span class="nx">store</span><span class="p">:</span>    <span class="nb">make</span><span class="p">([]</span><span class="kt">uint64</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">capacity</span><span class="p">),</span>
+        <span class="nx">capacity</span><span class="p">:</span> <span class="nx">capacity</span><span class="p">,</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">ringStripe</span><span class="p">)</span> <span class="nf">PushOrReturn</span><span class="p">(</span><span class="nx">item</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">[]</span><span class="kt">uint64</span> <span class="p">{</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nx">store</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">store</span><span class="p">,</span> <span class="nx">item</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">uint64</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">store</span><span class="p">))</span> <span class="o">&gt;=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">capacity</span> <span class="p">{</span>
+        <span class="nx">ret</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">store</span><span class="p">[:]</span>
+        <span class="nx">s</span><span class="p">.</span><span class="nx">store</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">uint64</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">capacity</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nx">ret</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">ringBuffer</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">stripes</span> <span class="p">[]</span><span class="o">*</span><span class="nx">ringStripe</span>
+    <span class="nx">pool</span>    <span class="o">*</span><span class="nx">sync</span><span class="p">.</span><span class="nx">Pool</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">newRingBuffer</span><span class="p">(</span><span class="nx">capacity</span> <span class="kt">uint64</span><span class="p">)</span> <span class="o">*</span><span class="nx">ringBuffer</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">ringBuffer</span><span class="p">{</span>
+        <span class="nx">pool</span><span class="p">:</span> <span class="o">&amp;</span><span class="nx">sync</span><span class="p">.</span><span class="nx">Pool</span><span class="p">{</span>
+            <span class="nx">New</span><span class="p">:</span> <span class="kd">func</span><span class="p">()</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="nf">newRingStripe</span><span class="p">(</span><span class="nx">capacity</span><span class="p">)</span>
+            <span class="p">},</span>
+        <span class="p">},</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">ringBuffer</span><span class="p">)</span> <span class="nf">PushOrReturn</span><span class="p">(</span><span class="nx">item</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">[]</span><span class="kt">uint64</span> <span class="p">{</span>
+    <span class="nx">stripe</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nf">Get</span><span class="p">().(</span><span class="o">*</span><span class="nx">ringStripe</span><span class="p">)</span>
+    <span class="k">defer</span> <span class="nx">b</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nf">Put</span><span class="p">(</span><span class="nx">stripe</span><span class="p">)</span>
+	
+    <span class="nx">got</span> <span class="o">:=</span> <span class="nx">stripe</span><span class="p">.</span><span class="nf">PushOrReturn</span><span class="p">(</span><span class="nx">item</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">got</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="设计">设计</h2>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200724175004.png" alt=""></p>
+<h1 id="驱逐器">驱逐器</h1>
+<h2 id="驱逐策略">驱逐策略</h2>
+<p>W-TinyLFU 算法在 TinyLFU 前面放了一个基于 LRU 的 Window Cache，从而可以使得前面提到的突发性稀疏流量会缓存在 Window Cache 里，只有在 Window Cache 里被淘汰的缓存才会过继给后面的 TinyLFU。至于最后的 Main Cache，虽然 W-TinyLFU 使用了分段式 LRU 来实现，但我们也可以根据实际情况修改使其符合我们需要的场景。</p>
+<p>为了简化本文的实现，我们暂时先不实现 W-TinyLFU 算法，而是实现一个简单的 LFU 驱逐策略。因此我们需要一个能够用来记录访问频率的数据结构。同时由于我们需要存储所有 key 的信息，所以还需要这个数据结构能够有效减少 key 的存储体积。</p>
+<p>即便有了上面的频率计数器，为了找到那个需要被驱逐的 LFU key，我们似乎需要遍历所有 key。所以我们不得不再引入一个驱逐候选列表来帮助我们提前排序好需要驱逐的 key。</p>
+<p>综上，我们还需要再实现：</p>
+<ul>
+<li>能够有效压缩数据大小的频率计数器</li>
+<li>预先排序的驱逐候选池</li>
+</ul>
+<h2 id="频率计数器count-min-sketch">频率计数器：Count-Min Sketch</h2>
+<p>Count-Min 算法和布隆过滤器类似，核心思想还是通过将相同 Hash 值的数据共享同一份存储空间，以减小整体体积。h1~hd 代表不同的 Hash 算法，这里的 value 代表我们要存储的 key，横坐标表示 Hash 后的值，对哈希值对应每个网格进行 +1 操作。当需要计算某个 key 的估计值时，取对应所有网格数值的最小值。</p>
+<p>为了避免一些短时间热度的 key 一直残留在缓存中，每隔一个时间间隔，还需要将所有网格计数器衰减一半。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200724180654.png" alt=""></p>
+<h1 id="流行的缓存实现方式">流行的缓存实现方式</h1>
+<p>许多方法的优化点是节省 GC 在 map 碎片上花费的时间。GC 的时间会随着 map 存数数量的增加而增大。减少的方案就是分配更少的数量，单位空间更大的区域，在每个空间上存储更多的内容。这确实是一个有效地方法，我们在 Badger 里面大量的使用了这个方法 (Skiplist,Table builder 等 )。 很多 Go 流行的缓存框架也是这么做的。</p>
+<h2 id="bigcache">BigCache</h2>
+<p>超大 map 的内存池导致的 GC 延迟，是可以通过 bigcache 解决的。那 bigcache 到底怎么做到的？</p>
+<p>简单来说：shards map + map[uint]uint + []byte + free link = BigCache</p>
+<ol>
+<li>定义 shards cache，避免锁粒度过大</li>
+<li>map 里只存放 uint 避免指针</li>
+<li>实现一个 queue 结构（实际是[]byte，通过 uint 下标追加分配）</li>
+<li>采用 free 链机制，删除保留空洞最后一起回收</li>
+</ol>
+<p>bigcache 先对 key hash 分配到不同的 shard 中，shard 的数量可配置（默认1024）。每个 shard 有一个 ring buffer 实际存储数据，有一个 map 记录 key 对应的 index， 如果同一个 key 被 set 多次，那么前面的 entry 会被置为 invalid。 shard 会在容量不够切且没有到达上限的时候扩容。缓存有生存周期，每个生存周期都会把过期的缓存清除。</p>
+<p>每个 map 的 key 都是一个 uint32 的 hash 值，每个值对应一个存储着元数据的 ring buffer。如果 hash 值碰撞了，BigCache 会忽略旧 key，然后把新的值存储到 map 中。预先分配更少，更大的 ring buffer，使用 <code>map [uint32] uint32</code> 是避免支付 GC 扫描成本的好方法</p>
+<h2 id="freecache">FreeCache</h2>
+<p>FreeCache 将缓存分成了 256 个segement，每个segement包括 256 个slot和一个 ring buffer 存储数据。当一个新的元素被添加进来的时候，使用 hash 值下 8 位作为标识 id，通过使用 LSB 9-16 的值作为slot ID。将数据分配到多个slot里面，有助于优化查询的时间 ( 分治策略 )。</p>
+<p>数据被存储在 ring buffer 中，位置被保存在一个排序的数组里面。如果 ring buffer 内存不足，则会利用 LRU 的策略在 ring buffer 逐个扫描，如果缓存的最后访问时间小于平均访问的时间，就会被删掉。要找到一个缓存内容，在slot中是通过二分查找法对一个已经排好的数据进行查询。读写的时候， segement 会上锁。</p>
+<h2 id="groupcache">GroupCache</h2>
+<p>GroupCache 使用链表和 Map 实现了一个精准的 LRU 删除策略的缓存。实现内存池的要点：</p>
+<ol>
+<li>内存池用 map 不用 sync.Map；map 要加读写锁</li>
+<li>map 尽量存非指针(key 和 value 都不包含指针)</li>
+<li>map 里存放指针，需要注意 keys 过多会带来的 GC 停顿问题</li>
+<li>使用 shards map</li>
+</ol>
+<p>然后我们看看GroupCache 的实现方法，这个定义在 lru/lru.go 里：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Cache is an LRU cache. It is not safe for concurrent access.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Cache</span> <span class="kd">struct</span> <span class="p">{</span>
+  <span class="nx">cache</span> <span class="kd">map</span><span class="p">[</span><span class="kd">interface</span><span class="p">{}]</span><span class="o">*</span><span class="nx">list</span><span class="p">.</span><span class="nx">Element</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>从 cache 的定义可以看出，这是我们说的 map 里包含指针的情况，而且还是不分 shards 的。所以如果你单机 GroupCache 里 keys 过多，还是要注意下用法的。</p>
+<p>为了进行公平的比较，我们在 GroupCache 的基础上，实现了一个包括 256 个分片的切片结构。</p>
+<h2 id="性能对比">性能对比</h2>
+<p>为了比较各种缓存的性能，我们生成了一个 zipf 分布式工作负载，并使用 n1-highcpu-32 机器运行基准测试。下表比较了三个缓存库在只读工作负载下的性能。</p>
+<h3 id="只读情况">只读情况</h3>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200724185410.png" alt=""></p>
+<p>我们可以看到，由于读锁是无消耗的，所以 BigCache 的伸缩性更好。FreeCache 和 GroupCache 读锁是有消耗的，并且在并发数达到 20 的时候，伸缩性下降了。(Y 轴越大越好 )</p>
+<h3 id="只写情况">只写情况</h3>
+<p>在只写的情况下，三者的性能表现比较接近，FreeCache 比另两个的情况，稍微好一点。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200726133144.png" alt=""></p>
+<h3 id="读写情况-25-写75-读-">读写情况 (25% 写，75% 读 )</h3>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200726133249.png" alt=""></p>
+<p>两者混合的情况下，BigCache 看起来是唯一一个在伸缩性上表现完美的，正如下一节所解释的那样，命中率对于 Zipf 工作负载是不利的。</p>
+<h3 id="命中率比较">命中率比较</h3>
+<p>就读写性能来说，bigcache 表现最好，但是数据测试表示它的命中率有点惨不忍睹。在 Zipf 分布的情况下，缓存数量达到10000000级别的时候，命中率居然可以低到55%。分析有如下两个原因：</p>
+<ol>
+<li>bigcache 没有善用 buffer，往往同一个 key 同时存了多个 entry （写入多次的时候）；</li>
+<li>bigcache 不会在读的时候更新 entry，所以可能会清退最近访问的 key；</li>
+</ol>
+<p>所以，即使是 bigcache 也没有符合要求5。</p>
+<p>参考:<br>
+<a href="https://zhangyet.github.io/archivers/go_cache">go cache 实现综述</a><br>
+<a href="https://studygolang.com/articles/19402">Go 中的缓存现状</a><br>
+<a href="https://blog.joway.io/posts/modern-memory-cache/">设计实现高性能本地内存缓存</a><br>
+<a href="https://juejin.im/post/5b7593496fb9a009b62904fa">你应该知道的缓存进化史</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2020-07-24
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/cache/">cache</a>
+          <a href="/tags/go/">GO</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/bigcache%E4%BC%98%E5%8C%96%E6%8A%80%E5%B7%A7/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Bigcache优化技巧</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/gocache%E4%B8%80%E4%B8%AA%E5%8A%9F%E8%83%BD%E9%BD%90%E5%85%A8%E4%B8%94%E6%98%93%E4%BA%8E%E6%89%A9%E5%B1%95%E7%9A%84go%E7%BC%93%E5%AD%98%E5%BA%93/">
+            <span class="next-text nav-default">Gocache:一个功能齐全且易于扩展的Go缓存库</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2020
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
