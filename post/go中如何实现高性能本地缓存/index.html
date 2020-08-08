@@ -53,7 +53,7 @@
 <meta itemprop="description" content="前言 在大部分业务系统中，都会使用诸如 Redis、Memcached 等远程缓存，一方面可以避免自身进程内存占用过大而导致的 OOM 或 GC 问题，另一方面">
 <meta itemprop="datePublished" content="2020-07-24T18:29:28&#43;00:00" />
 <meta itemprop="dateModified" content="2020-07-24T18:29:28&#43;00:00" />
-<meta itemprop="wordCount" content="6204">
+<meta itemprop="wordCount" content="11963">
 
 
 
@@ -167,8 +167,8 @@
         <div class="post-category">
             <a href="/categories/cache/"> cache </a>
             </div>
-          <span class="more-meta"> 约 6204 字 </span>
-          <span class="more-meta"> 预计阅读 13 分钟 </span>
+          <span class="more-meta"> 约 11963 字 </span>
+          <span class="more-meta"> 预计阅读 24 分钟 </span>
         
       </div>
     </header>
@@ -208,6 +208,39 @@
         <li><a href="#命中率比较">命中率比较</a></li>
       </ul>
     </li>
+  </ul>
+
+  <ul>
+    <li><a href="#指导原则">指导原则</a></li>
+    <li><a href="#快速访问">快速访问</a></li>
+    <li><a href="#并发和竞争">并发和竞争</a>
+      <ul>
+        <li><a href="#gets">Gets</a></li>
+        <li><a href="#sets">Sets</a></li>
+        <li><a href="#注意事项">注意事项</a></li>
+        <li><a href="#抗争性">抗争性</a></li>
+      </ul>
+    </li>
+    <li><a href="#记忆边界">记忆边界</a>
+      <ul>
+        <li><a href="#关键成本">关键成本</a></li>
+        <li><a href="#通过tinylfu的录取政策">通过TinyLFU的录取政策</a></li>
+        <li><a href="#通过采样lfu驱逐政策">通过采样LFU驱逐政策</a></li>
+        <li><a href="#门卫">门卫</a></li>
+        <li><a href="#指标">指标</a></li>
+      </ul>
+    </li>
+    <li><a href="#基准测试">基准测试</a>
+      <ul>
+        <li><a href="#命中率">命中率</a></li>
+        <li><a href="#搜索">搜索</a></li>
+        <li><a href="#数据库">数据库</a></li>
+        <li><a href="#循环播放">循环播放</a></li>
+        <li><a href="#codasyl">CODASYL</a></li>
+        <li><a href="#通量">通量</a></li>
+      </ul>
+    </li>
+    <li><a href="#未来的改进">未来的改进</a></li>
   </ul>
 </nav>
   </div>
@@ -790,11 +823,331 @@
 <li>bigcache 不会在读的时候更新 entry，所以可能会清退最近访问的 key；</li>
 </ol>
 <p>所以，即使是 bigcache 也没有符合要求5。</p>
+<h1 id="ristretto">Ristretto</h1>
+<p>从那以后，我们阅读了文献，进行了广泛测试的实现，并讨论了在编写缓存库时要考虑的每个变量。今天，我们很自豪地宣布，它已经准备好供更广泛的Go社区使用和试验。</p>
+<p>在我们开始解释Ristretto的设计之前，这里是一个代码片段，展示了如何使用它：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">cache</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">ristretto</span><span class="p">.</span><span class="nf">NewCache</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ristretto</span><span class="p">.</span><span class="nx">Config</span><span class="p">{</span>
+		<span class="nx">NumCounters</span><span class="p">:</span> <span class="mf">1e7</span><span class="p">,</span>     <span class="c1">// Num keys to track frequency of (10M).
+</span><span class="c1"></span>		<span class="nx">MaxCost</span><span class="p">:</span>     <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">30</span><span class="p">,</span> <span class="c1">// Maximum cost of cache (1GB).
+</span><span class="c1"></span>		<span class="nx">BufferItems</span><span class="p">:</span> <span class="mi">64</span><span class="p">,</span>      <span class="c1">// Number of keys per Get buffer.
+</span><span class="c1"></span>	<span class="p">})</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="nx">cache</span><span class="p">.</span><span class="nf">Set</span><span class="p">(</span><span class="s">&#34;key&#34;</span><span class="p">,</span> <span class="s">&#34;value&#34;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="c1">// set a value
+</span><span class="c1"></span>	<span class="c1">// wait for value to pass through buffers
+</span><span class="c1"></span>	<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="mi">10</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span><span class="p">)</span>
+
+	<span class="nx">value</span><span class="p">,</span> <span class="nx">found</span> <span class="o">:=</span> <span class="nx">cache</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="s">&#34;key&#34;</span><span class="p">)</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">found</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="s">&#34;missing value&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">value</span><span class="p">)</span>
+	<span class="nx">cache</span><span class="p">.</span><span class="nf">Del</span><span class="p">(</span><span class="s">&#34;key&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="指导原则">指导原则</h2>
+<p>Ristretto建立在三个指导原则上：</p>
+<ul>
+<li>快速访问</li>
+<li>高并发和抗竞争性</li>
+<li>内存边界。</li>
+</ul>
+<p>在此博客文章中，我们将讨论这三个原理以及如何在Ristretto中实现它们。</p>
+<h2 id="快速访问">快速访问</h2>
+<p>尽管我们喜欢Go及其在功能方面的坚定立场，但Go的某些设计决策阻止了我们挤出我们想要的所有性能。最值得注意的是Go的并发模型。由于对CSP的关注，大多数其他形式的原子操作都被忽略了。这使得难以实现在缓存库中有用的无锁结构。例如，Go 不提供线程本地存储。</p>
+<p>缓存的核心是散列图，其中包含有关进出的规则。如果哈希表的性能不佳，则整个缓存将受到影响。与Java相反，Go没有无锁的并发哈希图。相反，Go中的线程安全是通过显式获取互斥锁来实现的。</p>
+<p>我们尝试了多种实现方式（使用storeRistretto中的接口），发现sync.Map对于读取繁重的工作负载表现良好，但对于写入工作负载却表现不佳。考虑到没有线程本地存储，我们发现分片互斥包装的Gomap具有最佳的整体性能。特别是，我们选择使用256个分片以确保即使在64核服务器上也能很好地执行。</p>
+<p>使用基于分片的方法，我们还需要找到一种计算密钥应该放入哪个分片的快速方法。这种要求以及对长密钥消耗过多内存的担忧，导致我们不得不使用uint64密钥，而不是存储整个密钥。这样做的理由是，我们需要在多个位置进行键的散列，并且在入口处执行一次即可使我们重新使用该散列，从而避免了更多的计算。</p>
+<p>为了生成快速哈希，我们从Go Runtime 借用了runtime.memhash。 此函数使用汇编代码快速生成哈希。请注意，哈希具有一个随机化器，该随机化器会在进程启动时进行初始化，这意味着相同的密钥在下一次进程运行时不会生成相同的哈希。但是，对于非永久性缓存来说，这没关系。在我们的实验中，我们发现它可以在10ns内对64字节密钥进行哈希处理。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-fallback" data-lang="fallback">BenchmarkMemHash-32 200000000	 8.88 ns/op
+BenchmarkFarm-32    100000000	 17.9 ns/op
+BenchmarkSip-32      30000000	 41.1 ns/op
+BenchmarkFnv-32      20000000	 70.6 ns/op
+</code></pre></td></tr></table>
+</div>
+</div><p>然后，我们不仅使用此哈希作为存储的密钥，而且还弄清楚了密钥应放入的分片。这确实会带来按键碰撞的机会，这是我们计划在以后处理的事情。</p>
+<h2 id="并发和竞争">并发和竞争</h2>
+<p>要实现高命中率，需要管理有关缓存中存在的内容以及缓存中应存在的内容的元数据。在跨goroutines平衡缓存的性能和可伸缩性时，这变得非常困难。幸运的是，有一篇名为BP-Wrapper的论文，它写了一个系统框架，该框架使得任何替换算法几乎都可以无争用地锁定。本文介绍了两种缓解争用的方法：预取和批处理。我们仅使用批处理。</p>
+<p>批处理几乎可以按照您的想法工作。与其为每个元数据突变获取互斥锁，不如在获取互斥锁并处理突变之前等待环形缓冲区填满。如该论文所述，这几乎没有任何开销地降低了竞争。</p>
+<p>我们应用这一切的方法Gets，并Sets到缓存中。</p>
+<h3 id="gets">Gets</h3>
+<p>当然，所有获取到缓存的内容都会立即得到服务。困难的部分是捕获Get，因此我们可以跟踪密钥访问。在LRU缓存中，通常将密钥放在链接列表的开头。在基于LFU的缓存中，我们需要增加项目的点击计数器。这两个操作都需要对缓存全局结构进行线程安全访问。BP-Wrapper建议使用批处理来处理命中计数器的增量，但问题是我们如何在不获取另一个锁的情况下实现此批处理过程。</p>
+<p>这听起来像是Go渠道的完美用例，事实确实如此。不幸的是，通道的吞吐量性能使我们无法使用它们。取而代之的是，我们设计了一种巧妙的方法来sync.Pool实现带状，有损环形缓冲区，这些缓冲区性能出色，数据丢失很少。</p>
+<p>池中存储的任何项目都可以随时自动删除， 恕不另行通知。这就引入了一种有损行为。 池中的每个项目实际上都是一批密钥。批次填满后，将其推送到某个渠道。故意将通道大小保持较小，以避免消耗太多的CPU周期来处理它。如果通道已满，则删除该批次。 这引入了有损行为的第二级。一个goroutine从内部通道中提取此批次并处理密钥，从而更新其命中计数器。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nf">AddToLossyBuffer</span><span class="p">(</span><span class="nx">key</span><span class="p">):</span>
+  <span class="nx">stripe</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nf">Get</span><span class="p">().(</span><span class="o">*</span><span class="nx">ringStripe</span><span class="p">)</span>
+  <span class="nx">stripe</span><span class="p">.</span><span class="nf">Push</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+  <span class="nx">b</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nf">Put</span><span class="p">(</span><span class="nx">stripe</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Once buffer fills up, push to channel:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">  <span class="k">select</span> <span class="p">{</span>
+  <span class="k">case</span> <span class="nx">p</span><span class="p">.</span><span class="nx">itemsCh</span> <span class="o">&lt;-</span> <span class="nx">keys</span><span class="p">:</span>
+      <span class="nx">p</span><span class="p">.</span><span class="nx">stats</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">keepGets</span><span class="p">,</span> <span class="nx">keys</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="nb">uint64</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">keys</span><span class="p">)))</span>
+      <span class="k">return</span> <span class="kc">true</span>
+  <span class="k">default</span><span class="p">:</span>
+      <span class="nx">p</span><span class="p">.</span><span class="nx">stats</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">dropGets</span><span class="p">,</span> <span class="nx">keys</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="nb">uint64</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">keys</span><span class="p">)))</span>
+      <span class="k">return</span> <span class="kc">false</span>
+  <span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>p.itemCh processing:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">  <span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">tinyLFU</span><span class="p">)</span> <span class="nf">Push</span><span class="p">(</span><span class="nx">keys</span> <span class="p">[]</span><span class="kt">uint64</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">key</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">keys</span> <span class="p">{</span>
+      <span class="nx">p</span><span class="p">.</span><span class="nf">Increment</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+    <span class="p">}</span>
+  <span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>使用a sync.Pool优于其他任何功能（切片，带区互斥锁等）的性能优势主要是由于内部使用了线程本地存储，而Go使用者无法将其作为公共API使用。</p>
+<h3 id="sets">Sets</h3>
+<p>Set缓冲区的要求与Get稍有不同。在Gets中，我们对键进行缓冲，仅在缓冲区填满后才对其进行处理。在集合中，我们希望尽快处理密钥。因此，我们使用一个通道来捕获Set，如果通道已满，则将它们放在地板上以避免竞争。几个后台goroutine从通道中选择集并处理该集。</p>
+<p>与Gets一样，该方法旨在优化竞争阻力。但是，有一些警告，如下所述。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="k">select</span> <span class="p">{</span>
+<span class="k">case</span> <span class="nx">c</span><span class="p">.</span><span class="nx">setBuf</span> <span class="o">&lt;-</span> <span class="o">&amp;</span><span class="nx">item</span><span class="p">{</span><span class="nx">key</span><span class="p">:</span> <span class="nx">hash</span><span class="p">,</span> <span class="nx">val</span><span class="p">:</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">cost</span><span class="p">:</span> <span class="nx">cost</span><span class="p">}:</span>
+    <span class="k">return</span> <span class="kc">true</span>
+<span class="k">default</span><span class="p">:</span>
+    <span class="c1">// drop the set and avoid blocking
+</span><span class="c1"></span>    <span class="nx">c</span><span class="p">.</span><span class="nx">stats</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">dropSets</span><span class="p">,</span> <span class="nx">hash</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="kc">false</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="注意事项">注意事项</h3>
+<p>Ristretto中的集合被排队到缓冲区中，控制权返回给调用者，然后将该缓冲区应用于高速缓存。这有两个副作用：</p>
+<ul>
+<li>不能保证一定会套用。可以立即删除它以避免争用，或者以后可以被该策略拒绝。</li>
+<li>即使应用了设置，呼叫返回给用户后也可能需要花费几毫秒的时间。用数据库术语来说，这是一个最终的一致性 模型。</li>
+</ul>
+<p>但是，如果缓存中已存在密钥，Set将立即更新该密钥。这是为了避免缓存的键保留陈旧的值。</p>
+<h3 id="抗争性">抗争性</h3>
+<p>Ristretto针对争用进行了优化。在繁重的并发负载下，这确实表现出色，我们将在下面的吞吐量基准中看到这一点。但是，它将损失一些元数据以换取更好的吞吐量性能。</p>
+<p>有趣的是，由于密钥访问分布的性质，信息丢失不会损害我们的命中率性能。如果我们确实丢失了元数据，则通常会统一丢失元数据，而密钥访问分配仍保持不一致。因此，我们仍然可以实现较高的命中率，并且命中率的下降很小，如下图所示。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200804103123.png" alt=""></p>
+<h2 id="记忆边界">记忆边界</h2>
+<h3 id="关键成本">关键成本</h3>
+<p>无限大的缓存实际上是不可能的。高速缓存必须有大小限制。许多缓存库会将缓存大小视为元素数。我们发现这种方法很幼稚。当然，它可以在大小相同的工作负载中工作。但是，大多数工作负载具有可变大小的值。一个值可能要花几个字节，另一个值要花几千字节，而另一个值要花几兆字节。将它们视为具有相同的内存成本是不现实的。</p>
+<p>在Ristretto中，我们将成本附加到每个键值。用户可以在调用Set时指定该费用。我们将此成本与缓存的MaxCost相比较。当缓存以最大容量运行时，沉重的物品可能会取代许多轻量物品。该机制非常不错，因为它适用于所有不同的工作负载，包括幼稚的方法，其中每个键值花费1。</p>
+<h3 id="通过tinylfu的录取政策">通过TinyLFU的录取政策</h3>
+<p>“我们应该让什么进入缓存？”</p>
+<p>由录取政策回答。显然，目标是让新项目比当前项目更“有价值”。但是，如果您考虑跟踪与“价值”问题相关的相关项目信息所需的开销（延迟和内存），这将成为一个挑战。</p>
+<p>尽管是提高命中率的有据可查的策略，但大多数Go缓存库根本没有接纳策略。实际上，许多LRU收回实现都将最新密钥视为最有价值。</p>
+<p>此外，大多数Go缓存库使用纯LRU或近似LRU作为其驱逐策略。尽管具有LRU近似值的质量，但某些工作负载更适合LFU驱逐策略。我们发现使用各种跟踪的基准测试就是这种情况。</p>
+<p>对于我们的准入策略，我们研究了一篇名为TinyLFU的新颖有趣的论文 ：高效的高速缓存准入策略。从高度上讲，TinyLFU提供了三种方法：</p>
+<ul>
+<li>增量（键uint64）</li>
+<li>估计（键uint64）int（称为ɛ）</li>
+<li>重启</li>
+</ul>
+<p>该论文对此进行了最好的解释，但是TinyLFU是一种与逐出无关的准入策略，旨在以很少的内存开销来提高命中率。主要思想是仅在新项目的估计值高于被逐出的项目的估计值时才允许使用。我们 使用Count-Min Sketch 在Ristretto中实现了TinyLFU 。它使用4位计数器来近似项（ɛ）的访问频率。与使用普通键映射到频率映射相比，每个键的这种小成本使我们能够跟踪更大范围的全局键空间样本。</p>
+<p>TinyLFU还通过Reset功能保持键访问的新近性。N键4递增后，计数器减半。因此，一段时间未看到的键会将其计数器重置为零；为最近出现的密钥铺平道路。</p>
+<h3 id="通过采样lfu驱逐政策">通过采样LFU驱逐政策</h3>
+<p>当缓存达到容量时，每个传入密钥都应替换缓存中存在的一个或多个密钥。不仅如此，传入密钥的should应该比被逐出的密钥的higher高。要查找低key的密钥，我们使用了Go map迭代提供的自然 随机性来挑选一个密钥样本，并在它们上循环查找最低ɛ的密钥。</p>
+<p>然后，我们将此键的against与传入键进行比较。如果输入的密钥具有较高的ɛ，则此密钥将被逐出（逐出策略）。否则，输入密钥将被拒绝（准入策略）。重复此机制，直到可以将传入密钥的成本放入高速缓存中为止。因此，单个输入密钥可以移动一个以上的密钥。请注意，传入密钥的成本不会影响选择退出密钥的成本。</p>
+<p>使用这种方法，命中率在各种工作负载的确切LFU策略的1％以内。这意味着我们可以在同一个小包装中获得准入策略，保守的内存使用和较低的争用的好处。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Snippet from the Admission and Eviction Algorithm
+</span><span class="c1"></span><span class="nx">incHits</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">admit</span><span class="p">.</span><span class="nf">Estimate</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+<span class="k">for</span> <span class="p">;</span> <span class="nx">room</span> <span class="p">&lt;</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">room</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">evict</span><span class="p">.</span><span class="nf">roomLeft</span><span class="p">(</span><span class="nx">cost</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">sample</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">evict</span><span class="p">.</span><span class="nf">fillSample</span><span class="p">(</span><span class="nx">sample</span><span class="p">)</span>
+    <span class="nx">minKey</span><span class="p">,</span> <span class="nx">minHits</span><span class="p">,</span> <span class="nx">minId</span> <span class="o">:=</span> <span class="nb">uint64</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">math</span><span class="p">.</span><span class="nx">MaxInt64</span><span class="p">),</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="nx">i</span><span class="p">,</span> <span class="nx">pair</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">sample</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">hits</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">admit</span><span class="p">.</span><span class="nf">Estimate</span><span class="p">(</span><span class="nx">pair</span><span class="p">.</span><span class="nx">key</span><span class="p">);</span> <span class="nx">hits</span> <span class="p">&lt;</span> <span class="nx">minHits</span> <span class="p">{</span>
+            <span class="nx">minKey</span><span class="p">,</span> <span class="nx">minHits</span><span class="p">,</span> <span class="nx">minId</span> <span class="p">=</span> <span class="nx">pair</span><span class="p">.</span><span class="nx">key</span><span class="p">,</span> <span class="nx">hits</span><span class="p">,</span> <span class="nx">i</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="nx">incHits</span> <span class="p">&lt;</span> <span class="nx">minHits</span> <span class="p">{</span>
+        <span class="nx">p</span><span class="p">.</span><span class="nx">stats</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">rejectSets</span><span class="p">,</span> <span class="nx">key</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nx">victims</span><span class="p">,</span> <span class="kc">false</span>
+    <span class="p">}</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nx">evict</span><span class="p">.</span><span class="nf">del</span><span class="p">(</span><span class="nx">minKey</span><span class="p">)</span>
+    <span class="nx">sample</span><span class="p">[</span><span class="nx">minId</span><span class="p">]</span> <span class="p">=</span> <span class="nx">sample</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="nx">sample</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+    <span class="nx">sample</span> <span class="p">=</span> <span class="nx">sample</span><span class="p">[:</span><span class="nb">len</span><span class="p">(</span><span class="nx">sample</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+    <span class="nx">victims</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">victims</span><span class="p">,</span> <span class="nx">minKey</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="门卫">门卫</h3>
+<p>在我们将新密钥放入TinyLFU中之前，Ristretto使用bloom过滤器首先检查该密钥是否之前已被查看过。仅当密钥在布隆过滤器中已经存在时，才将其插入TinyLFU。这是为了避免 长时间不被看到的长尾键污染 TinyLFU。</p>
+<p>计算键的ɛ时，如果该项目包含在Bloom Bloom过滤器中，则其频率估计为TinyLFU的估算值加1。在ResetTinyLFU 期间 ，还会清除Bloom过滤器。</p>
+<h3 id="指标">指标</h3>
+<p>尽管是可选的，但重要的是要了解缓存的行为方式。我们希望确保不仅可以实现与缓存相关的跟踪指标，而且这样做的开销也足够低以至于可以打开和保持打开状态。</p>
+<p>除了命中和遗漏之外，Ristretto还跟踪指标，例如键及其添加，更新和收回的成本，集的丢失或拒绝以及集的丢失或保留。所有这些数字有助于了解各种工作负载上的缓存行为，并为进一步优化铺平道路。</p>
+<p>最初，我们使用原子计数器。但是，开销很大。我们将原因归结为虚假分享。考虑一个多核系统，其中不同的原子计数器（每个8字节）位于同一高速缓存行（通常为64字节）中。对这些计数器之一进行的任何更新都会导致其他计数器被标记为无效。这将强制为拥有该缓存的所有其他核心重新加载缓存，从而在缓存行上产生写争用。</p>
+<p>为了实现可伸缩性，我们确保每个原子计数器都完全占用完整的缓存行。因此，每个内核都在不同的缓存行上工作。Ristretto通过为每个度量分配256个uint64来使用此功能，在每个活动uint64之间保留9个未使用的uint64。为了避免额外的计算，将密钥哈希值重新使用以确定要增加的uint64。</p>
+<p>Add:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">	<span class="nx">valp</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">all</span><span class="p">[</span><span class="nx">t</span><span class="p">]</span>
+	<span class="c1">// Avoid false sharing by padding at least 64 bytes of space between two
+</span><span class="c1"></span>	<span class="c1">// atomic counters which would be incremented.
+</span><span class="c1"></span>	<span class="nx">idx</span> <span class="o">:=</span> <span class="p">(</span><span class="nx">hash</span> <span class="o">%</span> <span class="mi">25</span><span class="p">)</span> <span class="o">*</span> <span class="mi">10</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddUint64</span><span class="p">(</span><span class="nx">valp</span><span class="p">[</span><span class="nx">idx</span><span class="p">],</span> <span class="nx">delta</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Read:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">	<span class="nx">valp</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">all</span><span class="p">[</span><span class="nx">t</span><span class="p">]</span>
+	<span class="kd">var</span> <span class="nx">total</span> <span class="kt">uint64</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">valp</span> <span class="p">{</span>
+		<span class="nx">total</span> <span class="o">+=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadUint64</span><span class="p">(</span><span class="nx">valp</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">total</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>读取度量标准时，将读取并汇总所有uint64，以获取最新编号。使用这种方法，指标跟踪仅会增加大约10％的缓存性能开销。</p>
+<h2 id="基准测试">基准测试</h2>
+<p>既然您已经了解了Ristretto中存在的各种机制，那么让我们看看与其他流行的Go缓存相比，命中率和吞吐量基准。</p>
+<h3 id="命中率">命中率</h3>
+<p>使用Damian Gryski的cachetest和我们自己的基准测试套件来衡量命中率。这两个实用程序的命中率数字相同，但是我们增加了读取某些跟踪格式（特别是LIRS和ARC）以及CSV输出的功能，以便于绘制图形。如果要编写自己的基准测试或添加跟踪格式，请签出 sim软件包。</p>
+<p>为了更好地了解改进的空间，我们添加了一个理论上 最佳的缓存实现，该实现使用未来的知识来逐出在其整个生命周期内命中次数最少的项目。请注意，这是千篇一律的LFU驱逐策略，其他千篇一律的策略可能会使用LRU。根据工作量，LFU或LRU可能更适合，但我们发现通透的LFU对于与Ristretto的Sampled LFU 进行比较很有用。</p>
+<h3 id="搜索">搜索</h3>
+<p>将该跟踪描述为“大型商业搜索引擎响应各种Web搜索请求而发起的磁盘读取访问。”</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200804103451.png" alt=""></p>
+<h3 id="数据库">数据库</h3>
+<p>此跟踪被描述为“在商业站点上运行的数据库服务器，该服务器在商业数据库之上运行ERP应用程序。”</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200804103503.png" alt=""></p>
+<h3 id="循环播放">循环播放</h3>
+<p>此跟踪演示了循环访问模式。在本基准及以下基准中，我们不能包括Fastcache，Freecache或Bigcache实施，因为它们的最小容量要求会使结果产生偏差。一些跟踪文件很小，并且需要较小的容量来进行性能测量。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200804104723.png" alt=""></p>
+<h3 id="codasyl">CODASYL</h3>
+<p>将此跟踪描述为“在一小时内对CODASYL数据库的引用”。请注意，与此处的其他相比，Ristretto的表现受到影响。这是因为LFU驱逐策略不适合此工作负载。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200804104749.png" alt=""></p>
+<h3 id="通量">通量</h3>
+<p>可以通过使用所测量的相同的效用与以前的博客文章，从而产生了大量的用于获取和根据业务负载设置够程之间键和的交替。</p>
+<p>所有吞吐量基准均在具有16GB RAM的Intel Core i7-8700K（3.7GHz）上运行。</p>
+<p>混合：25％写入，75％读取</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200804110532.png" alt=""></p>
+<p>读取：100％读取</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200804110540.png" alt=""></p>
+<p>写入：100％写入</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20200804113318.png" alt=""></p>
+<h2 id="未来的改进">未来的改进</h2>
+<p>您可能已经在CODASYL基准测试中注意到，Ristretto的性能在LRU繁重的工作负载中受到影响。但是，对于大多数工作负载，我们的“采样LFU”策略的性能都很好。问题变成了“我们如何才能兼得两全”？</p>
+<p>在一纸所谓的自适应软件高速缓存管理，这个确切的问题进行了探讨。基本思想是在主缓存段之前放置一个LRU“窗口”，并使用爬山技术自适应地调整窗口大小以最大化命中率。咖啡因已经看到了 巨大的 做结果 此。我们相信Ristretto将来也会从中受益。</p>
+<p>在Dgraph中使用此缓存的一些初步实验看起来很有希望。我们希望在接下来的几个月中将Ristretto集成到Dgraph和 Badger中。请检查一下，也许使用ristretto，以加快您的工作负载！</p>
 <p>参考:<br>
 <a href="https://zhangyet.github.io/archivers/go_cache">go cache 实现综述</a><br>
 <a href="https://studygolang.com/articles/19402">Go 中的缓存现状</a><br>
 <a href="https://blog.joway.io/posts/modern-memory-cache/">设计实现高性能本地内存缓存</a><br>
-<a href="https://juejin.im/post/5b7593496fb9a009b62904fa">你应该知道的缓存进化史</a></p>
+<a href="https://juejin.im/post/5b7593496fb9a009b62904fa">你应该知道的缓存进化史</a>
+<a href="https://dgraph.io/blog/post/introducing-ristretto-high-perf-go-cache/">Ristretto简介：高性能Go缓存</a></p>
 
     </div>
 

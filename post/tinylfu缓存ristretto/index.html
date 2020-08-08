@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>TinyLFU缓存:ristretto - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="Overview Ristretto是一种快速的，固定大小的内存中高速缓存，同时关注吞吐量和命中率性能。您可以轻松地将Ristretto添加到现有系统，并将" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
+
+
+<link rel="canonical" href="/post/tinylfu%E7%BC%93%E5%AD%98ristretto/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="TinyLFU缓存:ristretto" />
+<meta property="og:description" content="Overview Ristretto是一种快速的，固定大小的内存中高速缓存，同时关注吞吐量和命中率性能。您可以轻松地将Ristretto添加到现有系统，并将" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/tinylfu%E7%BC%93%E5%AD%98ristretto/" />
+<meta property="article:published_time" content="2020-08-04T17:24:43+00:00" />
+<meta property="article:modified_time" content="2020-08-04T17:24:43+00:00" />
+<meta itemprop="name" content="TinyLFU缓存:ristretto">
+<meta itemprop="description" content="Overview Ristretto是一种快速的，固定大小的内存中高速缓存，同时关注吞吐量和命中率性能。您可以轻松地将Ristretto添加到现有系统，并将">
+<meta itemprop="datePublished" content="2020-08-04T17:24:43&#43;00:00" />
+<meta itemprop="dateModified" content="2020-08-04T17:24:43&#43;00:00" />
+<meta itemprop="wordCount" content="1788">
+
+
+
+<meta itemprop="keywords" content="Go,ristretto," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="TinyLFU缓存:ristretto"/>
+<meta name="twitter:description" content="Overview Ristretto是一种快速的，固定大小的内存中高速缓存，同时关注吞吐量和命中率性能。您可以轻松地将Ristretto添加到现有系统，并将"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">TinyLFU缓存:ristretto</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2020-08-04 </span>
+        <div class="post-category">
+            <a href="/categories/go/"> Go </a>
+            </div>
+          <span class="more-meta"> 约 1788 字 </span>
+          <span class="more-meta"> 预计阅读 4 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents"></nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h1 id="overview">Overview</h1>
+<p>Ristretto是一种快速的，固定大小的内存中高速缓存，同时关注吞吐量和命中率性能。您可以轻松地将Ristretto添加到现有系统，并将最有价值的数据保留在需要的位置。</p>
+<p>该软件包包括接纳/驱逐元数据所需的多个概率数据结构。多数是计数布隆过滤器的变化，但是还需要一种特定于缓存的功能，即“新鲜”机制，该机制基本上是一个“生命周期”过程。TinyLFU的原始论文中描述了这种新鲜度机制，但其他机制可能更适合某些数据分布。</p>
+<h1 id="type-cache">type Cache</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Cache</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="c1">// Metrics contains a running log of important statistics like hits, misses,
+</span><span class="c1"></span>	<span class="c1">// and dropped items.
+</span><span class="c1"></span>	<span class="nx">Metrics</span> <span class="o">*</span><span class="nx">Metrics</span>
+	<span class="c1">// contains filtered or unexported fields
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>高速缓存是具有TinyLFU允许策略和Sampled LFU逐出策略的哈希映射的线程安全实现。您可以根据需要在多个goroutine中使用相同的Cache实例。</p>
+<h1 id="func-newcache">func NewCache</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">NewCache</span><span class="p">(</span><span class="nx">config</span> <span class="o">*</span><span class="nx">Config</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">Cache</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>NewCache返回一个新的Cache实例和任何配置错误（如果有）。</p>
+<h1 id="func-cache-clear">func (*Cache) Clear</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Cache</span><span class="p">)</span> <span class="nf">Clear</span><span class="p">()</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>清除清空哈希表，并将所有策略计数器归零。请注意，这不是原子操作（但这应该不成问题，因为假定直到此之后才进行Set / Get调用）。</p>
+<h1 id="func-cache-close">func (*Cache) Close</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Cache</span><span class="p">)</span> <span class="nf">Close</span><span class="p">()</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>关闭将停止所有goroutine，并关闭所有channel。</p>
+<h1 id="func-cache-del">func (*Cache) Del</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Cache</span><span class="p">)</span> <span class="nf">Del</span><span class="p">(</span><span class="nx">key</span> <span class="kd">interface</span><span class="p">{})</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Del从缓存中删除键值项（如果存在）。</p>
+<h1 id="func-cache-get">func (*Cache) Get</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Cache</span><span class="p">)</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">key</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">(</span><span class="kd">interface</span><span class="p">{},</span> <span class="kt">bool</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Get返回值（如果有）和一个布尔值，表示是否找到该值。值可以为nil，布尔值可以同时为true。</p>
+<h1 id="func-cache-set">func (*Cache) Set</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Cache</span><span class="p">)</span> <span class="nf">Set</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">cost</span> <span class="kt">int64</span><span class="p">)</span> <span class="kt">bool</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>set尝试将键值项添加到缓存中。如果返回false，则删除Set，并且不将键值项添加到缓存中。如果返回true，则如果确定键值项不值得保留，则该策略仍有可能被丢弃，但否则将添加该项，并逐出其他项以腾出空间。</p>
+<p>要使用Config.Coster函数动态评估物料成本，请将cost参数设置为0，然后在需要时运行Coster，以找到物料的真实成本。</p>
+<h1 id="func-cache-setwithttl">func (*Cache) SetWithTTL</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Cache</span><span class="p">)</span> <span class="nf">SetWithTTL</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">cost</span> <span class="kt">int64</span><span class="p">,</span> <span class="nx">ttl</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">)</span> <span class="kt">bool</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>SetWithTTL的工作方式与Set相似，但是将键值对添加到缓存中，该键值对将在经过指定的TTL（生存时间）后过期。零值表示该值永不过期，与调用Set相同。负值是无操作，该值将被丢弃。</p>
+<h1 id="type-config">type Config</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Config</span> <span class="kd">struct</span> <span class="p">{</span>
+<span class="c1">// NumCounters determines the number of counters (keys) to keep that hold
+</span><span class="c1"></span>	<span class="c1">// access frequency information. It&#39;s generally a good idea to have more
+</span><span class="c1"></span>	<span class="c1">// counters than the max cache capacity, as this will improve eviction
+</span><span class="c1"></span>	<span class="c1">// accuracy and subsequent hit ratios.
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// For example, if you expect your cache to hold 1,000,000 items when full,
+</span><span class="c1"></span>	<span class="c1">// NumCounters should be 10,000,000 (10x). Each counter takes up 4 bits, so
+</span><span class="c1"></span>	<span class="c1">// keeping 10,000,000 counters would require 5MB of memory.
+</span><span class="c1"></span>	<span class="nx">NumCounters</span> <span class="kt">int64</span>
+	<span class="c1">// MaxCost can be considered as the cache capacity, in whatever units you
+</span><span class="c1"></span>	<span class="c1">// choose to use.
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// For example, if you want the cache to have a max capacity of 100MB, you
+</span><span class="c1"></span>	<span class="c1">// would set MaxCost to 100,000,000 and pass an item&#39;s number of bytes as
+</span><span class="c1"></span>	<span class="c1">// the `cost` parameter for calls to Set. If new items are accepted, the
+</span><span class="c1"></span>	<span class="c1">// eviction process will take care of making room for the new item and not
+</span><span class="c1"></span>	<span class="c1">// overflowing the MaxCost value.
+</span><span class="c1"></span>	<span class="nx">MaxCost</span> <span class="kt">int64</span>
+	<span class="c1">// BufferItems determines the size of Get buffers.
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// Unless you have a rare use case, using `64` as the BufferItems value
+</span><span class="c1"></span>	<span class="c1">// results in good performance.
+</span><span class="c1"></span>	<span class="nx">BufferItems</span> <span class="kt">int64</span>
+	<span class="c1">// Metrics determines whether cache statistics are kept during the cache&#39;s
+</span><span class="c1"></span>	<span class="c1">// lifetime. There *is* some overhead to keeping statistics, so you should
+</span><span class="c1"></span>	<span class="c1">// only set this flag to true when testing or throughput performance isn&#39;t a
+</span><span class="c1"></span>	<span class="c1">// major factor.
+</span><span class="c1"></span>	<span class="nx">Metrics</span> <span class="kt">bool</span>
+	<span class="c1">// OnEvict is called for every eviction and passes the hashed key, value,
+</span><span class="c1"></span>	<span class="c1">// and cost to the function.
+</span><span class="c1"></span>	<span class="nx">OnEvict</span> <span class="kd">func</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">conflict</span> <span class="kt">uint64</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">cost</span> <span class="kt">int64</span><span class="p">)</span>
+	<span class="c1">// KeyToHash function is used to customize the key hashing algorithm.
+</span><span class="c1"></span>	<span class="c1">// Each key will be hashed using the provided function. If keyToHash value
+</span><span class="c1"></span>	<span class="c1">// is not set, the default keyToHash function is used.
+</span><span class="c1"></span>	<span class="nx">KeyToHash</span> <span class="kd">func</span><span class="p">(</span><span class="nx">key</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">(</span><span class="kt">uint64</span><span class="p">,</span> <span class="kt">uint64</span><span class="p">)</span>
+	<span class="c1">// Cost evaluates a value and outputs a corresponding cost. This function
+</span><span class="c1"></span>	<span class="c1">// is ran after Set is called for a new item or an item update with a cost
+</span><span class="c1"></span>	<span class="c1">// param of 0.
+</span><span class="c1"></span>	<span class="nx">Cost</span> <span class="kd">func</span><span class="p">(</span><span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kt">int64</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Config传递给NewCache以创建新的Cache实例。</p>
+<h1 id="type-metrics">type Metrics</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Metrics</span> <span class="kd">struct</span> <span class="p">{</span>
+<span class="c1">// contains filtered or unexported fields
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>指标是缓存实例生命周期内性能统计信息的快照。</p>
+<h1 id="func-metrics-clear">func (*Metrics) Clear</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Metrics</span><span class="p">)</span> <span class="nf">Clear</span><span class="p">()</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>清除将重置所有指标。</p>
+<h1 id="func-metrics-costadded">func (*Metrics) CostAdded</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Metrics</span><span class="p">)</span> <span class="nf">CostAdded</span><span class="p">()</span> <span class="kt">uint64</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>CostAdded是已添加的费用总和（成功的Set调用）。</p>
+<h1 id="func-metrics-costevicted">func (*Metrics) CostEvicted</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Metrics</span><span class="p">)</span> <span class="nf">CostEvicted</span><span class="p">()</span> <span class="kt">uint64</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>CostEvicted是已收回的所有成本的总和。</p>
+<h1 id="func-metrics-getsdropped">func (*Metrics) GetsDropped</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Metrics</span><span class="p">)</span> <span class="nf">GetsDropped</span><span class="p">()</span> <span class="kt">uint64</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>GetsDropped是在内部删除的Get计数器增量的数量。</p>
+<h1 id="func-metrics-getskept">func (*Metrics) GetsKept</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Metrics</span><span class="p">)</span> <span class="nf">GetsKept</span><span class="p">()</span> <span class="kt">uint64</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>GetsKept是保留的Get计数器增量的数量。</p>
+<h1 id="func-metrics-hits">func (*Metrics) Hits</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Metrics</span><span class="p">)</span> <span class="nf">Hits</span><span class="p">()</span> <span class="kt">uint64</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>命中数是在其中找到对应键值的Get调用数。</p>
+<h1 id="func-metrics-keysadded">func (*Metrics) KeysAdded</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Metrics</span><span class="p">)</span> <span class="nf">KeysAdded</span><span class="p">()</span> <span class="kt">uint64</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>KeysAdded 是添加了新的键值项的Set调用的总数。</p>
+<h1 id="func-metrics-keysevicted">func (*Metrics) KeysEvicted</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Metrics</span><span class="p">)</span> <span class="nf">KeysEvicted</span><span class="p">()</span> <span class="kt">uint64</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>KeysEvicted是已淘汰密钥的总数。</p>
+<h1 id="func-metrics-keysupdated">func (*Metrics) KeysUpdated</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Metrics</span><span class="p">)</span> <span class="nf">KeysUpdated</span><span class="p">()</span> <span class="kt">uint64</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>KeysUpdated是更新值的Set调用的总数。</p>
+<h1 id="func-metrics-misses">func (*Metrics) Misses</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Metrics</span><span class="p">)</span> <span class="nf">Misses</span><span class="p">()</span> <span class="kt">uint64</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Misses是未找到对应键值的Get调用数。</p>
+<h1 id="func-metrics-ratio">func (*Metrics) Ratio</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Metrics</span><span class="p">)</span> <span class="nf">Ratio</span><span class="p">()</span> <span class="kt">float64</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>比率是所有访问的命中数（命中+未命中）。这是Get成功调用的百分比。</p>
+<h1 id="func-metrics-setsdropped">func (*Metrics) SetsDropped</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Metrics</span><span class="p">)</span> <span class="nf">SetsDropped</span><span class="p">()</span> <span class="kt">uint64</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>SetsDropped是未进入内部缓冲区（由于争用或其他原因）的Set调用数。</p>
+<h1 id="func-metrics-setsrejected">func (*Metrics) SetsRejected</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Metrics</span><span class="p">)</span> <span class="nf">SetsRejected</span><span class="p">()</span> <span class="kt">uint64</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>SetsRejected是策略（TinyLFU）拒绝的Set呼叫数。</p>
+<h1 id="func-metrics-string">func (*Metrics) String</h1>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Metrics</span><span class="p">)</span> <span class="nf">String</span><span class="p">()</span> <span class="kt">string</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>String返回指标的字符串表示形式。</p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2020-08-04
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go/">Go</a>
+          <a href="/tags/ristretto/">ristretto</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/%E5%BA%8F%E5%88%97%E5%8C%96vmihailenco-msgpack/">
+            <span class="next-text nav-default">序列化:vmihailenco-Msgpack</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2020
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
