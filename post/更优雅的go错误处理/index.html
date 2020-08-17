@@ -53,7 +53,7 @@
 <meta itemprop="description" content="错误类型解析 error 接口 Go 继承了 C，以返回值为错误处理的主要方式。但与 C 不同的是，在 Go 的惯用法中，返回值不是整型等常用返回值类型（errno），而">
 <meta itemprop="datePublished" content="2019-04-05T21:50:59&#43;00:00" />
 <meta itemprop="dateModified" content="2019-04-05T21:50:59&#43;00:00" />
-<meta itemprop="wordCount" content="6491">
+<meta itemprop="wordCount" content="9031">
 
 
 
@@ -167,8 +167,8 @@
         <div class="post-category">
             <a href="/categories/go/"> Go </a>
             </div>
-          <span class="more-meta"> 约 6491 字 </span>
-          <span class="more-meta"> 预计阅读 13 分钟 </span>
+          <span class="more-meta"> 约 9031 字 </span>
+          <span class="more-meta"> 预计阅读 19 分钟 </span>
         
       </div>
     </header>
@@ -584,7 +584,8 @@
 <li>隐藏内部细节的错误处理：假设上层代码不知道被调用函数返回的错误任何细节，直接再向上返回错误</li>
 </ol>
 <h2 id="返回和检查错误值">返回和检查错误值</h2>
-<p>这种方式在其它语言中，也很常见。</p>
+<p>这个名字来源于计算机编程中使用特定值来表示无法进一步处理的做法。因此，对于Go我们使用特定的值来表示错误。例子包括类似于像包io.EOF或常量那样的低级错误syscall，比如syscall.ENOENT。甚至有用sentinel error，表示没有发生错误，例如go/build.NoGoError, and path/filepath.SkipDir 。</p>
+<p>使用sentinel错误处理是最不灵活的错误处理策略，因为调用者必须使用相等运算符将结果与预先声明的值进行比较。当你想提供更多的上下文时，这会产生问题，因为返回不同的错误将会破坏相等性检查。即使是fmt.Errorf用来向错误添加一些上下文的含义也会破坏调用者的相等性测试。相反，调用者将不得不看的输出error的Error方法，看它是否一个特定的字符串相匹配。</p>
 <p>这种策略是最不灵活的错误处理策略，上层代码需要判断返回错误值是否等于特定值。如果想修改返回的错误值，则会破坏上层调用代码的逻辑。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -605,6 +606,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>另外一种场景也属于这类情况，上层代码通过检查错误的Error方法的返回值是否包含特定字符串，来判定如何进行错误处理。</p>
+<p>顺便说一句，不应该检查error.Error方法的输出。该Error方法仅仅提供可视化，而不是代码逻辑判断。该字符串的内容属于日志文件，或显示在屏幕上。有时这是不可能的，正如有人在twitter上指出的那样，这个建议不适用于编写测试。比较字符串形式的错误是一种坏的代码风格，你应该尽量避免它。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt"> 1
@@ -639,12 +641,79 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>error interface 的 Error 方法的输出，是给人看的，不是给机器看的。我们通常会把Error方法返回的字符串打印到日志中，或者显示在控制台上。永远不要通过判断Error方法返回的字符串是否包含特定字符串，来决定错误处理的方式。</p>
-<p>如果你是开发一个公共库，库的API返回了特定值的错误值。那么必须把这个特定值的错误定义为public，写在文档中。</p>
-<p>“高内聚、低耦合”是衡量公共库质量的一个重要方面，而返回特定错误值的方式，增加了公共库和调用代码的耦合性。让模块之间产生了依赖。</p>
+</div><p>如果你的公共函数或方法返回特定值的错误，那么该值必须是公开的，并且应该有文档说明来增加API完整性。如果你的API定义了一个返回特定错误的接口，则该接口的所有实现都将被限制为仅返回该错误类型，即使它们可能提供更多描述性错误。我们来看io.Copy函数，需要一个实现io.Reader接口的对象，对象返回io.EOF的信号，是通知调用者没有更多的数据，但这不是一个错误。</p>
+<p>Sentinel errors create a dependency between two packages</p>
+<p>到目前为止，Sentinel错误值最糟糕的问题是它们在两个包之间创建源代码依赖关系。作为一个例子，为了检查错误是否等于io.EOF，你的代码必须导入这个io包。这个具体的例子听起来不是很糟糕，由于它很常见，但想象一下,当项目中的许多软件包导出错误值时，导致耦合度上升，项目中的其他软件包也必须导入依赖包以检查特定错误情况。在参与一个大型项目中，不良设计的幽灵（以导入循环的形式）是我们谨慎的事情。</p>
+<p>结论：避免Sentinel错误</p>
+<p>所以，建议是避免在你编写的代码中使用标记错误值。在标准库中，有少许的示例使用，但这不应该值得我们借鉴。如果有人要求你从你的包中导出一个错误值，你应该礼貌地拒绝，而是建议一种替代方法，比如将在下面讨论的方法。</p>
 <h2 id="自定义错误类型">自定义错误类型</h2>
 <p>如果要提供额外的 error context，我们可以定义自己的实现 error 接口的类型；如果这些类型还是 exported 的，我们就可以用 type assertion or type switch 来判断返回的错误码类型并予以对应处理。</p>
-<p>这种方式相比于“返回和检查错误值”，很大一个优点在于可以将底层错误包起来一起返回给上层，这样可以提供更多的上下文信息。比如os.PathError：</p>
+<p>这种方式相比于“返回和检查错误值”，很大一个优点在于可以将底层错误包起来一起返回给上层，这样可以提供更多的上下文信息。</p>
+<p>错误类型是我想讨论的Go错误处理的第二种形式。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="k">if</span> <span class="nx">err</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">err</span><span class="p">.(</span><span class="nx">SomeType</span><span class="p">);</span> <span class="nx">ok</span> <span class="p">{</span> <span class="err">…</span> <span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>错误是一种类型接口，在这个例子中，MyError类型跟踪文件和行号，以及解释发生了什么事情。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">MyError</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">Msg</span> <span class="kt">string</span>
+    <span class="nx">File</span> <span class="kt">string</span>
+    <span class="nx">Line</span> <span class="kt">int</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">MyError</span><span class="p">)</span> <span class="nf">Error</span><span class="p">()</span> <span class="kt">string</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%s:%d: %s”, e.File, e.Line, e.Msg)
+</span><span class="s">}
+</span><span class="s">
+</span><span class="s">return &amp;MyError{&#34;</span><span class="nx">Something</span> <span class="nx">happened</span><span class="s">&#34;, “server.go&#34;</span><span class="p">,</span> <span class="mi">42</span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>由于MyError是error类型，调用者可以使用类型断言来从错误中提取额外的上下文。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">err</span> <span class="o">:=</span> <span class="nf">something</span><span class="p">()</span>
+<span class="k">switch</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">err</span><span class="p">.(</span><span class="kd">type</span><span class="p">)</span> <span class="p">{</span>
+<span class="k">case</span> <span class="kc">nil</span><span class="p">:</span>
+    <span class="c1">// call succeeded, nothing to do
+</span><span class="c1"></span><span class="k">case</span> <span class="o">*</span><span class="nx">MyError</span><span class="p">:</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="err">“</span><span class="kt">error</span> <span class="nx">occurred</span> <span class="nx">on</span> <span class="nx">line</span><span class="p">:</span><span class="err">”</span><span class="p">,</span> <span class="nx">err</span><span class="p">.</span><span class="nx">Line</span><span class="p">)</span>
+<span class="k">default</span><span class="p">:</span>
+<span class="c1">// unknown error
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>错误类型替代错误值（Sentinel）的重大改进是它们能包装底层错误以提供更多上下文的能力。</p>
+<p>比如os.PathError：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt">1
@@ -755,10 +824,38 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>然而，这种方式依然会增加模块之间的依赖。</p>
+</div><p>下面这个例子中，os.PathError它用它正试图执行的操作以及它试图使用的文件来注释底层错误。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// PathError records an error and the operation
+</span><span class="c1">// and file path that caused it.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">PathError</span> <span class="kd">struct</span> <span class="p">{</span>
+        <span class="nx">Op</span>   <span class="kt">string</span>
+        <span class="nx">Path</span> <span class="kt">string</span>
+        <span class="nx">Err</span>  <span class="kt">error</span> <span class="c1">// the cause
+</span><span class="c1"></span><span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">PathError</span><span class="p">)</span> <span class="nf">Error</span><span class="p">()</span> <span class="kt">string</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Problems with error types</p>
+<p>由于调用者可以使用类型断言或类型切换，错误类型必须公开。如果你的代码实现了其需要特定错误类型的接口，则该接口的所有实现者都需要依赖于定义错误类型的包。这种对包类型的深入了解可以与调用者形成强大的耦合，从而形成一个脆弱的API。</p>
+<p>结论：避免error types</p>
+<p>虽然错误类型比标记错误值更好，但由于它们可以捕获关于错误的更多上下文，错误类型与标记错误值存在共同的问题。所以我的建议是再次避免错误类型，或者至少避免让它们成为公共API的一部分。</p>
 <h2 id="隐藏内部细节的错误处理">隐藏内部细节的错误处理</h2>
-<p>这种策略之所以叫“隐藏内部细节的错误处理”，是因为当上层代码碰到错误发生的时候，不知道错误的内部细节。</p>
-<p>作为上层代码，你需要知道的就是被调用函数是否正常工作。 如果你接受这个原则，将极大降低模块之间的耦合性。</p>
+<p>这种策略之所以叫“隐藏内部细节的错误处理”，是因为当上层代码碰到错误发生的时候，不知道错误的内部细节。作为上层代码，你需要知道的就是被调用函数是否正常工作。 如果你接受这个原则，将极大降低模块之间的耦合性。</p>
+<p>现在我们来看第三类错误处理。在我看来，这是最灵活的错误处理策略，因为它要求代码和调用者之间的耦合最少。我将这种风格称为不透明错误处理，因为当你知道发生错误时，你无法看到错误内部。作为调用者，你所知道的操作结果只是它的工作原理，或者没有。这就是所有不透明的错误处理 - 只是返回错误而不假设其内容。如果你采用这种方式，那么错误处理作为调试辅助工具变得更加有用。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt">1
@@ -777,13 +874,101 @@
 <span class="kd">func</span> <span class="nf">fn</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
     <span class="nx">x</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">bar</span><span class="p">.</span><span class="nf">Foo</span><span class="p">()</span>
     <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-        <span class="k">return</span> <span class="nx">err</span>
+            <span class="k">return</span> <span class="nx">err</span>
     <span class="p">}</span>
     <span class="c1">// use x
 </span><span class="c1"></span><span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>上面的例子中，Foo这个方法不承诺返回的错误的具体内容。这样，Foo函数的开发者可以不断调整返回错误的内容来提供更多的错误信息，而不会破坏Foo提供的协议。这就是“隐藏内部细节”的内涵。</p>
+</div><p>例如，Foo函数不能保证它会在错误的情况下返回什么。现在，Foo可以自由注释通过附加上下文传递的错误，而不会违反与调用方（fn）的关系。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">Assert</span> <span class="nx">errors</span> <span class="k">for</span> <span class="nx">behaviour</span><span class="p">,</span> <span class="nx">not</span> <span class="kd">type</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在少数情况下，这种错误处理的方法是不充分的。例如，与流程之外的世界进行交互（例如网络活动）要求调用者调查错误的性质，以决定重试操作是否合理。在这种情况下，我们可以断言错误实现了特定的行为，而不是断言错误是特定的类型或值。考虑这个例子：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">temporary</span> <span class="kd">interface</span> <span class="p">{</span>
+        <span class="nf">Temporary</span><span class="p">()</span> <span class="kt">bool</span>
+<span class="p">}</span>
+
+<span class="c1">// IsTemporary returns true if err is temporary.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">IsTemporary</span><span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+        <span class="nx">te</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">err</span><span class="p">.(</span><span class="nx">temporary</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">te</span><span class="p">.</span><span class="nf">Temporary</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们可以传递任何错误给IsTemporary函数来确定错误是否可以重试。如果错误没有实现temporary接口，也就是说，它没有Temporary方法，那么错误不是暂时的。如果错误确实实现了Temporary，调用者能调用重试操作。这里的关键是这个逻辑可以在不导入定义错误的包或实际知道任何关于err底层类型的包的情况下实现-我们只是对它的行为感兴趣。</p>
+<p>Don’t just check errors, handle them gracefully</p>
+<p>这让我想到了第二个我想谈论的Go知识点; 不要只检查错误，优雅地处理它们。你能用下面的一段代码来提出一些问题吗？</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">AuthenticateRequest</span><span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">Request</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="nx">err</span> <span class="o">:=</span> <span class="nf">authenticate</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">User</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="nx">err</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>一个明显的建议是该函数的五行可以替换为:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="k">return</span> <span class="nf">authenticate</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">User</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>但这是每个人都应该在代码审查中抓住的简单东西。更根本的是这个代码的问题是，我不知道原始错误来自哪里。如果authenticate返回错误，则会AuthenticateRequest将错误返回给其调用者，他们可能会这样做，等等。在程序的顶部，程序的主体将把错误输出到屏幕或日志文件中，所有打印的内容是：No such file or directory。</p>
+<p>没有文件和行的信息生成错误。调用堆栈没有导致错误的堆栈跟踪。此代码的作者将被迫进行长时间的平分其代码，以发现哪些代码路径触发了文件未找到错误。Donovan和Kernighan的Go编程语言建议你使用添加上下文到错误路径fmt.Errorf</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">AuthenticateRequest</span><span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">Request</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+        <span class="nx">err</span> <span class="o">:=</span> <span class="nf">authenticate</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">User</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;authenticate failed: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>但正如我们前面所看到的，这种模式与使用标记错误值或类型断言不兼容，因为将错误值转换为字符串，将其与另一个字符串合并，然后将其转换为具有fmt.Errorf中断等式的错误并销毁任何上下文在原来的错误。</p>
 <h2 id="最合适的错误处理策略">最合适的错误处理策略</h2>
 <p>上面我们提到了三种错误处理策略，其中第三种策略耦合性最低。然而，第三种方式也存在一些问题：</p>
 <ul>
@@ -1222,7 +1407,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>通过fmt.Errorf创建一个新的错误，添加更多的上下文信息到新的错误中，但这样仍不能解决上面提出的问题。</p>
-<p>这里，我们通过一个很小的包github.com/pkg/errors来试图解决上面的问题。这个包提供这样几个主要的API：</p>
+<p>这里，我们通过一个很小的包<code>github.com/pkg/errors</code>来试图解决上面的问题。这个包提供这样几个主要的API：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt">1
@@ -1737,6 +1922,8 @@ exit status 1
 </code></pre></td></tr></table>
 </div>
 </div><p>sample4/main.go中将出错的代码行数也打印了出来，这样的日志，可以帮助我们更方便的定位问题原因。</p>
+<h1 id="结论">结论</h1>
+<p>简而言之，错误是你的软件包的公共API的一部分，与你公开API的任何其他部分一样谨慎。为了获得最大的灵活性，我建议你尝试将所有错误视为不透明。在不能这样做的情况下，为行为声明错误，而不是类型或值。最大限度地减少程序中的标记错误值的数量，并将错误转换为不透明的错误，只要它们一出现就用errors.Wrap将它们包装起来。最后，如果需要检查它，则使用errors.Cause来恢复基本错误。</p>
 <p>参考:<br>
 <a href="http://lessisbetter.site/2018/10/24/go-handle-error/">http://lessisbetter.site/2018/10/24/go-handle-error/</a>
 <a href="https://windmt.com/2017/07/30/golang-error-handle/">https://windmt.com/2017/07/30/golang-error-handle/</a>
