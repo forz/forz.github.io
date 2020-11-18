@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Go的调度器原理 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="协程 进程时代 最初的计算机上面没有操作系统，更别提进程、线程和协程了。 后来，现代化的计算机有了操作系统，每个程序都是一个进程，但是操作系统在一" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
+
+
+<link rel="canonical" href="/post/go%E7%9A%84%E8%B0%83%E5%BA%A6%E5%99%A8%E5%8E%9F%E7%90%86/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Go的调度器原理" />
+<meta property="og:description" content="协程 进程时代 最初的计算机上面没有操作系统，更别提进程、线程和协程了。 后来，现代化的计算机有了操作系统，每个程序都是一个进程，但是操作系统在一" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/go%E7%9A%84%E8%B0%83%E5%BA%A6%E5%99%A8%E5%8E%9F%E7%90%86/" />
+<meta property="article:published_time" content="2019-07-05T16:46:28+00:00" />
+<meta property="article:modified_time" content="2019-07-05T16:46:28+00:00" />
+<meta itemprop="name" content="Go的调度器原理">
+<meta itemprop="description" content="协程 进程时代 最初的计算机上面没有操作系统，更别提进程、线程和协程了。 后来，现代化的计算机有了操作系统，每个程序都是一个进程，但是操作系统在一">
+<meta itemprop="datePublished" content="2019-07-05T16:46:28&#43;00:00" />
+<meta itemprop="dateModified" content="2019-07-05T16:46:28&#43;00:00" />
+<meta itemprop="wordCount" content="14810">
+
+
+
+<meta itemprop="keywords" content="Go,调度器," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Go的调度器原理"/>
+<meta name="twitter:description" content="协程 进程时代 最初的计算机上面没有操作系统，更别提进程、线程和协程了。 后来，现代化的计算机有了操作系统，每个程序都是一个进程，但是操作系统在一"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Go的调度器原理</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2019-07-05 </span>
+        <div class="post-category">
+            <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
+            </div>
+          <span class="more-meta"> 约 14810 字 </span>
+          <span class="more-meta"> 预计阅读 30 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#协程">协程</a>
+      <ul>
+        <li><a href="#进程时代">进程时代</a></li>
+        <li><a href="#线程时代">线程时代</a></li>
+        <li><a href="#协程时代">协程时代</a></li>
+      </ul>
+    </li>
+    <li><a href="#goroutine">Goroutine</a>
+      <ul>
+        <li><a href="#goroutine和线程的区别">goroutine和线程的区别</a></li>
+      </ul>
+    </li>
+    <li><a href="#g-p-m模型">G-P-M模型</a>
+      <ul>
+        <li><a href="#g">G</a></li>
+        <li><a href="#m">M</a></li>
+        <li><a href="#p">P</a></li>
+      </ul>
+    </li>
+    <li><a href="#调度思想">调度思想</a>
+      <ul>
+        <li><a href="#复用线程">复用线程</a></li>
+        <li><a href="#利用并行">利用并行</a></li>
+        <li><a href="#抢占">抢占</a></li>
+        <li><a href="#全局g队列">全局G队列</a></li>
+        <li><a href="#poller">Poller</a></li>
+      </ul>
+    </li>
+    <li><a href="#go-func-调度流程">go func() 调度流程</a></li>
+    <li><a href="#调度器的生命周期">调度器的生命周期</a>
+      <ul>
+        <li><a href="#m0和g0">M0和G0</a></li>
+      </ul>
+    </li>
+    <li><a href="#调度器的基本原理">调度器的基本原理</a>
+      <ul>
+        <li></li>
+        <li><a href="#m如何寻找g">M如何寻找G</a></li>
+      </ul>
+    </li>
+    <li><a href="#调度触发时机">调度触发时机</a>
+      <ul>
+        <li><a href="#系统态的阻塞唤醒">系统态的阻塞/唤醒</a></li>
+        <li><a href="#用户态的阻塞唤醒">用户态的阻塞/唤醒</a></li>
+        <li><a href="#netpoller">NetPoller</a></li>
+        <li><a href="#抢占式调度">抢占式调度</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="协程">协程</h2>
+<h3 id="进程时代">进程时代</h3>
+<p>最初的计算机上面没有操作系统，更别提进程、线程和协程了。</p>
+<p>后来，现代化的计算机有了操作系统，每个程序都是一个进程，但是操作系统在一段时间只能运行一个进程，直到这个进程运行完，才能运行下一个进程，这个时期可以成为单进程时代——串行时代。</p>
+<p>后来操作系统就具有了最早的并发能力：多进程并发，当一个进程阻塞的时候，切换到另外等待执行的进程，这样就能尽量把CPU利用起来，CPU就不浪费了。</p>
+<h3 id="线程时代">线程时代</h3>
+<p>有了对进程的调度能力之后，发现进程拥有太多资源，在创建、切换和销毁的时候，都会占用很长的时间，CPU虽然利用起来了，但CPU有很大的一部分都被用来进行进程调度了，怎么才能提高CPU的利用率呢？</p>
+<p>大家希望能有一种轻量级的进程，调度不怎么花时间，这样CPU就有更多的时间用在执行任务上。</p>
+<p>后来，操作系统支持了线程，线程在进程里面，线程运行所需要资源比进程少多了，跟进程比起来，切换简直是“不算事”。</p>
+<p>一个进程可以有多个线程，CPU在执行调度的时候切换的是线程，如果下一个线程也是当前进程的，就只有线程切换，“很快”就能完成，如果下一个线程不是当前的进程，就需要切换进程，这就得费点时间了。</p>
+<p>传统的编程语言比如C、C++等的并发实现实际上就是基于操作系统调度的，即程序负责创建线程(一般通过pthread等lib调用实现)，操作系统负责调度。这种传统支持并发的方式有诸多不足：</p>
+<p>复杂:</p>
+<ul>
+<li>创建容易，退出难：做过C/C++ Programming的童鞋都知道，创建一个thread(比如利用pthread)虽然参数也不少，但好歹可以接受。但一旦涉及到thread的退出，就要考虑thread是detached，还是需要parent thread去join？是否需要在thread中设置cancel point，以保证join时能顺利退出？</li>
+<li>并发单元间通信困难，易错：多个thread之间的通信虽然有多种机制可选，但用起来是相当复杂；并且一旦涉及到shared memory，就会用到各种lock，死锁便成为家常便饭；</li>
+<li>thread stack size的设定：是使用默认的，还是设置的大一些，或者小一些呢？</li>
+</ul>
+<p>难于scaling:</p>
+<ul>
+<li>一个thread的代价已经比进程小了很多了，但我们依然不能大量创建thread，因为除了每个thread占用的资源不小之外，操作系统调度切换thread的代价也不小；</li>
+<li>对于很多网络服务程序，由于不能大量创建thread，就要在少量thread里做网络多路复用，即：使用epoll/kqueue/IoCompletionPort这套机制，即便有libevent/libev这样的第三方库帮忙，写起这样的程序也是很不易的，存在大量callback，给程序员带来不小的心智负担。</li>
+</ul>
+<h3 id="协程时代">协程时代</h3>
+<p>多进程、多线程已经提高了系统的并发能力，但是在当今互联网高并发场景下，为每个任务都创建一个线程是不现实的，因为会消耗大量的内存（每个线程的内存占用级别为MB），线程多了之后调度也会消耗大量的CPU。如何才能充分利用CPU、内存等资源的情况下，实现更高的并发？</p>
+<p>既然线程的资源占用、调度在高并发的情况下，依然是比较大的，是否有一种东西，更加轻量？</p>
+<p>你可能知道：线程分为内核态线程和用户态线程，用户态线程需要绑定内核态线程，CPU并不能感知用户态线程的存在，它只知道它在运行1个线程，这个线程实际是内核态线程。</p>
+<p>用户态线程实际有个名字叫协程（co-routine），为了容易区分，我们使用协程指用户态线程，使用线程指内核态线程。</p>
+<p>User-level threads, Application-level threads, Green threads都指一样的东西，就是不受OS感知的线程，如果你Google coroutine相关的资料，会看到它指的就是用户态线程，在Green threads的维基百科里，看Green threads的实现列表，你会看到好很多coroutine实现，比如Java、Lua、Go、Erlang、Common Lisp、Haskell、Rust、PHP、Stackless Python，所以，我认为用户态线程就是协程。</p>
+<p>协程跟线程是有区别的，线程由CPU调度是抢占式的，协程由用户态调度是协作式的，一个协程让出CPU后，才执行下一个协程。</p>
+<p>协程和线程有3种映射关系：</p>
+<p>N:1模型:N个协程在1个内核空间线程上运行。优势是上下文切换非常快但是无法利用多核系统的优点。</p>
+<p>1:1模型:1个线程运行一个协程。这种充分利用了多核系统的优势但是上下文切换非常慢，因为每一次调度都会在用户态和内核态之间切换。（POSIX线程模型(pthread)，Java）</p>
+<p>M:N模型:每个协程对应多个线程，同时也可以一个线程对应多个协程。Go打算采用这种模型，使用任意个内核模型管理任意个goroutine。这样结合了以上两种模型的优点，但缺点就是调度的复杂性。</p>
+<h2 id="goroutine">Goroutine</h2>
+<p>Go采用了用户层轻量级thread或者说是类coroutine的概念来解决这些问题，Go将之称为”goroutine“。goroutine占用的资源非常小(Go 1.4将每个goroutine stack的size默认设置为2k)，goroutine调度的切换也不用陷入(trap)操作系统内核层完成，代价很低。因此，一个Go程序中可以创建成千上万个并发的goroutine。所有的Go代码都在goroutine中执行，哪怕是go的runtime也不例外。将这些goroutines按照一定算法放到“CPU”上执行的程序就称为goroutine调度器或goroutine scheduler。</p>
+<p>不过，一个Go程序对于操作系统来说只是一个用户层程序，对于操作系统而言，它的眼中只有thread，它甚至不知道有什么叫Goroutine的东西的存在。goroutine的调度全要靠Go自己完成，实现Go程序内goroutine之间“公平”的竞争“CPU”资源，这个任务就落到了Go runtime头上，要知道在一个Go程序中，除了用户代码，剩下的就是go runtime了。</p>
+<p>于是Goroutine的调度问题就演变为go runtime如何将程序内的众多goroutine按照一定算法调度到“CPU”资源上运行了。在操作系统层面，Thread竞争的“CPU”资源是真实的物理CPU，但在Go程序层面，各个Goroutine要竞争的”CPU”资源是什么呢？Go程序是用户层程序，它本身整体是运行在一个或多个操作系统线程上的，因此goroutine们要竞争的所谓“CPU”资源就是操作系统线程。这样Go scheduler的任务就明确了：将goroutines按照一定算法放到不同的操作系统线程中去执行。这种在语言层面自带调度器的，我们称之为原生支持并发。</p>
+<h3 id="goroutine和线程的区别">goroutine和线程的区别</h3>
+<p>我们可以从三个角度区别：内存消耗、创建与销毀、切换。</p>
+<h4 id="内存占用">内存占用</h4>
+<p>创建一个 goroutine 的栈内存消耗为 2 KB，实际运行过程中，如果栈空间不够用，会自动进行扩容。创建一个 thread 则需要消耗 1 MB 栈内存，而且还需要一个被称为 “a guard page” 的区域用于和其他 thread 的栈空间进行隔离。</p>
+<p>对于一个用 Go 构建的 HTTP Server 而言，对到来的每个请求，创建一个 goroutine 用来处理是非常轻松的一件事。而如果用一个使用线程作为并发原语的语言构建的服务，例如 Java 来说，每个请求对应一个线程则太浪费资源了，很快就会出 OOM 错误（OutOfMermoryError）。</p>
+<h4 id="创建和销毀">创建和销毀</h4>
+<p>Thread 创建和销毀都会有巨大的消耗，因为要和操作系统打交道，是内核级的，通常解决的办法就是线程池。而 goroutine 因为是由 Go runtime 负责管理的，创建和销毁的消耗非常小，是用户级。</p>
+<h4 id="切换">切换</h4>
+<p>当 threads 切换时，需要保存各种寄存器，以便将来恢复：</p>
+<p>16 general purpose registers, PC (Program Counter), SP (Stack Pointer), segment registers, 16 XMM registers, FP coprocessor state, 16 AVX registers, all MSRs etc.</p>
+<p>而 goroutines 切换只需保存三个寄存器：Program Counter, Stack Pointer and BP。</p>
+<p>一般而言，线程切换会消耗 1000-1500 纳秒，一个纳秒平均可以执行 12-18 条指令。所以由于线程切换，执行指令的条数会减少 12000-18000。</p>
+<p>Goroutine 的切换约为 200 ns，相当于 2400-3600 条指令。</p>
+<p>因此，goroutines 切换成本比 threads 要小得多。</p>
+<h2 id="g-p-m模型">G-P-M模型</h2>
+<ul>
+<li>
+<p>G: 表示goroutine，存储了goroutine的执行stack信息、goroutine状态以及goroutine的任务函数等；另外G对象是可以重用的。</p>
+</li>
+<li>
+<p>P: 表示逻辑processor，P的数量决定了系统内最大可并行的G的数量（前提：系统的物理cpu核数&gt;=P的数量）；P的最大作用还是其拥有的各种G对象队列、链表、一些cache和状态。</p>
+</li>
+<li>
+<p>M: M代表着真正的执行计算资源。在绑定有效的p后，进入schedule循环；而schedule循环的机制大致是从各种队列、p的本地队列中获取G，切换到G的执行栈上并执行G的函数，调用goexit做清理工作并回到m，如此反复。M并不保留G状态，这是G可以跨M调度的基础。</p>
+</li>
+</ul>
+<p>P是一个“逻辑Proccessor”，每个G要想真正运行起来，首先需要被分配一个P（进入到P的local runq中，这里暂忽略global runq那个环节）。对于G来说，P就是运行它的“CPU”，可以说：G的眼里只有P。但从Go scheduler视角来看，真正的“CPU”是M，只有将P和M绑定才能让P的runq中G得以真实运行起来。这样的P与M的关系，就好比Linux操作系统调度层面用户线程(user thread)与核心线程(kernel thread)的对应关系那样(N x M)。</p>
+<p>P必须和M组合起来执行G，但是两者也并不是完全1:1对应，通常情况下P的数量固定和CPU的核数一样(GOMAXPROCS参数)，M则是按需创建，比如当M因为陷入系统调用而长时间阻塞的时候，P就会被监控线程抢回，去新建或者唤醒另一个M去执行，因此M的数量会增加，系统中可能存在一些阻塞的M。</p>
+<p>Goroutine调度器和系统调度器是通过M结合起来的，每个M都代表了1个内核线程，系统调度器负责把内核线程分配到CPU的核上执行。</p>
+<p>这幅图，展示了goroutine调度器和系统调度器的关系，而不是把二者割裂开来，并且从宏观的角度展示了调度器的重要组成。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201115152546.png" alt=""></p>
+<p>自顶向下是调度器的4个部分：</p>
+<ol>
+<li>全局队列（Global Queue）：存放等待运行的G。</li>
+<li>P的本地队列：同全局队列类似，存放的也是等待运行的G，存的数量有限，不超过256个。新建G’时，G’优先加入到P的本地队列，如果队列满了，则会把本地队列中一半的G移动到全局队列。</li>
+<li>P列表：所有的P都在程序启动时创建，并保存在数组中，最多有GOMAXPROCS个。</li>
+<li>M线程想运行任务就得获取P，从P的本地队列获取G，P队列为空时，M也会尝试从全局队列拿一批G放到P的本地队列，或从其他P的本地队列偷一半放到自己P的本地队列。M运行G，G执行之后，M会从P获取下一个G，不断重复下去。</li>
+</ol>
+<h3 id="g">G</h3>
+<p>Goroutine 就是 Go 语言调度器中待执行的任务，它在运行时调度器中的地位与线程在操作系统中差不多，但是它占用了更小的内存空间，也降低了上下文切换的开销。</p>
+<p>Goroutine 只存在于 Go 语言的运行时，它是 Go 语言在用户态提供的线程，作为一种粒度更细的资源调度单元，如果使用得当能够在高并发的场景下更高效地利用机器的 CPU。</p>
+<p>当 goroutine 被调离 CPU 时，调度器负责把 CPU 寄存器的值保存在 g 对象的成员变量之中。</p>
+<p>当 goroutine 被调度起来运行时，调度器又负责把 g 对象的成员变量所保存的寄存器值恢复到 CPU 的寄存器。</p>
+<p>Goroutine 在 Go 语言运行时使用私有结构体 runtime.g 表示。这个私有结构体非常复杂，总共包含 40 多个用于表示各种状态的成员变量，我们在这里也不会介绍全部字段，而是会挑选其中的一部分进行介绍，首先是与栈相关的两个字段：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">g</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">stack</span>       <span class="nx">stack</span>
+	<span class="nx">stackguard0</span> <span class="kt">uintptr</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>其中 stack 字段描述了当前 Goroutine 的栈内存范围 [stack.lo, stack.hi)，另一个字段 stackguard0 可以用于调度器抢占式调度。除了 stackguard0 之外，Goroutine 中还包含另外三个与抢占密切相关的字段：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">g</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">preempt</span>       <span class="kt">bool</span> <span class="c1">// 抢占信号
+</span><span class="c1"></span>	<span class="nx">preemptStop</span>   <span class="kt">bool</span> <span class="c1">// 抢占时将状态修改成 `_Gpreempted`
+</span><span class="c1"></span>	<span class="nx">preemptShrink</span> <span class="kt">bool</span> <span class="c1">// 在同步安全点收缩栈
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Goroutine 与我们在前面章节提到的 defer 和 panic 也有千丝万缕的联系，每一个 Goroutine 上都持有两个分别存储 defer 和 panic 对应结构体的链表：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">g</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">_panic</span>       <span class="o">*</span><span class="nx">_panic</span> <span class="c1">// 最内侧的 panic 结构体
+</span><span class="c1"></span>	<span class="nx">_defer</span>       <span class="o">*</span><span class="nx">_defer</span> <span class="c1">// 最内侧的延迟函数结构体
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>最后，我们再节选一些作者认为比较有趣或者重要的字段：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">g</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">m</span>              <span class="o">*</span><span class="nx">m</span>
+	<span class="nx">sched</span>          <span class="nx">gobuf</span>
+	<span class="nx">atomicstatus</span>   <span class="kt">uint32</span>
+	<span class="nx">goid</span>           <span class="kt">int64</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>m — 当前 Goroutine 占用的线程，可能为空；</li>
+<li>atomicstatus — Goroutine 的状态；</li>
+<li>sched — 存储 Goroutine 的调度相关的数据；</li>
+<li>goid — Goroutine 的 ID，该字段对开发者不可见，Go 团队认为引入 ID 会让部分 Goroutine 变得更特殊，从而限制语言的并发能力10；</li>
+</ul>
+<p>上述四个字段中，我们需要展开介绍 sched 字段的 runtime.gobuf 结构体中包含哪些内容：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">gobuf</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">sp</span>   <span class="kt">uintptr</span>
+	<span class="nx">pc</span>   <span class="kt">uintptr</span>
+	<span class="nx">g</span>    <span class="nx">guintptr</span>
+	<span class="nx">ret</span>  <span class="nx">sys</span><span class="p">.</span><span class="nx">Uintreg</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>sp — 栈指针（Stack Pointer）；</li>
+<li>pc — 程序计数器（Program Counter）；</li>
+<li>g — 持有 runtime.gobuf 的 Goroutine；</li>
+<li>ret — 系统调用的返回值；</li>
+</ul>
+<p>这些内容会在调度器保存或者恢复上下文的时候用到，其中的栈指针和程序计数器会用来存储或者恢复寄存器中的值，改变程序即将执行的代码。</p>
+<p>结构体 runtime.g 的 atomicstatus 字段就存储了当前 Goroutine 的状态。除了几个已经不被使用的以及与 GC 相关的状态之外，Goroutine 可能处于以下 9 个状态：</p>
+<table>
+<thead>
+<tr>
+<th>状态</th>
+<th>描述</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>_Gidle</td>
+<td>刚刚被分配并且还没有被初始化</td>
+</tr>
+<tr>
+<td>_Grunnable</td>
+<td>没有执行代码，没有栈的所有权，存储在运行队列中</td>
+</tr>
+<tr>
+<td>_Grunning</td>
+<td>可以执行代码，拥有栈的所有权，被赋予了内核线程 M 和处理器 P</td>
+</tr>
+<tr>
+<td>_Gsyscall</td>
+<td>正在执行系统调用，拥有栈的所有权，没有执行用户代码，被赋予了内核线程 M 但是不在运行队列上</td>
+</tr>
+<tr>
+<td>_Gwaiting</td>
+<td>由于运行时而被阻塞，没有执行用户代码并且不在运行队列上，但是可能存在于 Channel 的等待队列上</td>
+</tr>
+<tr>
+<td>_Gdead</td>
+<td>没有被使用，没有执行代码，可能有分配的栈</td>
+</tr>
+<tr>
+<td>_Gcopystack</td>
+<td>栈正在被拷贝，没有执行代码，不在运行队列上</td>
+</tr>
+<tr>
+<td>_Gpreempted</td>
+<td>由于抢占而被阻塞，没有执行用户代码并且不在运行队列上，等待唤醒</td>
+</tr>
+<tr>
+<td>_Gscan</td>
+<td>GC 正在扫描栈空间，没有执行代码，可以与其他状态同时存在</td>
+</tr>
+</tbody>
+</table>
+<p>上述状态中比较常见是_Grunnable、_Grunning、_Gsyscall、_Gwaiting 和_Gpreempted 五个状态，我们会重点介绍这几个状态，Goroutine 的状态迁移是一个复杂的过程，触发 Goroutine 状态迁移的方法也很多，在这里我们也没有办法介绍全部的迁移线路，我们会从中选择一些进行介绍。</p>
+<p>虽然 Goroutine 在运行时中定义的状态非常多而且复杂，但是我们可以将这些不同的状态聚合成最终的三种：等待中、可运行、运行中，在运行期间我们会在这三种不同的状态来回切换：</p>
+<ul>
+<li>等待中：Goroutine 正在等待某些条件满足，例如：系统调用结束等，包括 _Gwaiting、_Gsyscall 和 _Gpreempted 几个状态；</li>
+<li>可运行：Goroutine 已经准备就绪，可以在线程运行，如果当前程序中有非常多的 Goroutine，每个 Goroutine 就可能会等待更多的时间，即_Grunnable；</li>
+<li>运行中：Goroutine 正在某个线程上运行，即 _Grunning；
+golang-goroutine-state-transition</li>
+</ul>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201114234900.png" alt=""></p>
+<p>上图展示了 Goroutine 状态迁移的常见路径，其中包括创建 Goroutine 到 Goroutine 被执行、触发系统调用或者抢占式调度器的状态迁移过程。</p>
+<p>一个G在创建之初是Gidle状态。只有被初始化之后，其状态才变成Grunnable。一个G真正开始被使用是在其状态设置为Grunnabel之后。</p>
+<p>一个G在运行过程中是否会等待某个事件以及等待什么事件，完全由其封装的go函数决定。涉及通道操作，网络I/O以及操纵定时器和调用time.sleep函数会使G进入Gwaiting状态。</p>
+<p>事件到来之后，等待的G会被唤醒，并置于Grunnable状态，等待运行。</p>
+<p>G在退出系统调用时，运行时系统会首先尝试直接运行这个G。仅当无法直接运行时，才会把它转换为Grunnable状态并放入调度器的可运行G队列。那么为什么不是放入本地P的可运行G队列呢？因为在G进入系统调用之后，本地P就与当前M分离开了。当G退出系统调用时，本地P已经不在了，也就是说这个G没有本地P，所以只能让调度器去接纳它了。</p>
+<p>进入死亡状态（Gdead）的G会被放入本地P或调度器的自由G列表，可以在需要的时候重新初始化并使用。相比之下，P在进入死亡状态（Pdead）之后，只能面临销毁的结局。</p>
+<h3 id="m">M</h3>
+<p>Go 语言并发模型中的 M 是操作系统线程。调度器最多可以创建 10000 个线程，但是其中大多数的线程都不会执行用户代码（可能陷入系统调用），最多只会有 GOMAXPROCS 个活跃线程能够正常运行。</p>
+<p>在默认情况下，运行时会将 GOMAXPROCS 设置成当前机器的核数，我们也可以使用 runtime.GOMAXPROCS 来改变程序中最大的线程数。</p>
+<p>在默认情况下，一个四核机器上会创建四个活跃的操作系统线程，每一个线程都对应一个运行时中的 runtime.m 结构体。</p>
+<p>在大多数情况下，我们都会使用 Go 的默认设置，也就是线程数等于 CPU 个数，在这种情况下不会触发操作系统的线程调度和上下文切换，所有的调度都会发生在用户态，由 Go 语言调度器触发，能够减少非常多的额外开销。</p>
+<p>操作系统线程在 Go 语言中会使用私有结构体 runtime.m 来表示，这个结构体中也包含了几十个私有的字段，我们依然对其进行了删减，先来了解几个与 Goroutine 直接相关的字段：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">m</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">g0</span>   <span class="o">*</span><span class="nx">g</span>
+  <span class="nx">curg</span> <span class="o">*</span><span class="nx">g</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>其中 g0 是持有调度栈的 Goroutine，curg 是在当前线程上运行的用户 Goroutine，这也是操作系统线程唯一关心的两个 Goroutine。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201111114631.png" alt=""></p>
+<p>g0 是一个运行时中比较特殊的 Goroutine，它会深度参与运行时的调度过程，包括 Goroutine 的创建、大内存分配和 CGO 函数的执行。在后面的小节中，我们会经常看到 g0 的身影。runtime.m 结构体中还存在着三个处理器字段，它们分别表示正在运行代码的处理器 p、暂存的处理器 nextp 和执行系统调用之前的使用线程的处理器 oldp：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">m</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">p</span>             <span class="nx">puintptr</span>
+	<span class="nx">nextp</span>         <span class="nx">puintptr</span>
+	<span class="nx">oldp</span>          <span class="nx">puintptr</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>除了在上面介绍的字段之外，runtime.m 中还包含大量与线程状态、锁、调度、系统调用有关的字段，我们会在分析调度过程时详细介绍。</p>
+<h3 id="p">P</h3>
+<p>调度器中的处理器 P 是线程和 Goroutine 的中间层，它能提供线程需要的上下文环境，也会负责调度线程上的等待队列，通过处理器 P 的调度，每一个内核线程都能够执行多个 Goroutine，它能在 Goroutine 进行一些 I/O 操作时及时切换，提高线程的利用率。</p>
+<p>因为调度器在启动时就会创建 GOMAXPROCS 个处理器，所以 Go 语言程序的处理器数量一定会等于 GOMAXPROCS，这些处理器会绑定到不同的内核线程上并利用线程的计算资源运行 Goroutine。</p>
+<p>runtime.p 是处理器的运行时表示，作为调度器的内部实现，它包含的字段也非常多，其中包括与性能追踪、垃圾回收和计时器相关的字段，这些字段也非常重要，但是在这里就不一一展示了，我们主要关注处理器中的线程和运行队列：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">p</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">m</span>           <span class="nx">muintptr</span>
+
+	<span class="nx">runqhead</span> <span class="kt">uint32</span>
+	<span class="nx">runqtail</span> <span class="kt">uint32</span>
+	<span class="nx">runq</span>     <span class="p">[</span><span class="mi">256</span><span class="p">]</span><span class="nx">guintptr</span>
+	<span class="nx">runnext</span> <span class="nx">guintptr</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>反向存储的线程维护着线程与处理器之间的关系，而 runhead、runqtail 和 runq 三个字段表示处理器持有的运行队列，其中存储着待执行的 Goroutine 列表，runnext 中是线程下一个需要执行的 Goroutine。</p>
+<p>runtime.p 结构体中的状态 status 字段会是以下五种中的一种：</p>
+<table>
+<thead>
+<tr>
+<th>状态</th>
+<th>描述</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>_Pidle</td>
+<td>处理器没有运行用户代码或者调度器，被空闲队列或者改变其状态的结构持有，运行队列为空</td>
+</tr>
+<tr>
+<td>_Prunning</td>
+<td>被线程 M 持有，并且正在执行用户代码或者调度器</td>
+</tr>
+<tr>
+<td>_Psyscall</td>
+<td>没有执行用户代码，当前线程陷入系统调用</td>
+</tr>
+<tr>
+<td>_Pgcstop</td>
+<td>被线程 M 持有，当前处理器由于垃圾回收被停止</td>
+</tr>
+<tr>
+<td>_Pdead</td>
+<td>当前处理器已经不被使用</td>
+</tr>
+</tbody>
+</table>
+<p>通过分析处理器 P 的状态，我们能够对处理器的工作过程有一些简单理解，例如处理器在执行用户代码时会处于 _Prunning 状态，在当前线程执行 I/O 操作时会陷入_Psyscall 状态。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201114234757.png" alt=""></p>
+<p>P在创建之初的状态是Pgcstop，但这并不意味着运行时系统要进行垃圾回收。P出于这一状态的时间会非常短暂，在紧接着的初始化后，运行时系统会将其状态设置为Pidle并放入调度器的空闲P列表。</p>
+<p>非Pdead状态的P在运行时系统停止调度时都会被置于Pgcstop状态。重启调度时（如垃圾回收结束后），所有P都会被置于Pidle状态，而不是他们原来的状态。</p>
+<p>非Pgcstop状态的P都会因最大P数量的减小而被认为是多余的，并被置于Pdead状态。当P进入Pdead状态之前，该P的可运行G队列会被转移到调度器的可运行G队列，它的自由G列表会被转移到调度器的自由G列表。</p>
+<p>每个P中有一个可运行的G队列，以及一个自由G列表。自由G列表中包含了已运行完成的G。随着已运行完成的G越来越多，该列表会不断增长。如果它增长到一定程度，运行时系统会把其中部分G转移到调度器的自由G列表。同样，当调度器发现其中的自由G太少时，会预先尝试从调度器的自由G列表中转移一些G过来。</p>
+<p>当使用go语句启用一个G时，运行时系统会先从相应P的自由G列表中获取一个G来封装这个go语句的函数。仅当获取不到的时候，也就是调度器的自由G列表也空了，才会创建一个新的G。</p>
+<h2 id="调度思想">调度思想</h2>
+<h3 id="复用线程">复用线程</h3>
+<p>协程本身就是运行在一组线程之上，不需要频繁的创建、销毁线程，而是对线程的复用。</p>
+<p>在调度器中复用线程还有2个体现：</p>
+<ol>
+<li>work stealing，当本线程无可运行的G时，尝试从其他线程绑定的P偷取G，而不是销毁线程。</li>
+<li>hand off，当本线程因为G进行系统调用阻塞时，线程释放绑定的P，把P转移给其他空闲的线程执行。</li>
+</ol>
+<h3 id="利用并行">利用并行</h3>
+<p>GOMAXPROCS设置P的数量，当GOMAXPROCS大于1时，就最多有GOMAXPROCS个线程处于运行状态，这些线程可能分布在多个CPU核上同时运行，使得并发利用并行。</p>
+<p>另外，GOMAXPROCS也限制了并发的程度，比如GOMAXPROCS = 核数/2，则最多利用了一半的CPU核进行并行。</p>
+<p>上面提到并行了，关于并发和并行再说一下：Go创始人Rob Pike一直在强调go是并发，不是并行，因为Go做的是在一段时间内完成几十万、甚至几百万的工作，而不是同一时间同时在做大量的工作。并发可以利用并行提高效率，调度器是有并行设计的。</p>
+<p>并行依赖多核技术，每个核上在某个时间只能执行一个线程，当我们的CPU有8个核时，我们能同时执行8个线程，这就是并行。</p>
+<h3 id="抢占">抢占</h3>
+<h4 id="基于协作的抢占式调度12">基于协作的抢占式调度(1.2)</h4>
+<p>我们可以在 pkg/runtime/proc.c 文件中找到引入基于协作的抢占式调度后的调度器。Go 语言会在分段栈的机制上实现抢占调度，利用编译器在分段栈上插入的函数，所有 Goroutine 在函数调用时都有机会进入运行时检查是否需要执行抢占。Go 团队通过以下的多个提交实现该特性：</p>
+<ul>
+<li>runtime: add stackguard0 to G
+<ul>
+<li>为 Goroutine 引入 stackguard0 字段，该字段被设置成 StackPreempt 意味着当前 Goroutine 发出了抢占请求；</li>
+</ul>
+</li>
+<li>runtime: introduce preemption function (not used for now)
+<ul>
+<li>引入抢占函数 runtime.preemptone 和 runtime.preemptall，这两个函数会改变 Goroutine 的 stackguard0 字段发出抢占请求；</li>
+<li>定义抢占请求 StackPreempt；</li>
+</ul>
+</li>
+<li>runtime: preempt goroutines for GC
+<ul>
+<li>在 runtime.stoptheworld 中调用 runtime.preemptall 设置所有处理器上正在运行的 Goroutine 的 stackguard0 为 StackPreempt；</li>
+<li>在 runtime.newstack 函数中增加抢占的代码，当 stackguard0 等于 StackPreempt 时触发调度器抢占让出线程；</li>
+</ul>
+</li>
+<li>runtime: preempt long-running goroutines
+<ul>
+<li>在系统监控中，如果一个 Goroutine 的运行时间超过 10ms，就会调用 runtime.retake 和 runtime.preemptone；</li>
+</ul>
+</li>
+<li>runtime: more reliable preemption
+<ul>
+<li>修复 Goroutine 因为周期性执行非阻塞的 CGO 或者系统调用不会被抢占的问题；</li>
+</ul>
+</li>
+</ul>
+<p>上面的多个提交实现了抢占式调度，但是还缺少最关键的一个环节 — 编译器如何在函数调用前插入函数，我们能在非常古老的提交 runtime: stack growth adjustments, cleanup 中找到编译器插入函数的出行，最新版本的 Go 语言会通过 cmd/internal/obj/x86.stacksplit 插入 runtime.morestack 函数，该函数可能会调用 runtime.newstack 触发抢占。从上面的多个提交中，我们能归纳出基于协作的抢占式调度的工作原理：</p>
+<ol>
+<li>编译器会在调用函数前插入 runtime.morestack；</li>
+<li>Go 语言运行时会在垃圾回收暂停程序、系统监控发现 Goroutine 运行超过 10ms 时发出抢占请求 StackPreempt；</li>
+<li>当发生函数调用时，可能会执行编译器插入的 runtime.morestack 函数，它调用的 runtime.newstack 会检查 Goroutine 的 stackguard0 字段是否为 StackPreempt；</li>
+<li>如果 stackguard0 是 StackPreempt，就会触发抢占让出当前线程；</li>
+</ol>
+<p>这种实现方式虽然增加了运行时的复杂度，但是实现相对简单，也没有带来过多的额外开销，总体来看还是比较成功的实现，也在 Go 语言中使用了 10 几个版本。因为这里的抢占是通过编译器插入函数实现的，还是需要函数调用作为入口才能触发抢占，所以这是一种协作式的抢占式调度。</p>
+<h4 id="基于信号的抢占式调度114">基于信号的抢占式调度(1.14)</h4>
+<p>基于协作的抢占式调度虽然实现巧妙，但是并不完备，我们能在 runtime: non-cooperative goroutine preemption 中找到一些遗留问题：</p>
+<ul>
+<li>runtime: tight loops should be preemptible #10958</li>
+<li>An empty for{} will block large slice allocation in another goroutine, even with GOMAXPROCS &gt; 1 ? #17174</li>
+<li>runtime: tight loop hangs process completely after some time #15442</li>
+<li>…</li>
+</ul>
+<p>Go 语言在 1.14 版本中实现了非协作的抢占式调度，在实现的过程中我们重构已有的逻辑并为 Goroutine 增加新的状态和字段来支持抢占。Go 团队通过下面的一系列提交实现了这一功能，我们可以按时间顺序分析相关提交理解它的工作原理：</p>
+<ul>
+<li>runtime: add general suspendG/resumeG
+<ul>
+<li>挂起 Goroutine 的过程是在垃圾回收的栈扫描时完成的，我们通过 runtime.suspendG 和 runtime.resumeG 两个函数重构栈扫描这一过程；</li>
+<li>调用 runtime.suspendG 函数时会将处于运行状态的 Goroutine 的 preemptStop 标记成 true；</li>
+<li>调用 runtime.preemptPark 函数可以挂起当前 Goroutine、将其状态更新成 _Gpreempted 并触发调度器的重新调度，该函数能够交出线程控制权；</li>
+</ul>
+</li>
+<li>runtime: asynchronous preemption function for x86
+<ul>
+<li>在 x86 架构上增加异步抢占的函数 runtime.asyncPreempt 和 runtime.asyncPreempt2；</li>
+</ul>
+</li>
+<li>runtime: use signals to preempt Gs for suspendG
+<ul>
+<li>支持通过向线程发送信号的方式暂停运行的 Goroutine；</li>
+<li>在 runtime.sighandler 函数中注册 SIGURG 信号的处理函数 runtime.doSigPreempt；</li>
+<li>实现 runtime.preemptM 函数，它可以通过 SIGURG 信号向线程发送抢占请求；</li>
+</ul>
+</li>
+<li>runtime: implement async scheduler preemption
+<ul>
+<li>修改 runtime.preemptone 函数的实现，加入异步抢占的逻辑；</li>
+</ul>
+</li>
+</ul>
+<p>目前的抢占式调度也只会在垃圾回收扫描任务时触发，我们可以梳理一下上述代码实现的抢占式调度过程：</p>
+<ol>
+<li>程序启动时，在 runtime.sighandler 函数中注册 SIGURG 信号的处理函数 runtime.doSigPreempt；</li>
+<li>在触发垃圾回收的栈扫描时会调用 runtime.suspendG 挂起 Goroutine，该函数会执行下面的逻辑：
+<ol>
+<li>将 _Grunning 状态的 Goroutine 标记成可以被抢占，即将 preemptStop 设置成 true；</li>
+<li>调用 runtime.preemptM 触发抢占；</li>
+</ol>
+</li>
+<li>runtime.preemptM 会调用 runtime.signalM 向线程发送信号 SIGURG；</li>
+<li>操作系统会中断正在运行的线程并执行预先注册的信号处理函数 runtime.doSigPreempt；</li>
+<li>runtime.doSigPreempt 函数会处理抢占信号，获取当前的 SP 和 PC 寄存器并调用 runtime.sigctxt.pushCall；</li>
+<li>runtime.sigctxt.pushCall 会修改寄存器并在程序回到用户态时执行 runtime.asyncPreempt；</li>
+<li>汇编指令 runtime.asyncPreempt 会调用运行时函数 runtime.asyncPreempt2；</li>
+<li>runtime.asyncPreempt2 会调用 runtime.preemptPark；</li>
+<li>runtime.preemptPark 会修改当前 Goroutine 的状态到_Gpreempted 并调用 runtime.schedule 让当前函数陷入休眠并让出线程，调度器会选择其它的 Goroutine 继续执行；</li>
+</ol>
+<p>上述 9 个步骤展示了基于信号的抢占式调度的执行过程。除了分析抢占的过程之外，我们还需要讨论一下抢占信号的选择，提案根据以下的四个原因选择 SIGURG 作为触发异步抢占的信号；</p>
+<ol>
+<li>该信号需要被调试器透传；</li>
+<li>该信号不会被内部的 libc 库使用并拦截；</li>
+<li>该信号可以随意出现并且不触发任何后果；</li>
+<li>我们需要处理多个平台上的不同信号；</li>
+</ol>
+<p>STW 和栈扫描是一个可以抢占的安全点（Safe-points），所以 Go 语言会在这里先加入抢占功能。基于信号的抢占式调度只解决了垃圾回收和栈扫描时存在的问题，它到目前为止没有解决全部问题，但是这种真抢占式调度时调度器走向完备的开始，相信在未来我们可以会更多的地方触发抢占。</p>
+<h3 id="全局g队列">全局G队列</h3>
+<p>在新的调度器中依然有全局G队列，但功能已经被弱化了，当M执行work stealing从其他P偷不到G时，它可以从全局G队列获取G。</p>
+<h3 id="poller">Poller</h3>
+<p>Go runtime已经实现了netpoller，这使得即便G发起网络I/O操作也不会导致M被阻塞（仅阻塞G），从而不会导致大量M被创建出来。但是对于regular file的I/O操作一旦阻塞，那么M将进入sleep状态，等待I/O返回后被唤醒；这种情况下P将与sleep的M分离，再选择一个idle的M。如果此时没有idle的M，则会新创建一个M，这就是为何大量I/O操作导致大量Thread被创建的原因。</p>
+<p>Ian Lance Taylor在Go 1.9 dev周期中增加了一个Poller for os package的功能，这个功能可以像netpoller那样，在G操作支持pollable的fd时，仅阻塞G，而不阻塞M。不过该功能依然不能对regular file有效，regular file不是pollable的。不过，对于scheduler而言，这也算是一个进步了。</p>
+<h2 id="go-func-调度流程">go func() 调度流程</h2>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201115153416.png" alt=""></p>
+<p>从上图我们可以分析出几个结论：</p>
+<ol>
+<li>
+<p>我们通过 go func () 来创建一个 goroutine；</p>
+</li>
+<li>
+<p>有两个存储 G 的队列，一个是局部调度器 P 的本地队列、一个是全局 G 队列。新创建的 G 会先保存在 P 的本地队列中，如果 P 的本地队列已经满了就会保存在全局的队列中；</p>
+</li>
+<li>
+<p>G 只能运行在 M 中，一个 M 必须持有一个 P，M 与 P 是 1：1 的关系。M 会从 P 的本地队列弹出一个可执行状态的 G 来执行，如果 P 的本地队列为空，就会想其他的 MP 组合偷取一个可执行的 G 来执行；</p>
+</li>
+<li>
+<p>一个 M 调度 G 执行的过程是一个循环机制；</p>
+</li>
+<li>
+<p>当 M 执行某一个 G 时候如果发生了 syscall 或则其余阻塞操作，M 会阻塞，如果当前有一些 G 在执行，runtime 会把这个线程 M 从 P 中摘除 (detach)，然后再创建一个新的操作系统的线程 (如果有空闲的线程可用就复用空闲线程) 来服务于这个 P；</p>
+</li>
+<li>
+<p>当 M 系统调用结束时候，这个 G 会尝试获取一个空闲的 P 执行，并放入到这个 P 的本地队列。如果获取不到 P，那么这个线程 M 变成休眠状态， 加入到空闲线程中，然后这个 G 会被放入全局队列中。</p>
+</li>
+</ol>
+<h2 id="调度器的生命周期">调度器的生命周期</h2>
+<p>接下来我们从另外一个宏观角度——生命周期，认识调度器。</p>
+<p>所有的Go程序运行都会经过一个完整的调度器生命周期：从创建到结束。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190706204142.png" alt=""></p>
+<p>即使下面这段简单的代码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="s">&#34;fmt&#34;</span>
+
+<span class="c1">// main.main
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;Hello scheduler&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>也会经历如上图所示的过程：</p>
+<ol>
+<li>runtime创建最初的线程m0和goroutine g0，并把2者关联。</li>
+<li>调度器初始化：初始化m0、栈、垃圾回收，以及创建和初始化由GOMAXPROCS个P构成的P列表。</li>
+<li>示例代码中的main函数是main.main，runtime中也有1个main函数——runtime.main，代码经过编译后，runtime.main会调用main.main，程序启动时会为runtime.main创建goroutine，称它为main goroutine吧，然后把main goroutine加入到P的本地队列。</li>
+<li>启动m0，m0已经绑定了P，会从P的本地队列获取G，获取到main goroutine。</li>
+<li>G拥有栈，M根据G中的栈信息和调度信息设置运行环境</li>
+<li>M运行G</li>
+<li>G退出，再次回到M获取可运行的G，这样重复下去，直到main.main退出，runtime.main执行Defer和Panic处理，或调用runtime.exit退出程序。</li>
+</ol>
+<p>调度器的生命周期几乎占满了一个Go程序的一生，runtime.main的goroutine执行之前都是为调度器做准备工作，runtime.main的goroutine运行，才是调度器的真正开始，直到runtime.main结束而结束。</p>
+<h3 id="m0和g0">M0和G0</h3>
+<p>M0 是启动程序后的编号为 0 的主线程，这个 M 对应的实例会在全局变量 runtime.m0 中，不需要在 heap 上分配，M0 负责执行初始化操作和启动第一个 G， 在之后 M0 就和其他的 M 一样了。</p>
+<p>G0 是每次启动一个 M 都会第一个创建的 gourtine，G0 仅用于负责调度的 G，G0 不指向任何可执行的函数，每个 M 都会有一个自己的 G0。在调度或系统调用时会使用 G0 的栈空间，全局变量的 G0 是 M0 的 G0。</p>
+<h2 id="调度器的基本原理">调度器的基本原理</h2>
+<p>关于调度器的基本原理,本文总结了12个主要的场景，覆盖了以下内容：</p>
+<ul>
+<li>G的创建和分配</li>
+<li>M如何从G1切换到G2</li>
+<li>P的本地队列和全局队列的负载均衡</li>
+<li>M如何寻找G</li>
+<li>work stealing，M如何去偷G</li>
+<li>为何需要自旋线程</li>
+<li>G进行系统调用，如何保证P的其他G可以被执行，而不是饿死</li>
+<li>Go调度器的抢占</li>
+</ul>
+<p>下面根据上述情景进行分析,阐述goroutine的调度原理.</p>
+<p>图中三角形、正方形、圆形分别代表了M、P、G，正方形连接的绿色长方形代表了P的本地队列。蓝色长方形代表全局队列。</p>
+<h4 id="g的创建和分配">G的创建和分配</h4>
+<p>p1拥有g1，m1获取p1后开始运行g1，g1使用go func()创建了g2，为了局部性g2优先加入到p1的本地队列。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201115152412.png" alt=""></p>
+<h4 id="m如何从g1切换到g2">M如何从G1切换到G2</h4>
+<p>g1运行完成后(函数：goexit)，m上运行的goroutine切换为g0，g0负责调度时协程的切换（函数：schedule）。从p1的本地队列取g2，从g0切换到g2，并开始运行g2(函数：execute)。实现了线程m1的复用。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201115153758.png" alt=""></p>
+<p>假设每个p的本地队列只能存4个g。g2要创建了6个g，前4个g（g3, g4, g5, g6）已经加入p1的本地队列，p1本地队列满了。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201115154306.png" alt=""></p>
+<h4 id="p的本地队列和全局队列的负载均衡">P的本地队列和全局队列的负载均衡</h4>
+<p>g2在创建g7的时候，发现p1的本地队列已满，需要执行负载均衡，把p1中本地队列中前一半的g，还有新创建的g转移到全局队列（实现中并不一定是新的g，如果g是g2之后就执行的，会被保存在本地队列，利用某个老的g替换新g加入全局队列），这些g被转移到全局队列时，会被打乱顺序。所以g3,g4,g7被转移到全局队列。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201115154325.png" alt=""></p>
+<p>g2创建g8时，p1的本地队列未满，所以g8会被加入到p1的本地队列。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201115154345.png" alt=""></p>
+<h3 id="m如何寻找g">M如何寻找G</h3>
+<p>在创建g时，运行的g会尝试唤醒其他空闲的p和m执行。假定g2唤醒了m2，m2绑定了p2，并运行g0，但p2本地队列没有g，m2此时为自旋线程（没有G但为运行状态的线程，不断寻找g，后续场景会有介绍）。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201115155002.png" alt=""></p>
+<p>m2尝试从全局队列(GQ)取一批g放到p2的本地队列（函数：findrunnable）。m2从全局队列取的g数量符合下面的公式：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">n</span> <span class="p">=</span> <span class="nf">min</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">GQ</span><span class="p">)</span><span class="o">/</span><span class="nx">GOMAXPROCS</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">GQ</span><span class="o">/</span><span class="mi">2</span><span class="p">))</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>公式的含义是，至少从全局队列取1个g，但每次不要从全局队列移动太多的g到p本地队列，给其他p留点。这是从全局队列到P本地队列的负载均衡。</p>
+<p>假定我们场景中一共有4个P，所以m2只从能从全局队列取1个g（即g3）移动p2本地队列，然后完成从g0到g3的切换，运行g3。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201115155110.png" alt=""></p>
+<h4 id="work-stealingm如何去偷g">work stealing，M如何去偷G</h4>
+<p>假设g2一直在m1上运行，经过2轮后，m2已经把g7、g4也挪到了p2的本地队列并完成运行，全局队列和p2的本地队列都空了，如图左边。</p>
+<p>全局队列已经没有g，那m就要执行work stealing：从其他有g的p哪里偷取一半g过来，放到自己的P本地队列。p2从p1的本地队列尾部取一半的g，本例中一半则只有1个g8，放到p2的本地队列，情况如图右边。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201115155131.png" alt=""></p>
+<h4 id="自旋线程">自旋线程</h4>
+<p>p1本地队列g5、g6已经被其他m偷走并运行完成，当前m1和m2分别在运行g2和g8，m3和m4没有goroutine可以运行，m3和m4处于自旋状态，它们不断寻找goroutine。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201115155221.png" alt=""></p>
+<p>为什么要让m3和m4自旋，自旋本质是在运行，线程在运行却没有执行g，就变成了浪费CPU？销毁线程不是更好吗？可以节约CPU资源。创建和销毁CPU都是浪费时间的，我们希望当有新goroutine创建时，立刻能有m运行它，如果销毁再新建就增加了时延，降低了效率。</p>
+<p>当然也考虑了过多的自旋线程是浪费CPU，所以系统中最多有GOMAXPROCS个自旋的线程，多余的没事做线程会让他们休眠（见函数：notesleep()）。</p>
+<h4 id="场景融合">场景融合</h4>
+<p>如果把上面所有的场景都融合起来，就能构成下面这幅图了，它从整体的角度描述了Go调度器各部分的关系。图的上半部分是G的创建、负载均衡和work stealing，下半部分是M不停寻找和执行G的迭代过程。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190706221840.png" alt=""></p>
+<h2 id="调度触发时机">调度触发时机</h2>
+<h3 id="系统态的阻塞唤醒">系统态的阻塞/唤醒</h3>
+<p>如果G被阻塞在某个system call或cgo操作上，那么不光G会阻塞，执行该G的M也会解绑P，与G一起进入sleep状态。如果此时有idle的M，则P与其绑定继续执行其他G；如果没有idle M，但仍然有其他G要去执行，那么就会创建一个新M。</p>
+<p>当阻塞在syscall上的G完成syscall调用后，G会去尝试获取一个可用的P，如果没有可用的P，那么G会被标记为runnable，之前的那个sleep的M将再次进入sleep。</p>
+<h3 id="用户态的阻塞唤醒">用户态的阻塞/唤醒</h3>
+<p>如果G被阻塞在某个channel操作时，G会被放置到某个wait队列中，而M会尝试运行下一个runnable的G；如果此时没有runnable的G供m运行，那么m将解绑P，并进入sleep状态。当I/O available或channel操作完成，在wait队列中的G会被唤醒，标记为runnable，放入到某P的队列中，绑定一个M继续执行。</p>
+<h3 id="netpoller">NetPoller</h3>
+<p>Go 将 epoll 进行了包装(使用了垂直触发)，会单独创建一个名为 NetPoller 的 M 异步处理网络IO，它不需要和 P 进行绑定。</p>
+<p>当 G 执行网络 IO 的时候，G 会将当前 M 和 P 解绑，进入到 NetPoller 的 M 中，等待网络 IO 完成，这样即使执行网络 IO 的系统调用，也不会产生阻塞的 M.</p>
+<p>当网络 IO 完成后，M 的 Schedule 函数，会通过 findrunable函数 取到这个 G，继续运行它。</p>
+<h3 id="抢占式调度">抢占式调度</h3>
+<p>当 G 执行的时间超过 10ms 时，一个名为 sysmon 的 M 就会向其发起抢占式调度。由于 Go 是用户态的代码，并没有时间片和硬中断的概念，所以 Go 抢占式调度的方式是运行方主动将自己挂起。</p>
+<p>sysmon 如果要抢占某个 G 的执行权，那么就会设置它的抢占标记(g.stackguard0)。G 在执行函数的时候(具体来说是 newstack函数)，会检查抢占标记，如果这个标记已经被设置了，那么它就会通过 Gosched 的方式将自己放到 GRQ 中，重新等待执行。</p>
+<p>参考:<br>
+<a href="http://lessisbetter.site/2019/03/26/golang-scheduler-2-macro-view/">http://lessisbetter.site/2019/03/26/golang-scheduler-2-macro-view/</a><br>
+<a href="https://tonybai.com/2017/06/23/an-intro-about-goroutine-scheduler/">https://tonybai.com/2017/06/23/an-intro-about-goroutine-scheduler/</a><br>
+<a href="https://draveness.me/golang/docs/part3-runtime/ch06-concurrency/golang-goroutine/#654-%E5%88%9B%E5%BB%BA-goroutine">6.5 调度器</a><br>
+<a href="https://blog.csdn.net/puss0/article/details/80587232">地鼠宝宝的轶事奇闻之线程模型</a><br>
+<a href="https://qcrao91.gitbook.io/go/goroutine-tiao-du-qi/goroutine-he-xian-cheng-de-qu-bie">goroutine和线程的区别</a><br>
+<a href="https://www.bwangel.me/2020/03/16/go-schedule/">Go 的调度模型学习笔记</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2019-07-05
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go/">Go</a>
+          <a href="/tags/%E8%B0%83%E5%BA%A6%E5%99%A8/">调度器</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/go%E7%9A%84%E8%B0%83%E5%BA%A6%E5%99%A8%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Go的调度器源码剖析</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/%E4%B8%BA%E4%BB%80%E4%B9%88%E4%B8%8D%E8%A6%81%E5%9C%A8%E5%8D%95%E4%B8%AAsql.tx%E4%B8%AD%E4%BD%BF%E7%94%A8%E5%8D%8F%E7%A8%8B/">
+            <span class="next-text nav-default">为什么不要在单个sql.Tx中使用协程</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2020
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Goredis的连接池实现 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="ConnPool是go-redis中连接池的实现，其数据结构如下： type ConnPool struct { opt *Options dialErrorsNum uint32 // atomic lastDialErrorMu sync.RWMutex lastDialError error queue chan struct{} connsMu sync.Mutex conns []*Conn idleConns []*Conn poolSize int idleConnsLen int stats Stats _closed uint32 // atomic } 主要字" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
+
+
+<link rel="canonical" href="/post/goredis%E7%9A%84%E8%BF%9E%E6%8E%A5%E6%B1%A0%E5%AE%9E%E7%8E%B0/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Goredis的连接池实现" />
+<meta property="og:description" content="ConnPool是go-redis中连接池的实现，其数据结构如下： type ConnPool struct { opt *Options dialErrorsNum uint32 // atomic lastDialErrorMu sync.RWMutex lastDialError error queue chan struct{} connsMu sync.Mutex conns []*Conn idleConns []*Conn poolSize int idleConnsLen int stats Stats _closed uint32 // atomic } 主要字" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/goredis%E7%9A%84%E8%BF%9E%E6%8E%A5%E6%B1%A0%E5%AE%9E%E7%8E%B0/" />
+<meta property="article:published_time" content="2020-10-13T17:05:43+00:00" />
+<meta property="article:modified_time" content="2020-10-13T17:05:43+00:00" />
+<meta itemprop="name" content="Goredis的连接池实现">
+<meta itemprop="description" content="ConnPool是go-redis中连接池的实现，其数据结构如下： type ConnPool struct { opt *Options dialErrorsNum uint32 // atomic lastDialErrorMu sync.RWMutex lastDialError error queue chan struct{} connsMu sync.Mutex conns []*Conn idleConns []*Conn poolSize int idleConnsLen int stats Stats _closed uint32 // atomic } 主要字">
+<meta itemprop="datePublished" content="2020-10-13T17:05:43&#43;00:00" />
+<meta itemprop="dateModified" content="2020-10-13T17:05:43&#43;00:00" />
+<meta itemprop="wordCount" content="1590">
+
+
+
+<meta itemprop="keywords" content="go-redis," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Goredis的连接池实现"/>
+<meta name="twitter:description" content="ConnPool是go-redis中连接池的实现，其数据结构如下： type ConnPool struct { opt *Options dialErrorsNum uint32 // atomic lastDialErrorMu sync.RWMutex lastDialError error queue chan struct{} connsMu sync.Mutex conns []*Conn idleConns []*Conn poolSize int idleConnsLen int stats Stats _closed uint32 // atomic } 主要字"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Goredis的连接池实现</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2020-10-13 </span>
+        <div class="post-category">
+            <a href="/categories/go-redis/"> go-redis </a>
+            </div>
+          <span class="more-meta"> 约 1590 字 </span>
+          <span class="more-meta"> 预计阅读 4 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents"></nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>ConnPool是go-redis中连接池的实现，其数据结构如下：</p>
+<p>type ConnPool struct {
+opt *Options</p>
+<pre><code>dialErrorsNum uint32 // atomic
+
+lastDialErrorMu sync.RWMutex
+lastDialError   error
+
+queue chan struct{}
+
+connsMu      sync.Mutex
+conns        []*Conn
+idleConns    []*Conn
+poolSize     int
+idleConnsLen int
+
+stats Stats
+
+_closed uint32 // atomic
+</code></pre>
+<p>}
+主要字段说明：</p>
+<p>opt：连接池的参数选项。
+dialErrorsNum：连接失败的错误数。
+lastDialError：最近一次的连接错误。
+queue：轮转队列，是一个channel结构。
+conns：连接队列，维护了未被删除所有连接。
+idleConns：空闲连接队列，维护了所有的空闲连接。
+poolSize：连接池大小。
+idleConnsLen：空闲连接数。
+stats：连接池的使用数据。
+_closed：连接池是否关闭。
+连接池的选项如下：</p>
+<p>type Options struct {
+Dialer  func() (net.Conn, error)
+OnClose func(*Conn) error</p>
+<pre><code>PoolSize           int
+MinIdleConns       int
+MaxConnAge         time.Duration
+PoolTimeout        time.Duration
+IdleTimeout        time.Duration
+IdleCheckFrequency time.Duration
+</code></pre>
+<p>}
+字段说明：</p>
+<p>Dialer：新建连接的工厂函数。
+OnClose：关闭连接的回调函数。
+PoolSize：连接池大小。
+MinIdleConns：最小空闲连接数。
+PoolTimeout：连接池获取的超时时间。
+IdleTimeout：空闲连接的超时时间。
+IdleCheckFrequency：超时空闲连接清理的间隔时间。
+新建连接池的过程如下：</p>
+<p>func NewConnPool(opt *Options) *ConnPool {
+p := &amp;ConnPool{
+opt: opt,</p>
+<pre><code>    queue:     make(chan struct{}, opt.PoolSize),
+    conns:     make([]*Conn, 0, opt.PoolSize),
+    idleConns: make([]*Conn, 0, opt.PoolSize),
+}
+
+for i := 0; i &lt; opt.MinIdleConns; i++ {
+    p.checkMinIdleConns()
+}
+
+if opt.IdleTimeout &gt; 0 &amp;&amp; opt.IdleCheckFrequency &gt; 0 {
+    go p.reaper(opt.IdleCheckFrequency)
+}
+
+return p
+</code></pre>
+<p>}
+首先会初始化一个ConnPool实例，赋予PoolSize大小的连接队列和轮转队列，接着会根据MinIdleConns参数维持一个最小连接数，以保证连接池中有这么多数量的连接处于活跃状态。IdleTimeout和IdleCheckFrequency参数用来在每过一段时间内会对连接池中不活跃的连接做清理操作。</p>
+<p>从连接池中获取一个连接的过程如下：</p>
+<p>1.检查连接池是否被关闭，如果被关闭直接返回ErrClosed错误。否则尝试在轮转队列中占据一个位置，如果抢占的等待时间超过连接池的超时时间，会返回ErrPoolTimeout错误。</p>
+<p>if p.closed() {
+return nil, ErrClosed
+}</p>
+<p>err := p.waitTurn()
+if err != nil {
+return nil, err
+}
+这里面的等待过程如下：</p>
+<p>func (p *ConnPool) waitTurn() error {
+select {
+case p.queue &lt;- struct{}{}:
+return nil
+default:
+timer := timers.Get().(*time.Timer)
+timer.Reset(p.opt.PoolTimeout)</p>
+<pre><code>    select {
+    case p.queue &lt;- struct{}{}:
+        if !timer.Stop() {
+            &lt;-timer.C
+        }
+        timers.Put(timer)
+        return nil
+    case &lt;-timer.C:
+        timers.Put(timer)
+        return ErrPoolTimeout
+    }
+}
+</code></pre>
+<p>}
+轮转队列的主要作用是协调连接池的生产-消费过程，每往轮转队列中添加一个元素时，可用的连接资源的数量就减少一。若无法立即写入，该过程将尝试等待PoolTimeout大小的时间后，返回相应结果。</p>
+<p>2.尝试从连接池的空闲连接队列中获取一个已有连接，如果该连接已过期，则关闭并丢弃该连接，继续重复相同尝试操作，直至获取到一个连接或连接队列为空为止。</p>
+<p>for {
+p.connsMu.Lock()
+cn := p.popIdle()
+p.connsMu.Unlock()</p>
+<pre><code>if cn == nil {
+    break
+}
+
+if p.isStaleConn(cn) {
+    _ = p.CloseConn(cn)
+    continue
+}
+
+return cn, nil
+</code></pre>
+<p>}
+3.如果上一步无法获取到已有连接，则新建一个连接，如果没有返回错误则直接返回，如果新建连接时返回错误，则释放掉轮转队列中的位置，返回连接错误。</p>
+<p>newcn, err := p._NewConn(true)
+if err != nil {
+p.freeTurn()
+return nil, err
+}</p>
+<p>return newcn, nil
+其中新建连接的过程如下：</p>
+<p>cn, err := p.newConn(pooled)
+if err != nil {
+return nil, err
+}</p>
+<p>p.connsMu.Lock()
+p.conns = append(p.conns, cn)
+if pooled {
+if p.poolSize &lt; p.opt.PoolSize {
+p.poolSize++
+} else {
+cn.pooled = false
+}
+}
+p.connsMu.Unlock()
+return cn, nil
+新建的连接会插入到连接池的conns队列中，当发现连接池的大小超出了设定的连接大小时，这时候会触发超卖，新建的连接的pooled属性被设置为false，也就是说这个连接不会再落地，未来将会被删除。</p>
+<p>从连接池中取出的连接一般来说都是要放回到连接池中的，放回的过程如下：</p>
+<p>func (p *ConnPool) Put(cn *Conn) {
+if !cn.pooled {
+p.Remove(cn)
+return
+}</p>
+<pre><code>p.connsMu.Lock()
+p.idleConns = append(p.idleConns, cn)
+p.idleConnsLen++
+p.connsMu.Unlock()
+p.freeTurn()
+</code></pre>
+<p>}
+简单地说就是直接放空闲连接队列中插入这个连接，并把轮转队列的资源释放掉。若连接被标记为不要被池化，则会从连接池中删除这个连接。</p>
+<p>删除的过程如下，删除会从连接池的conns队列中移除这个连接：</p>
+<p>func (p *ConnPool) removeConn(cn *Conn) {
+p.connsMu.Lock()
+for i, c := range p.conns {
+if c == cn {
+p.conns = append(p.conns[:i], p.conns[i+1:]&hellip;)
+if cn.pooled {
+p.poolSize&ndash;
+p.checkMinIdleConns()
+}
+break
+}
+}
+p.connsMu.Unlock()
+}
+最后再来看下连接池是怎么自动收割长时间不使用的空闲连接的，后台的goroutine会定时执行任务，不断地从空闲连接队列中取出过时连接，做删除和关闭连接操作，并释放轮转资源：</p>
+<p>var n int
+for {
+p.getTurn()</p>
+<pre><code>p.connsMu.Lock()
+cn := p.reapStaleConn()
+p.connsMu.Unlock()
+
+if cn != nil {
+    p.removeConn(cn)
+}
+
+p.freeTurn()
+
+if cn != nil {
+    p.closeConn(cn)
+    n++
+} else {
+    break
+}
+</code></pre>
+<p>}
+return n, nil</p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2020-10-13
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go-redis/">go-redis</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/grpc%E7%9A%84%E8%B4%9F%E8%BD%BD%E5%9D%87%E8%A1%A1/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">GRPC的负载均衡</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/opentracing%E5%8C%85%E8%A7%A3%E6%9E%90/">
+            <span class="next-text nav-default">Opentracing包解析</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2020
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
