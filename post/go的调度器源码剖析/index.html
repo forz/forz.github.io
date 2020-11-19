@@ -53,7 +53,7 @@
 <meta itemprop="description" content="源码分析 根据源码实现,调度器有如下细节优化: G对象和M对象默认会复用.除P本地的复用链表外,还有全局链表在多个P之间共享. P分为本地队列和全">
 <meta itemprop="datePublished" content="2019-07-12T13:29:52&#43;00:00" />
 <meta itemprop="dateModified" content="2019-07-12T13:29:52&#43;00:00" />
-<meta itemprop="wordCount" content="50838">
+<meta itemprop="wordCount" content="51020">
 
 
 
@@ -167,7 +167,7 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 50838 字 </span>
+          <span class="more-meta"> 约 51020 字 </span>
           <span class="more-meta"> 预计阅读 102 分钟 </span>
         
       </div>
@@ -8577,43 +8577,11 @@
 </div>
 </div><p>从中可以看出,除lockedg只能由lockedm执行外,lockedm在完成任务或主动解除锁定前也不会执行其他任务.</p>
 <h5 id="触发时机-1">触发时机</h5>
-<h6 id="系统调用">系统调用</h6>
-<p>比如文件的读写:</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code><span class="lnt"> 1
-</span><span class="lnt"> 2
-</span><span class="lnt"> 3
-</span><span class="lnt"> 4
-</span><span class="lnt"> 5
-</span><span class="lnt"> 6
-</span><span class="lnt"> 7
-</span><span class="lnt"> 8
-</span><span class="lnt"> 9
-</span><span class="lnt">10
-</span><span class="lnt">11
-</span><span class="lnt">12
-</span><span class="lnt">13
-</span><span class="lnt">14
-</span></code></pre></td>
-<td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">read</span><span class="p">(</span><span class="nx">fd</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">p</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">(</span><span class="nx">n</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
-	<span class="kd">var</span> <span class="nx">_p0</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>
-	<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">p</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="nx">_p0</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
-	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
-		<span class="nx">_p0</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">_zero</span><span class="p">)</span>
-	<span class="p">}</span>
-	<span class="nx">r0</span><span class="p">,</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">e1</span> <span class="o">:=</span> <span class="nf">syscall_syscall</span><span class="p">(</span><span class="nf">funcPC</span><span class="p">(</span><span class="nx">libc_read_trampoline</span><span class="p">),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">fd</span><span class="p">),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">_p0</span><span class="p">),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">p</span><span class="p">)))</span>
-	<span class="nx">n</span> <span class="p">=</span> <span class="nb">int</span><span class="p">(</span><span class="nx">r0</span><span class="p">)</span>
-	<span class="k">if</span> <span class="nx">e1</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="nx">err</span> <span class="p">=</span> <span class="nf">errnoErr</span><span class="p">(</span><span class="nx">e1</span><span class="p">)</span>
-	<span class="p">}</span>
-	<span class="k">return</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
-</div>
-</div><h6 id="cgo">CGO</h6>
+<h6 id="同步系统调用-1">同步系统调用</h6>
+<p>提供给用户使用的系统调用，基本都会通知 runtime，以 entersyscall，exitsyscall 的形式来告诉 runtime，在这个 syscall 阻塞的时候，由 runtime 判断是否把 P 腾出来给其它的 M 用。解绑定指的是把 M 和 P 之间解绑，如果绑定被解除，在 syscall 返回时，这个 g 会被放入执行队列 runq 中。</p>
+<p>同时 runtime 又保留了自己的特权，在执行自己的逻辑的时候，我的 P 不会被调走，这样保证了在 Go 自己“底层”使用的这些 syscall 返回之后都能被立刻处理。</p>
+<p>所以同样是 epollwait，runtime 用的是不能被别人打断的，你用的 syscall.EpollWait 那显然是没有这种特权的。</p>
+<h6 id="cgo">CGO</h6>
 <p>CGO也会触发系统态的阻塞</p>
 <p>参考:<br>
 <a href="https://tonybai.com/2017/06/23/an-intro-about-goroutine-scheduler/">https://tonybai.com/2017/06/23/an-intro-about-goroutine-scheduler/</a><br>
