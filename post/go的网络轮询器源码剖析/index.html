@@ -53,7 +53,7 @@
 <meta itemprop="description" content="导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的">
 <meta itemprop="datePublished" content="2020-11-14T22:52:29&#43;00:00" />
 <meta itemprop="dateModified" content="2020-11-14T22:52:29&#43;00:00" />
-<meta itemprop="wordCount" content="14969">
+<meta itemprop="wordCount" content="14993">
 
 
 
@@ -167,7 +167,7 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 14969 字 </span>
+          <span class="more-meta"> 约 14993 字 </span>
           <span class="more-meta"> 预计阅读 30 分钟 </span>
         
       </div>
@@ -768,7 +768,55 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>从全局的 epfd 中删除待监听的文件描述符可以使用 runtime.netpollclose 函数，因为该函数的实现与 runtime.netpollopen 比较相似，所以这里就不展开分析了。</p>
-<h3 id="事件循环">事件循环</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">//go:linkname poll_runtime_pollClose internal/poll.runtime_pollClose
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">poll_runtime_pollClose</span><span class="p">(</span><span class="nx">pd</span> <span class="o">*</span><span class="nx">pollDesc</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">pd</span><span class="p">.</span><span class="nx">closing</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;runtime: close polldesc w/o unblock&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wg</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wg</span> <span class="o">!=</span> <span class="nx">pdReady</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;runtime: blocked write on closing polldesc&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rg</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rg</span> <span class="o">!=</span> <span class="nx">pdReady</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;runtime: blocked read on closing polldesc&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nf">netpollclose</span><span class="p">(</span><span class="nx">pd</span><span class="p">.</span><span class="nx">fd</span><span class="p">)</span>
+	<span class="nx">pollcache</span><span class="p">.</span><span class="nf">free</span><span class="p">(</span><span class="nx">pd</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">netpollclose</span><span class="p">(</span><span class="nx">fd</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="kt">int32</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">ev</span> <span class="nx">epollevent</span>
+	<span class="k">return</span> <span class="o">-</span><span class="nf">epollctl</span><span class="p">(</span><span class="nx">epfd</span><span class="p">,</span> <span class="nx">_EPOLL_CTL_DEL</span><span class="p">,</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">fd</span><span class="p">),</span> <span class="o">&amp;</span><span class="nx">ev</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="事件循环">事件循环</h3>
 <p>本节将继续介绍网络轮询器的核心逻辑，也就是事件循环。我们将从以下的两个部分介绍事件循环的实现原理：</p>
 <ul>
 <li>Goroutine 让出线程并等待读写事件；</li>
@@ -2682,7 +2730,6 @@
 <p>所以我们现在可以来从整体的层面来概括 Go 的网络业务 goroutine 是如何被规划调度的了：</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201119153905.png" alt=""></p>
 <p>首先，client 连接 server 的时候，listener 通过 accept 调用接收新 connection，每一个新 connection 都启动一个 goroutine 处理，accept 调用会把该 connection 的 fd 连带所在的 goroutine 上下文信息封装注册到 epoll 的监听列表里去，当 goroutine 调用 conn.Read 或者 conn.Write 等需要阻塞等待的函数时，会被 gopark 给封存起来并使之休眠，让 P 去执行本地调度队列里的下一个可执行的 goroutine，往后 Go scheduler 会在循环调度的 runtime.schedule() 函数以及 sysmon 监控线程中调用 runtime.nepoll 以获取可运行的 goroutine 列表并通过调用 injectglist 把剩下的 g 放入全局调度队列或者当前 P 本地调度队列去重新执行。</p>
-<p>那么当 I/O 事件发生之后，netpoller 是通过什么方式唤醒那些在 I/O wait 的 goroutine 的？答案是通过 runtime.netpoll。</p>
 <p>综上，Go 借助于 epoll/kqueue/iocp 和 runtime scheduler 等的帮助，设计出了自己的 I/O 多路复用 netpoller，成功地让 Listener.Accept / conn.Read / conn.Write 等方法从开发者的角度看来是同步模式。</p>
 <h2 id="价值">价值</h2>
 <p>通过前面对源码的分析，我们现在知道 Go netpoller 依托于 runtime scheduler，为开发者提供了一种强大的同步网络编程模式；然而，Go netpoller 存在的意义却远不止于此，Go netpoller I/O 多路复用搭配 Non-blocking I/O 而打造出来的这个原生网络模型，它最大的价值是把网络 I/O 的控制权牢牢掌握在 Go 自己的 runtime 里.</p>
