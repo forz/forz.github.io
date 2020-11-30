@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Go调度器的协作与抢占 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="前言 如果某个 G 执行时间过长，其他的 G 如何才能被正常的调度？ 这便涉及到有关调度的两个理念：协作式调度与抢占式调度。 协作式和抢占式这两个理念解释" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
+
+
+<link rel="canonical" href="/post/go%E8%B0%83%E5%BA%A6%E5%99%A8%E7%9A%84%E5%8D%8F%E4%BD%9C%E4%B8%8E%E6%8A%A2%E5%8D%A0/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Go调度器的协作与抢占" />
+<meta property="og:description" content="前言 如果某个 G 执行时间过长，其他的 G 如何才能被正常的调度？ 这便涉及到有关调度的两个理念：协作式调度与抢占式调度。 协作式和抢占式这两个理念解释" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/go%E8%B0%83%E5%BA%A6%E5%99%A8%E7%9A%84%E5%8D%8F%E4%BD%9C%E4%B8%8E%E6%8A%A2%E5%8D%A0/" />
+<meta property="article:published_time" content="2020-11-27T17:25:33+00:00" />
+<meta property="article:modified_time" content="2020-11-27T17:25:33+00:00" />
+<meta itemprop="name" content="Go调度器的协作与抢占">
+<meta itemprop="description" content="前言 如果某个 G 执行时间过长，其他的 G 如何才能被正常的调度？ 这便涉及到有关调度的两个理念：协作式调度与抢占式调度。 协作式和抢占式这两个理念解释">
+<meta itemprop="datePublished" content="2020-11-27T17:25:33&#43;00:00" />
+<meta itemprop="dateModified" content="2020-11-27T17:25:33&#43;00:00" />
+<meta itemprop="wordCount" content="3320">
+
+
+
+<meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Go调度器的协作与抢占"/>
+<meta name="twitter:description" content="前言 如果某个 G 执行时间过长，其他的 G 如何才能被正常的调度？ 这便涉及到有关调度的两个理念：协作式调度与抢占式调度。 协作式和抢占式这两个理念解释"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Go调度器的协作与抢占</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2020-11-27 </span>
+        <div class="post-category">
+            <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
+            </div>
+          <span class="more-meta"> 约 3320 字 </span>
+          <span class="more-meta"> 预计阅读 7 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#前言">前言</a></li>
+    <li><a href="#协作式调度">协作式调度</a>
+      <ul>
+        <li><a href="#主动用户让权gosched">主动用户让权：Gosched</a></li>
+        <li><a href="#主动调度弃权栈扩张与抢占标记">主动调度弃权：栈扩张与抢占标记</a></li>
+      </ul>
+    </li>
+    <li><a href="#抢占式调度">抢占式调度</a>
+      <ul>
+        <li><a href="#p-抢占">P 抢占</a></li>
+        <li><a href="#m-抢占">M 抢占</a></li>
+      </ul>
+    </li>
+    <li><a href="#小结">小结</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="前言">前言</h2>
+<p>如果某个 G 执行时间过长，其他的 G 如何才能被正常的调度？ 这便涉及到有关调度的两个理念：协作式调度与抢占式调度。</p>
+<p>协作式和抢占式这两个理念解释起来很简单： 协作式调度依靠被调度方主动弃权；抢占式调度则依靠调度器强制将被调度方被动中断。 这两个概念其实描述了调度的两种截然不同的策略，这两种决策模式，在调度理论中其实已经研究得很透彻了。</p>
+<p>Go 的运行时并不具备操作系统内核级的硬件中断能力，基于工作窃取的调度器实现，本质上属于 先来先服务的协作式调度，为了解决响应时间可能较高的问题，目前运行时实现了两种不同的调度策略、 每种策略各两个形式。保证在大部分情况下，不同的 G 能够获得均匀的时间片：</p>
+<ul>
+<li>同步协作式调度
+<ol>
+<li>主动用户让权：通过 runtime.Gosched 调用主动让出执行机会；</li>
+<li>主动调度弃权：当发生执行栈分段时，检查自身的抢占标记，决定是否继续执行；</li>
+</ol>
+</li>
+<li>异步抢占式调度
+<ol>
+<li>被动监控抢占：当 G 阻塞在 M 上时（系统调用、channel 等），系统监控会将 P 从 M 上抢夺并分配给其他的 M 来执行其他的 G，而位于被抢夺 P 的 M 本地调度队列中 的 G 则可能会被偷取到其他 M 中。</li>
+<li>被动 GC 抢占：当需要进行垃圾回收时，为了保证不具备主动抢占处理的函数执行时间过长，导致 导致垃圾回收迟迟不得执行而导致的高延迟，而强制停止 G 并转为执行垃圾回收。</li>
+</ol>
+</li>
+</ul>
+<h2 id="协作式调度">协作式调度</h2>
+<h3 id="主动用户让权gosched">主动用户让权：Gosched</h3>
+<p>Gosched 是一种主动放弃执行的手段，用户态代码通过调用此接口来出让执行机会，使其他人也能在 密集的执行过程中获得被调度的机会。</p>
+<p>当然，尽管具有主动弃权的能力，但它对 Go 语言的用户要求比较高， 因为用户在编写并发逻辑的时候需要自行甄别是否需要让出时间片，这并非用户友好的， 而且很多 Go 的新用户并不会了解到这个问题的存在，我们在随后的抢占式调度中再进一步展开讨论。</p>
+<h3 id="主动调度弃权栈扩张与抢占标记">主动调度弃权：栈扩张与抢占标记</h3>
+<p>另一种主动放弃的方式是通过抢占标记的方式实现的。基本想法是在每个函数调用的序言 （函数调用的最前方）插入抢占检测指令，当检测到当前 Goroutine 被标记为被应该被抢占时， 则主动中断执行，让出执行权利。</p>
+<h2 id="抢占式调度">抢占式调度</h2>
+<p>从上面提到的两种协作式调度逻辑我们可以看出，这种需要用户代码来主动配合的调度方式存在 一些致命的缺陷：一个没有主动放弃执行权、且不参与任何函数调用的函数，直到执行完毕之前， 是不会被抢占的。那么这种不会被抢占的函数会导致什么严重的问题呢？回答是，由于运行时无法 停止该用户代码，则当需要进行垃圾回收时，无法及时进行；对于一些实时性要求较高的用户态 Goroutine 而言，也久久得不到调度。我们这里不去深入讨论垃圾回收的具体细节，读者将垃圾回收器 一章中详细看到这类问题导致的后果。单从调度的角度而言，我们直接来看一个非常简单的例子：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 此程序在 Go 1.14 之前的版本不会输出 OK
+</span><span class="c1"></span><span class="kn">package</span> <span class="nx">main</span>
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;runtime&#34;</span>
+	<span class="s">&#34;time&#34;</span>
+<span class="p">)</span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="p">{</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+	<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span><span class="p">)</span>
+	<span class="nb">println</span><span class="p">(</span><span class="s">&#34;OK&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这段代码中处于死循环的 Goroutine 永远无法被抢占，其中创建的 Goroutine 会执行一个不产生任何调用、不主动放弃执行权的死循环。由于主 Goroutine 优先调用了 休眠，此时唯一的 P 会转去执行 for 循环所创建的 Goroutine。进而主 Goroutine 永远不会再被调度，进而程序彻底阻塞在了这四个 Goroutine 上，永远无法退出。这样的例子 非常多，但追根溯源，均为此问题导致。</p>
+<p>Go 团队其实很早（1.0 以前）就已经意识到了这个问题，但在 Go 1.2 时增加了上文提到的 在函数序言部分增加抢占标记后，此问题便被搁置，直到越来越多的用户提交并报告此问题。 在 Go 1.5 前后，Austin Clements 希望仅解决这种由密集循环导致的无法抢占的问题 [Clements, 2015]， 于是尝试通过协作式 loop 循环抢占，通过编译器辅助的方式，插入抢占检查指令， 与流程图回边（指节点被访问过但其子节点尚未访问完毕）安全点（在一个线程执行中，垃圾回收器 能够识别所有对象引用状态的一个状态，我们将在 8.9 安全点分析 一节中进一步深入讨论这一状态）的方式进行解决。</p>
+<p>尽管此举能为抢占带来显著的提升，但是在一个循环中引入分支显然会降低性能。 尽管随后 David Chase 对这个方法进行了改进，仅在插入了一条 TESTB 指令 [Chase, 2017]， 在完全没有分支以及寄存器压力的情况下，仍然造成了几何平均 7.8% 的性能损失。 这种结果其实是情理之中的，很多需要进行密集循环的计算时间都是在运行时才能确定的， 直接由编译器检测这类密集循环而插入额外的指令可想而知是欠妥的做法。</p>
+<p>终于在 Go 1.10 后 [Clements, 2019]，Austin 进一步提出的解决方案，希望使用每个指令 与执行栈和寄存器的映射关系，通过记录足够多的信息，并通过异步线程来发送抢占信号的方式 来支持异步抢占式调度。</p>
+<p>我们知道现代操作系统的调度器多为抢占式调度，其实现方式通过硬件中断来支持线程的切换， 进而能安全的保存运行上下文。在 Go 运行时实现抢占式调度同样也可以使用类似的方式，通过 向线程发送系统信号的方式来中断 M 的执行，进而达到抢占的目的。 但与操作系统的不同之处在于，由于运行时诸多机制的存在（例如垃圾回收器），还必须能够在 Goroutine 被停止时，保存充足的上下文信息。 这就给中断信号带来了麻烦，如果中断信号恰好发生在一些关键阶段（例如写屏障期间）， 则无法保证程序的正确性。这也就要求我们需要严格考虑触发异步抢占的时机。</p>
+<p>异步抢占式调度的一种方式就与运行时系统监控有关，监控循环会将发生阻塞的 Goroutine 抢占， 解绑 P 与 M，从而让其他的线程能够获得 P 继续执行其他的 Goroutine。 这得益于 sysmon 中调用的 retake 方法。这个方法处理了两种抢占情况， 一是抢占阻塞在系统调用上的 P，二是抢占运行时间过长的 G。 其中抢占运行时间过长的 G 这一方式还会出现在垃圾回收需要进入 STW 时。</p>
+<h3 id="p-抢占">P 抢占</h3>
+<p>我们先来看抢占阻塞在系统调用上的 G 这种情况。这种抢占的实现方法非常的自然，因为 Goroutine 已经阻塞在了系统调用上，我们可以非常安全的将 M 与 P 进行解绑，即便是 Goroutine 从阻塞中恢复，也会检查自身所在的 M 是否仍然持有 P，如果没有 P 则重新考虑 与可用的 P 进行绑定。这种异步抢占的本质是：抢占 P。</p>
+<p>在抢占 P 的过程中，有两个非常小心的处理方式：</p>
+<ol>
+<li>如果此时队列为空，那么完全没有必要进行抢占，这时候似乎可以继续遍历其他的 P， 但必须在调度器中自旋的 M 和 空闲的 P 同时存在时、且系统调用阻塞时间非常长的情况下 才能这么做。否则，这个 retake 过程可能返回 0，进而系统监控可能看起来像是什么事情 也没做的情况下调整自己的步调进入深度睡眠。</li>
+<li>在将 P 设置为空闲状态前，必须先将 M 的数量减少，否则当 M 退出系统调用时， 会在 exitsyscall0 中调用 stoplockedm 从而增加空闲 M 的数量，进而发生死锁。</li>
+</ol>
+<h3 id="m-抢占">M 抢占</h3>
+<p>在 P 抢占的循环中，我们没有讨论一个细节：即在检查 P 的状态时，P 如果是运行状态会调用 preemptone，来通过系统信号来完成抢占，之所以没有在之前提及的原因在于该调用 在 M 不与 P 绑定的情况下是不起任何作用直接返回的。这种异步抢占的本质是：抢占 M。</p>
+<ol>
+<li>M1 发送中断信号（signalM(mp, sigPreempt)）</li>
+<li>M2 收到信号，操作系统中断其执行代码，并切换到信号处理函数（sighandler(signum, info, ctxt, gp)）</li>
+<li>M2 修改执行的上下文，并恢复到修改后的位置（asyncPreempt）</li>
+<li>重新进入调度循环进而调度其他 Goroutine（preemptPark 和 gopreempt_m）</li>
+</ol>
+<p>上述的异步抢占流程我们是通过系统监控来说明的，正如前面所提及的，异步抢占的本质是在为垃圾回收器服务， 由于我们还没有讨论过 Go 语言垃圾回收的具体细节，这里便不做过多展开，读者只需理解，在垃圾回收周期开始时， 垃圾回收器将通过上述异步抢占的逻辑，停止所有用户 Goroutine，进而转去执行垃圾回收。</p>
+<h2 id="小结">小结</h2>
+<p>总的来说，应用层的调度策略不易实现，因此实现上也并不是特别紧急。我们回顾 Go 语言调度策略的演变过程 不难发现，实现它们的动力是从实际需求出发的。Go 语言从设计之初并没有刻意的去考虑对 Goroutine 的抢占机制。 从早期无法对 Goroutine 进行抢占的原始时代，到现在的协作与抢占同时配合的调度策略， 其问题的核心是垃圾回收等运行时机制的需要。</p>
+<p>当运行时需要执行垃圾回收时，协作式调度能够保证具备函数调用的用户 Goroutine 正常停止； 抢占式调度则能避免由于死循环导致的任意时间的垃圾回收延迟。有了这两种不同的调度策略， Go 语言的用户可以放心的写出各种形式的代码逻辑，即使运行时垃圾回收也能够在适当的时候及时中断用户代码， 不至于导致整个系统进入不可预测的停顿。</p>
+<p>转载: <a href="https://golang.design/under-the-hood/zh-cn/part2runtime/ch06sched/preemption/#heading">6.8 协作与抢占</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2020-11-27
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/go%E7%9A%84%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Go的垃圾回收源码剖析</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/go%E8%B0%83%E5%BA%A6%E5%99%A8%E7%9A%84%E4%BF%A1%E5%8F%B7%E5%A4%84%E7%90%86%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <span class="next-text nav-default">Go调度器的信号处理源码剖析</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2020
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
