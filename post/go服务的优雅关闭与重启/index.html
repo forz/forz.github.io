@@ -1,0 +1,1285 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Go服务的优雅关闭与重启 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="背景 在业务快速增长中，前期只是验证模式是否可行，初期忽略程序发布重启带来的暂短停机影响。当模式实验成熟之后会逐渐放量，此时我们的发布停机带来" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
+
+
+<link rel="canonical" href="/post/go%E6%9C%8D%E5%8A%A1%E7%9A%84%E4%BC%98%E9%9B%85%E5%85%B3%E9%97%AD%E4%B8%8E%E9%87%8D%E5%90%AF/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Go服务的优雅关闭与重启" />
+<meta property="og:description" content="背景 在业务快速增长中，前期只是验证模式是否可行，初期忽略程序发布重启带来的暂短停机影响。当模式实验成熟之后会逐渐放量，此时我们的发布停机带来" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/go%E6%9C%8D%E5%8A%A1%E7%9A%84%E4%BC%98%E9%9B%85%E5%85%B3%E9%97%AD%E4%B8%8E%E9%87%8D%E5%90%AF/" />
+<meta property="article:published_time" content="2020-12-11T14:13:08+00:00" />
+<meta property="article:modified_time" content="2020-12-11T14:13:08+00:00" />
+<meta itemprop="name" content="Go服务的优雅关闭与重启">
+<meta itemprop="description" content="背景 在业务快速增长中，前期只是验证模式是否可行，初期忽略程序发布重启带来的暂短停机影响。当模式实验成熟之后会逐渐放量，此时我们的发布停机带来">
+<meta itemprop="datePublished" content="2020-12-11T14:13:08&#43;00:00" />
+<meta itemprop="dateModified" content="2020-12-11T14:13:08&#43;00:00" />
+<meta itemprop="wordCount" content="5543">
+
+
+
+<meta itemprop="keywords" content="Go," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Go服务的优雅关闭与重启"/>
+<meta name="twitter:description" content="背景 在业务快速增长中，前期只是验证模式是否可行，初期忽略程序发布重启带来的暂短停机影响。当模式实验成熟之后会逐渐放量，此时我们的发布停机带来"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Go服务的优雅关闭与重启</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2020-12-11 </span>
+        <div class="post-category">
+            <a href="/categories/go/"> Go </a>
+            </div>
+          <span class="more-meta"> 约 5543 字 </span>
+          <span class="more-meta"> 预计阅读 12 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#背景">背景</a></li>
+    <li><a href="#优雅重启fork子进程">优雅重启:fork子进程</a>
+      <ul>
+        <li><a href="#使用">使用</a></li>
+        <li><a href="#问题">问题</a></li>
+      </ul>
+    </li>
+    <li><a href="#优雅关闭httpshutdown">优雅关闭:http.Shutdown</a></li>
+    <li><a href="#优雅关闭grpcgracefulstop">优雅关闭:grpc.GracefulStop</a>
+      <ul>
+        <li><a href="#goaway帧">goaway帧</a></li>
+        <li><a href="#server">server</a></li>
+        <li><a href="#client">client</a></li>
+        <li><a href="#对比nethttp-和-grpc的graceful-shutdown">对比net/http 和 grpc的graceful shutdown</a></li>
+      </ul>
+    </li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="背景">背景</h2>
+<p>在业务快速增长中，前期只是验证模式是否可行，初期忽略程序发布重启带来的暂短停机影响。当模式实验成熟之后会逐渐放量，此时我们的发布停机带来的影响就会大很多。我们整个服务都是基于云，请求流量从 四层-&gt;七层-&gt;机器。</p>
+<p>要想实现平滑重启大致有三种方案，一种是在流量调度的入口处理，一般的做法是 ApiGateway + CD ，发布的时候自动摘除机器，等待程序处理完现有请求再做发布处理，这样的好处就是程序不需要关心如何做平滑重启。</p>
+<p>第二种就是程序自己完成平滑重启，保证在重启的时候 listen socket  FD（文件描述符） 依然可以接受请求进来，只不过切换新老进程，但是这个方案需要程序自己去完成，有些技术栈可能实现起来不是很简单，有些语言无法控制到操作系统级别，实现起来会很麻烦。</p>
+<p>第三种方案就是完全 docker，所有的东西交给 k8s 统一管理.</p>
+<h2 id="优雅重启fork子进程">优雅重启:fork子进程</h2>
+<p>与 java、net 等基于虚拟机的语言不同，golang  天然支持系统级别的调用，平滑重启处理起来很容易。从原理上讲，基于 linux fork 子进程的方式，启动新的代码，再切换 listen socket FD</p>
+<p>原理固然不难，但是完全自己实现还是会有很多细节问题的。好在有比较成熟的开源库帮我们实现了。</p>
+<p>graceful <a href="https://github.com/tylerb/graceful">https://github.com/tylerb/graceful</a>
+endless <a href="https://github.com/fvbock/endless">https://github.com/fvbock/endless</a></p>
+<p>上面两个是 github 排名靠前的 web host 框架，都是支持平滑重启的，只不过接受的进程信号有点区别 endless 接受 signal HUP，graceful 接受 signal USR2 。graceful 比较纯粹的 web host，endless 支持一些 routing 的能力。</p>
+<p>解决方案是fork一个进程运行新编译的应用，该子进程接收从父进程传来的相关文件描述符，直接复用socket，同时父进程关闭socket。父进程留在后台处理未处理完的用户请求，这样一来问题1解决了。且复用soket也直接解决了问题2，实现0切换时间差。复用socket可以说是endless方案的核心。</p>
+<h3 id="使用">使用</h3>
+<p>endless可以很方便的接入已经写好的程序，对于原生api，直接替换ListenAndServe为endless的方法，如下。并在编译完新的程序后，执行kill -1 旧进程id，旧进程便会fork一个进程运行新编译的程序。注：此处需要保证新编译的程序的路径和程序名和旧程序的一致。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">handler</span><span class="p">(</span><span class="nx">w</span> <span class="nx">http</span><span class="p">.</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">r</span> <span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">w</span><span class="p">.</span><span class="nf">Write</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&#34;WORLD!&#34;</span><span class="p">))</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">mux1</span> <span class="o">:=</span> <span class="nx">mux</span><span class="p">.</span><span class="nf">NewRouter</span><span class="p">()</span>
+	<span class="nx">mux1</span><span class="p">.</span><span class="nf">HandleFunc</span><span class="p">(</span><span class="s">&#34;/hello&#34;</span><span class="p">,</span> <span class="nx">handler</span><span class="p">).</span>
+		<span class="nf">Methods</span><span class="p">(</span><span class="s">&#34;GET&#34;</span><span class="p">)</span>
+
+	<span class="nx">err</span> <span class="o">:=</span> <span class="nx">endless</span><span class="p">.</span><span class="nf">ListenAndServe</span><span class="p">(</span><span class="s">&#34;localhost:4242&#34;</span><span class="p">,</span> <span class="nx">mux1</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;Server on 4242 stopped&#34;</span><span class="p">)</span>
+
+	<span class="nx">os</span><span class="p">.</span><span class="nf">Exit</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>对于使用gin框架的程序，可以以下面的方式接入：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">    <span class="nx">r</span> <span class="o">:=</span> <span class="nx">gin</span><span class="p">.</span><span class="nf">New</span><span class="p">()</span>
+	<span class="nx">r</span><span class="p">.</span><span class="nf">GET</span><span class="p">(</span><span class="s">&#34;/&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">gin</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nf">String</span><span class="p">(</span><span class="mi">200</span><span class="p">,</span> <span class="nx">config</span><span class="p">.</span><span class="nx">Config</span><span class="p">.</span><span class="nx">Server</span><span class="p">.</span><span class="nx">AppId</span><span class="p">)</span>
+	<span class="p">})</span>
+	<span class="nx">s</span> <span class="o">:=</span> <span class="nx">endless</span><span class="p">.</span><span class="nf">NewServer</span><span class="p">(</span><span class="s">&#34;:8080&#34;</span><span class="p">,</span> <span class="nx">r</span><span class="p">)</span>
+	<span class="nx">err</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">ListenAndServe</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;server err: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="原理">原理</h4>
+<p>其使用非常简单，实现代码也很少，但是很强大，下面我们看看她的实现：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">kill</span> <span class="m">-1</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>endless的使用方法是先编译新程序，并执行&quot;kill -1 旧进程id&rdquo;，我们看看旧程序接收到-1信号之后作了什么：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">endlessServer</span><span class="p">)</span> <span class="nf">handleSignals</span><span class="p">()</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">sig</span> <span class="p">=</span> <span class="o">&lt;-</span><span class="nx">srv</span><span class="p">.</span><span class="nx">sigChan</span>
+		<span class="nx">srv</span><span class="p">.</span><span class="nf">signalHooks</span><span class="p">(</span><span class="nx">PRE_SIGNAL</span><span class="p">,</span> <span class="nx">sig</span><span class="p">)</span>
+		<span class="k">switch</span> <span class="nx">sig</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SIGHUP</span><span class="p">:</span>	<span class="c1">//接收到-1信号之后，fork一个进程，并运行新编译的程序
+</span><span class="c1"></span>			<span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">pid</span><span class="p">,</span> <span class="s">&#34;Received SIGHUP. forking.&#34;</span><span class="p">)</span>
+			<span class="nx">err</span> <span class="o">:=</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">fork</span><span class="p">()</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;Fork err:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="o">...</span>
+		<span class="k">default</span><span class="p">:</span>
+			<span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;Received %v: nothing i care about...\n&#34;</span><span class="p">,</span> <span class="nx">sig</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">srv</span><span class="p">.</span><span class="nf">signalHooks</span><span class="p">(</span><span class="nx">POST_SIGNAL</span><span class="p">,</span> <span class="nx">sig</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">endlessServer</span><span class="p">)</span> <span class="nf">fork</span><span class="p">()</span> <span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="nx">path</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>	<span class="c1">//获取当前程序的路径，在子进程执行。所以要保证新编译的程序路径和旧程序的一致。
+</span><span class="c1"></span>	<span class="kd">var</span> <span class="nx">args</span> <span class="p">[]</span><span class="kt">string</span>
+	<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">1</span> <span class="p">{</span>
+		<span class="nx">args</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+	<span class="p">}</span>
+
+	<span class="nx">cmd</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="nx">path</span><span class="p">,</span> <span class="nx">args</span><span class="o">...</span><span class="p">)</span>
+	<span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdout</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdout</span>
+	<span class="nx">cmd</span><span class="p">.</span><span class="nx">Stderr</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span>
+	<span class="nx">cmd</span><span class="p">.</span><span class="nx">ExtraFiles</span> <span class="p">=</span> <span class="nx">files</span>	<span class="c1">//socket在此处传给子进程，windows系统不支持获取socket文件，所以endless无法在windows上用。windows获取socket文件时报错：file tcp [::]:9999: not supported by windows。
+</span><span class="c1"></span>	<span class="nx">cmd</span><span class="p">.</span><span class="nx">Env</span> <span class="p">=</span> <span class="nx">env</span>	<span class="c1">//env有一个ENDLESS_SOCKET_ORDER变量存储了socket传递的顺序（如果有多个socket）
+</span><span class="c1"></span>	<span class="o">...</span>
+
+	<span class="nx">err</span> <span class="p">=</span> <span class="nx">cmd</span><span class="p">.</span><span class="nf">Start</span><span class="p">()</span>	<span class="c1">//运行新程序
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;Restart: Failed to launch, error: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>接下来我们看看程序启动之后做了什么。</p>
+<p>新进程启动之后会执行ListenAndServe这个方法，这个方法主要做了系统信号监听，并且判断自己所在进程是否是子进程，如果是，则发送中断信号给父进程，让其退出。最后调用Serve方法给socket提供新的服务。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">endlessServer</span><span class="p">)</span> <span class="nf">ListenAndServe</span><span class="p">()</span> <span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="o">...</span>
+	<span class="k">go</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">handleSignals</span><span class="p">()</span>
+	<span class="nx">l</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">getListener</span><span class="p">(</span><span class="nx">addr</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="nx">srv</span><span class="p">.</span><span class="nx">EndlessListener</span> <span class="p">=</span> <span class="nf">newEndlessListener</span><span class="p">(</span><span class="nx">l</span><span class="p">,</span> <span class="nx">srv</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">srv</span><span class="p">.</span><span class="nx">isChild</span> <span class="p">{</span>
+		<span class="nx">syscall</span><span class="p">.</span><span class="nf">Kill</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nf">Getppid</span><span class="p">(),</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SIGTERM</span><span class="p">)</span>		<span class="c1">//给父进程发出中断信号
+</span><span class="c1"></span>	<span class="p">}</span>
+	<span class="o">...</span>
+	<span class="k">return</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">Serve</span><span class="p">()</span>	<span class="c1">//为socket提供新的服务
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>前面提到复用socket是endless的核心，必须在Serve前准备好，否则会导致端口已使用的异常。复用socket的实现在上面的getListener方法中：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">endlessServer</span><span class="p">)</span> <span class="nf">getListener</span><span class="p">(</span><span class="nx">laddr</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">l</span> <span class="nx">net</span><span class="p">.</span><span class="nx">Listener</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">srv</span><span class="p">.</span><span class="nx">isChild</span> <span class="p">{</span><span class="c1">//如果此方法运行在子进程中，则复用socket
+</span><span class="c1"></span>		<span class="kd">var</span> <span class="nx">ptrOffset</span> <span class="kt">uint</span> <span class="p">=</span> <span class="mi">0</span>
+		<span class="nx">runningServerReg</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+		<span class="k">defer</span> <span class="nx">runningServerReg</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">socketPtrOffsetMap</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">ptrOffset</span> <span class="p">=</span> <span class="nx">socketPtrOffsetMap</span><span class="p">[</span><span class="nx">laddr</span><span class="p">]</span><span class="c1">//获取和addr相对应的socket的位置
+</span><span class="c1"></span>		<span class="p">}</span>
+
+		<span class="nx">f</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">NewFile</span><span class="p">(</span><span class="nb">uintptr</span><span class="p">(</span><span class="mi">3</span><span class="o">+</span><span class="nx">ptrOffset</span><span class="p">),</span> <span class="s">&#34;&#34;</span><span class="p">)</span><span class="c1">//创建socket文件描述符
+</span><span class="c1"></span>		<span class="nx">l</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">net</span><span class="p">.</span><span class="nf">FileListener</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span><span class="c1">//创建socket文件监听器
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">err</span> <span class="p">=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;net.FileListener error: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span><span class="c1">//如果此方法不是运行在子进程中，则新建一个socket
+</span><span class="c1"></span>		<span class="nx">l</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">net</span><span class="p">.</span><span class="nf">Listen</span><span class="p">(</span><span class="s">&#34;tcp&#34;</span><span class="p">,</span> <span class="nx">laddr</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">err</span> <span class="p">=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;net.Listen error: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>但是父进程关闭socket和子进程绑定socket并不可能同时进行，如果这段时间有请求进来，这个请求会到哪里去呢？关于这个问题，我做了个实验，实验代码如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">isChild</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Getenv</span><span class="p">(</span><span class="s">&#34;child&#34;</span><span class="p">)</span> <span class="o">!=</span> <span class="s">&#34;&#34;</span>
+
+	<span class="nx">http</span><span class="p">.</span><span class="nf">HandleFunc</span><span class="p">(</span><span class="s">&#34;/&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">writer</span> <span class="nx">http</span><span class="p">.</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">request</span> <span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">writer</span><span class="p">.</span><span class="nf">Write</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;hello world from child?  %v&#34;</span><span class="p">,</span> <span class="nx">isChild</span><span class="p">)))</span>
+	<span class="p">})</span>
+
+	<span class="kd">var</span> <span class="nx">ln</span> <span class="nx">net</span><span class="p">.</span><span class="nx">Listener</span>
+	<span class="kd">var</span> <span class="nx">err</span> <span class="kt">error</span>
+
+	<span class="k">if</span> <span class="nx">isChild</span> <span class="p">{</span>
+		<span class="nx">f</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">NewFile</span><span class="p">(</span><span class="nb">uintptr</span><span class="p">(</span><span class="mi">3</span><span class="o">+</span><span class="mi">0</span><span class="p">),</span> <span class="s">&#34;&#34;</span><span class="p">)</span><span class="c1">//由于只传一个文件，所以此处直接为3
+</span><span class="c1"></span>		<span class="nx">ln</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">net</span><span class="p">.</span><span class="nf">FileListener</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="nx">ln</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">net</span><span class="p">.</span><span class="nf">Listen</span><span class="p">(</span><span class="s">&#34;tcp&#34;</span><span class="p">,</span> <span class="s">&#34;:9999&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;listener create&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+		<span class="nx">os</span><span class="p">.</span><span class="nf">Exit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">c</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Signal</span><span class="p">)</span>
+		<span class="nx">signal</span><span class="p">.</span><span class="nf">Notify</span><span class="p">(</span><span class="nx">c</span><span class="p">,</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Interrupt</span><span class="p">)</span>
+		<span class="o">&lt;-</span><span class="nx">c</span>
+
+		<span class="nx">path</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+		<span class="kd">var</span> <span class="nx">args</span> <span class="p">[]</span><span class="kt">string</span>
+		<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">1</span> <span class="p">{</span>
+			<span class="nx">args</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+		<span class="p">}</span>
+
+		<span class="nx">f</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">ln</span><span class="p">.(</span><span class="o">*</span><span class="nx">net</span><span class="p">.</span><span class="nx">TCPListener</span><span class="p">).</span><span class="nf">File</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;get socket file&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="nx">os</span><span class="p">.</span><span class="nf">Exit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+		<span class="p">}</span>
+
+		<span class="nx">cmd</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="nx">path</span><span class="p">,</span> <span class="nx">args</span><span class="o">...</span><span class="p">)</span>
+		<span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdout</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdout</span>
+		<span class="nx">cmd</span><span class="p">.</span><span class="nx">Stderr</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span>
+		<span class="nx">cmd</span><span class="p">.</span><span class="nx">ExtraFiles</span> <span class="p">=</span> <span class="p">[]</span><span class="o">*</span><span class="nx">os</span><span class="p">.</span><span class="nx">File</span><span class="p">{</span><span class="nx">f</span><span class="p">}</span>
+		<span class="nx">cmd</span><span class="p">.</span><span class="nx">Env</span> <span class="p">=</span> <span class="p">[]</span><span class="kt">string</span><span class="p">{</span><span class="s">&#34;child=1&#34;</span><span class="p">}</span>
+
+		<span class="nx">err</span> <span class="p">=</span> <span class="nx">cmd</span><span class="p">.</span><span class="nf">Start</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+			<span class="nx">os</span><span class="p">.</span><span class="nf">Exit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+
+	<span class="nx">http</span><span class="p">.</span><span class="nf">Serve</span><span class="p">(</span><span class="nx">ln</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在centos7上试验结果如下：</p>
+<p>第一种情况：如果某个终端跟服务器建立了长连接（应该是设置了keepalive属性），那么该终端的所有请求都会发到建立长连接的进程去，如下信息，所有computerName的请求都会被转发到父进程去（父进程id为13603）：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">[root</span><span class="o">@</span><span class="n">localhost</span> <span class="n">care_watch_deploy]</span><span class="c1"># lsof -i:9999</span>
+<span class="n">COMMAND</span> <span class="n">PID</span> <span class="n">USER</span> <span class="n">FD</span> <span class="n">TYPE</span> <span class="n">DEVICE</span> <span class="n">SIZE</span><span class="o">/</span><span class="n">OFF</span> <span class="n">NODE</span> <span class="n">NAME</span>
+<span class="n">care_watc</span> <span class="m">13603</span> <span class="n">root</span> <span class="m">3</span><span class="n">u</span> <span class="n">IPv6</span> <span class="m">17537280</span> <span class="m">0</span><span class="n">t0</span> <span class="n">TCP</span> <span class="o">*:</span><span class="nf">distinct </span><span class="p">(</span><span class="n">LISTEN</span><span class="p">)</span>
+<span class="n">care_watc</span> <span class="m">13603</span> <span class="n">root</span> <span class="m">5</span><span class="n">u</span> <span class="n">IPv6</span> <span class="m">17528589</span> <span class="m">0</span><span class="n">t0</span> <span class="n">TCP</span> <span class="m">10.100.21.105</span><span class="o">:</span><span class="n">distinct</span><span class="o">-&gt;</span><span class="n">computerName</span><span class="o">:</span><span class="m">58776</span> <span class="p">(</span><span class="n">ESTABLISHED</span><span class="p">)</span>
+<span class="n">care_watc</span> <span class="m">13603</span> <span class="n">root</span> <span class="m">6</span><span class="n">u</span> <span class="n">IPv6</span> <span class="m">17528593</span> <span class="m">0</span><span class="n">t0</span> <span class="n">TCP</span> <span class="m">10.100.21.105</span><span class="o">:</span><span class="n">distinct</span><span class="o">-&gt;</span><span class="n">computerName</span><span class="o">:</span><span class="m">58780</span> <span class="p">(</span><span class="n">ESTABLISHED</span><span class="p">)</span>
+<span class="n">care_watc</span> <span class="m">13603</span> <span class="n">root</span> <span class="m">7</span><span class="n">u</span> <span class="n">IPv6</span> <span class="m">17537280</span> <span class="m">0</span><span class="n">t0</span> <span class="n">TCP</span> <span class="o">*:</span><span class="nf">distinct </span><span class="p">(</span><span class="n">LISTEN</span><span class="p">)</span>
+<span class="n">care_watc</span> <span class="m">13617</span> <span class="n">root</span> <span class="m">3</span><span class="n">u</span> <span class="n">IPv6</span> <span class="m">17537280</span> <span class="m">0</span><span class="n">t0</span> <span class="n">TCP</span><span class="o">*:</span><span class="nf">distinct </span><span class="p">(</span><span class="n">LISTEN</span><span class="p">)</span>
+<span class="n">care_watc</span> <span class="m">13617</span> <span class="n">root</span> <span class="m">4</span><span class="n">u</span> <span class="n">IPv6</span> <span class="m">17537280</span> <span class="m">0</span><span class="n">t0</span> <span class="n">TCP</span> <span class="o">*:</span><span class="nf">distinct </span><span class="p">(</span><span class="n">LISTEN</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>第二种情况：如果有新的请求进来，会随机分配到父进程或者子进程，不知道为什么，我多次试验的结果是，20%的请求会被转发到子进程，80%的请求会被转发到父进程。测试的python代码如下，不管运行几次count_child的值永远都是100左右：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">import</span> <span class="nx">requests</span>
+
+<span class="nx">count_child</span> <span class="p">=</span> <span class="mi">0</span>
+
+<span class="k">for</span> <span class="nx">i</span> <span class="nx">in</span> <span class="k">range</span><span class="p">(</span><span class="mi">500</span><span class="p">):</span>
+    <span class="nx">resp</span> <span class="p">=</span> <span class="nx">requests</span><span class="p">.</span><span class="nf">get</span><span class="p">(</span><span class="s">&#34;http://10.100.21.105:9999/&#34;</span><span class="p">)</span>
+    <span class="nx">result</span> <span class="p">=</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">content</span><span class="p">.</span><span class="nf">decode</span><span class="p">(</span><span class="s">&#34;utf8&#34;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">result</span> <span class="o">==</span> <span class="s">&#34;hello world from child?  true&#34;</span><span class="p">:</span>
+        <span class="nx">count_child</span> <span class="o">+=</span> <span class="mi">1</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="nx">count_child</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>第三种情况，父进程或者子进程任意一个退出之后，所有请求都会转发到另一个进程进行处理。</p>
+<p>从以上三种情况看，endless的做法不会落下任何请求，因为请求不是被父进程处理了就是被子进程处理了，所以endless是个可放心使用的热更新方案。</p>
+<p>最终endless的整个执行过程如其日志：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="m">2015</span><span class="o">/</span><span class="m">03</span><span class="o">/</span><span class="m">22</span> <span class="m">20</span><span class="o">:</span><span class="m">04</span><span class="o">:</span><span class="m">10</span> <span class="m">2710</span> <span class="n">Received</span> <span class="n">SIGHUP.</span> <span class="n">forking.</span>	<span class="o">//</span>接收到<span class="n">kill</span> <span class="m">-1</span>信号，<span class="n">fork进程运行新程序</span>
+<span class="m">2015</span><span class="o">/</span><span class="m">03</span><span class="o">/</span><span class="m">22</span> <span class="m">20</span><span class="o">:</span><span class="m">04</span><span class="o">:</span><span class="m">10</span> <span class="m">2710</span> <span class="n">Received</span> <span class="n">SIGTERM.</span>	<span class="o">//</span>父进程接收到子进程发出的中断信号，关闭<span class="n">socket监听器</span>
+<span class="m">2015</span><span class="o">/</span><span class="m">03</span><span class="o">/</span><span class="m">22</span> <span class="m">20</span><span class="o">:</span><span class="m">04</span><span class="o">:</span><span class="m">10</span> <span class="m">2710</span> <span class="n">Waiting</span> <span class="n">for</span> <span class="n">connections</span> <span class="n">to</span> <span class="n">finish...</span>	<span class="o">//</span>父进程等待请求处理完成
+<span class="m">2015</span><span class="o">/</span><span class="m">03</span><span class="o">/</span><span class="m">22</span> <span class="m">20</span><span class="o">:</span><span class="m">04</span><span class="o">:</span><span class="m">10</span> <span class="n">PID</span><span class="o">:</span> <span class="m">2726</span> <span class="n">localhost</span><span class="o">:</span><span class="m">4242</span>	<span class="o">//</span>新进程启动服务
+<span class="m">2015</span><span class="o">/</span><span class="m">03</span><span class="o">/</span><span class="m">22</span> <span class="m">20</span><span class="o">:</span><span class="m">04</span><span class="o">:</span><span class="m">10</span> <span class="n">accept</span> <span class="n">tcp</span> <span class="m">127.0.0.1</span><span class="o">:</span><span class="m">4242</span><span class="o">:</span> <span class="n">use</span> <span class="n">of</span> <span class="n">closed</span> <span class="n">network</span> <span class="n">connection</span>	<span class="o">//</span>新的用户请求进入到新程序
+<span class="m">2015</span><span class="o">/</span><span class="m">03</span><span class="o">/</span><span class="m">22</span> <span class="m">20</span><span class="o">:</span><span class="m">04</span><span class="o">:</span><span class="m">10</span> <span class="n">Server</span> <span class="n">on</span> <span class="m">4242</span> <span class="n">stopped</span>	<span class="o">//</span>父进程处理完所有请求并退出
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="问题">问题</h3>
+<ol>
+<li>简单的http server很容易升级，若监听了多个端口该如何进行热升级？</li>
+<li>若go server使用tls服务（其他也类似），如何进行升级？</li>
+<li>go http server在容器场景下是否需要平滑热升级？平滑停机是否足够？如果平滑停机足够的话，那么如何结合docker+k8s进行热升级？</li>
+<li>热更新是采取创建子进程后，将原进程退出的方式，这点不符合守护进程的要求</li>
+</ol>
+<p>优雅重启通常并不推荐在生产环境使用,建议生产环境只使用优雅关闭.</p>
+<h2 id="优雅关闭httpshutdown">优雅关闭:http.Shutdown</h2>
+<p>http shutdown 源码分析</p>
+<p>先来看下http shutdown的主方法实现逻辑。用atomic来做退出标记的状态，然后关闭各种的资源，然后一直阻塞的等待无空闲连接，每500ms轮询一次。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">shutdownPollInterval</span> <span class="p">=</span> <span class="mi">500</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">Server</span><span class="p">)</span> <span class="nf">Shutdown</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="c1">// 标记退出的状态
+</span><span class="c1"></span>    <span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">srv</span><span class="p">.</span><span class="nx">inShutdown</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="nx">srv</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="c1">// 关闭listen fd，新连接无法建立。
+</span><span class="c1"></span>    <span class="nx">lnerr</span> <span class="o">:=</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">closeListenersLocked</span><span class="p">()</span>
+
+    <span class="c1">// 把server.go的done chan给close掉，通知等待的worker退出
+</span><span class="c1"></span>    <span class="nx">srv</span><span class="p">.</span><span class="nf">closeDoneChanLocked</span><span class="p">()</span>
+
+    <span class="c1">// 执行回调方法，我们可以注册shutdown的回调方法
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">f</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">srv</span><span class="p">.</span><span class="nx">onShutdown</span> <span class="p">{</span>
+        <span class="k">go</span> <span class="nf">f</span><span class="p">()</span>
+    <span class="p">}</span>
+
+    <span class="c1">// 每500ms来检查下，是否没有空闲的连接了，或者监听上游传递的ctx上下文。
+</span><span class="c1"></span>    <span class="nx">ticker</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTicker</span><span class="p">(</span><span class="nx">shutdownPollInterval</span><span class="p">)</span>
+    <span class="k">defer</span> <span class="nx">ticker</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">closeIdleConns</span><span class="p">()</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="nx">lnerr</span>
+        <span class="p">}</span>
+        <span class="k">select</span> <span class="p">{</span>
+        <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ctx</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
+            <span class="k">return</span> <span class="nx">ctx</span><span class="p">.</span><span class="nf">Err</span><span class="p">()</span>
+        <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ticker</span><span class="p">.</span><span class="nx">C</span><span class="p">:</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>是否没有空闲的连接</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Server</span><span class="p">)</span> <span class="nf">closeIdleConns</span><span class="p">()</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="k">defer</span> <span class="nx">s</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="nx">quiescent</span> <span class="o">:=</span> <span class="kc">true</span>
+	<span class="k">for</span> <span class="nx">c</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">s</span><span class="p">.</span><span class="nx">activeConn</span> <span class="p">{</span>
+		<span class="nx">st</span><span class="p">,</span> <span class="nx">unixSec</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">getState</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">st</span> <span class="o">==</span> <span class="nx">StateNew</span> <span class="o">&amp;&amp;</span> <span class="nx">unixSec</span> <span class="p">&lt;</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">().</span><span class="nf">Unix</span><span class="p">()</span><span class="o">-</span><span class="mi">5</span> <span class="p">{</span>
+			<span class="nx">st</span> <span class="p">=</span> <span class="nx">StateIdle</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">st</span> <span class="o">!=</span> <span class="nx">StateIdle</span> <span class="o">||</span> <span class="nx">unixSec</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">quiescent</span> <span class="p">=</span> <span class="kc">false</span>
+			<span class="k">continue</span>
+		<span class="p">}</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nx">rwc</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+		<span class="nb">delete</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">activeConn</span><span class="p">,</span> <span class="nx">c</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">quiescent</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>关闭server.doneChan和监听的文件描述符</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 关闭doen chan
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Server</span><span class="p">)</span> <span class="nf">closeDoneChanLocked</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">ch</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">getDoneChanLocked</span><span class="p">()</span>
+    <span class="k">select</span> <span class="p">{</span>
+    <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ch</span><span class="p">:</span>
+        <span class="c1">// Already closed. Don&#39;t close again.
+</span><span class="c1"></span>    <span class="k">default</span><span class="p">:</span>
+        <span class="c1">// Safe to close here. We&#39;re the only closer, guarded
+</span><span class="c1"></span>        <span class="c1">// by s.mu.
+</span><span class="c1"></span>        <span class="nb">close</span><span class="p">(</span><span class="nx">ch</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// 关闭监听的fd
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Server</span><span class="p">)</span> <span class="nf">closeListenersLocked</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">err</span> <span class="kt">error</span>
+    <span class="k">for</span> <span class="nx">ln</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">s</span><span class="p">.</span><span class="nx">listeners</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">cerr</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">ln</span><span class="p">).</span><span class="nf">Close</span><span class="p">();</span> <span class="nx">cerr</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">err</span> <span class="p">=</span> <span class="nx">cerr</span>
+        <span class="p">}</span>
+        <span class="nb">delete</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">listeners</span><span class="p">,</span> <span class="nx">ln</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nx">err</span>
+<span class="p">}</span>
+
+<span class="c1">// 关闭连接
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">conn</span><span class="p">)</span> <span class="nf">Close</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">!</span><span class="nx">c</span><span class="p">.</span><span class="nf">ok</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">EINVAL</span>
+    <span class="p">}</span>
+    <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">err</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">OpError</span><span class="p">{</span><span class="nx">Op</span><span class="p">:</span> <span class="s">&#34;close&#34;</span><span class="p">,</span> <span class="nx">Net</span><span class="p">:</span> <span class="nx">c</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nx">net</span><span class="p">,</span> <span class="nx">Source</span><span class="p">:</span> <span class="nx">c</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nx">laddr</span><span class="p">,</span> <span class="nx">Addr</span><span class="p">:</span> <span class="nx">c</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nx">raddr</span><span class="p">,</span> <span class="nx">Err</span><span class="p">:</span> <span class="nx">err</span><span class="p">}</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nx">err</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这么一系列的操作后，server.go的serve主监听方法也就退出了。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">Server</span><span class="p">)</span> <span class="nf">Serve</span><span class="p">(</span><span class="nx">l</span> <span class="nx">net</span><span class="p">.</span><span class="nx">Listener</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="nx">rw</span><span class="p">,</span> <span class="nx">e</span> <span class="o">:=</span> <span class="nx">l</span><span class="p">.</span><span class="nf">Accept</span><span class="p">()</span>
+        <span class="k">if</span> <span class="nx">e</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="k">select</span> <span class="p">{</span>
+             <span class="c1">// 退出
+</span><span class="c1"></span>            <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">srv</span><span class="p">.</span><span class="nf">getDoneChan</span><span class="p">():</span>
+                <span class="k">return</span> <span class="nx">ErrServerClosed</span>
+            <span class="k">default</span><span class="p">:</span>
+            <span class="p">}</span>
+            <span class="o">...</span>
+            <span class="k">return</span> <span class="nx">e</span>
+        <span class="p">}</span>
+        <span class="nx">tempDelay</span> <span class="p">=</span> <span class="mi">0</span>
+        <span class="nx">c</span> <span class="o">:=</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">newConn</span><span class="p">(</span><span class="nx">rw</span><span class="p">)</span>
+        <span class="nx">c</span><span class="p">.</span><span class="nf">setState</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">rwc</span><span class="p">,</span> <span class="nx">StateNew</span><span class="p">)</span> <span class="c1">// before Serve can return
+</span><span class="c1"></span>        <span class="k">go</span> <span class="nx">c</span><span class="p">.</span><span class="nf">serve</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>那么如何保证用户在请求完成后，再关闭连接的？</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Server</span><span class="p">)</span> <span class="nf">doKeepAlives</span><span class="p">()</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">disableKeepAlives</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nx">s</span><span class="p">.</span><span class="nf">shuttingDown</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="c1">// Serve a new connection.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">conn</span><span class="p">)</span> <span class="nf">serve</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="o">...</span>
+		<span class="k">if</span> <span class="p">!</span><span class="nx">c</span><span class="p">.</span><span class="nf">hijacked</span><span class="p">()</span> <span class="p">{</span>
+                        <span class="c1">// 关闭连接，并且标记退出
+</span><span class="c1"></span>			<span class="nx">c</span><span class="p">.</span><span class="nb">close</span><span class="p">()</span>
+			<span class="nx">c</span><span class="p">.</span><span class="nf">setState</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">rwc</span><span class="p">,</span> <span class="nx">StateClosed</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+        <span class="o">...</span>
+	<span class="nx">ctx</span><span class="p">,</span> <span class="nx">cancelCtx</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">WithCancel</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">cancelCtx</span> <span class="p">=</span> <span class="nx">cancelCtx</span>
+	<span class="k">defer</span> <span class="nf">cancelCtx</span><span class="p">()</span>
+
+	<span class="nx">c</span><span class="p">.</span><span class="nx">r</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">connReader</span><span class="p">{</span><span class="nx">conn</span><span class="p">:</span> <span class="nx">c</span><span class="p">}</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">bufr</span> <span class="p">=</span> <span class="nf">newBufioReader</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">r</span><span class="p">)</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">bufw</span> <span class="p">=</span> <span class="nf">newBufioWriterSize</span><span class="p">(</span><span class="nx">checkConnErrorWriter</span><span class="p">{</span><span class="nx">c</span><span class="p">},</span> <span class="mi">4</span><span class="o">&lt;&lt;</span><span class="mi">10</span><span class="p">)</span>
+
+	<span class="k">for</span> <span class="p">{</span>
+                <span class="c1">// 接收请求
+</span><span class="c1"></span>		<span class="nx">w</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">readRequest</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">r</span><span class="p">.</span><span class="nx">remain</span> <span class="o">!=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">server</span><span class="p">.</span><span class="nf">initialReadLimitSize</span><span class="p">()</span> <span class="p">{</span>
+			<span class="nx">c</span><span class="p">.</span><span class="nf">setState</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">rwc</span><span class="p">,</span> <span class="nx">StateActive</span><span class="p">)</span>
+		<span class="p">}</span>
+                <span class="o">...</span>
+                <span class="o">...</span>
+                <span class="c1">// 匹配路由及回调处理方法
+</span><span class="c1"></span>		<span class="nx">serverHandler</span><span class="p">{</span><span class="nx">c</span><span class="p">.</span><span class="nx">server</span><span class="p">}.</span><span class="nf">ServeHTTP</span><span class="p">(</span><span class="nx">w</span><span class="p">,</span> <span class="nx">w</span><span class="p">.</span><span class="nx">req</span><span class="p">)</span>
+		<span class="nx">w</span><span class="p">.</span><span class="nf">cancelCtx</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nf">hijacked</span><span class="p">()</span> <span class="p">{</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+                <span class="o">...</span>
+                <span class="c1">// 判断是否在shutdown mode, 选择退出
+</span><span class="c1"></span>		<span class="k">if</span> <span class="p">!</span><span class="nx">w</span><span class="p">.</span><span class="nx">conn</span><span class="p">.</span><span class="nx">server</span><span class="p">.</span><span class="nf">doKeepAlives</span><span class="p">()</span> <span class="p">{</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+    <span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="优雅关闭grpcgracefulstop">优雅关闭:grpc.GracefulStop</h2>
+<h3 id="goaway帧">goaway帧</h3>
+<p>grpc的通信协议是http2，http2对于连接关闭使用goaway帧信号。goaway帧（类型= 0x7）用于启动连接关闭或发出严重错误状态信号。 goaway允许端点正常停止接受新的流，同时仍然完成对先前建立的流的处理。这可以实现管理操作，例如服务器维护，升级等。</p>
+<h3 id="server">server</h3>
+<p>golang grpc server提供了两个退出方法，一个是stop，一个是gracefulStop。先说下gracefulStop。首先close listen fd，这样就无法建立新的请求，然后遍历所有的当前连接发送goaway帧信号。goaway帧信号在http2用来关闭连接的。serveWG.Wait()会等待所有 handleRawConn协程的退出，在grpc server里每个新连接都会创建一个 handleRawConn协程，并且增加waitgroup的计数。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Server</span><span class="p">)</span> <span class="nf">GracefulStop</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="o">...</span>
+
+    <span class="c1">// 关闭 listen fd，不再接收新的连接
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">lis</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">s</span><span class="p">.</span><span class="nx">lis</span> <span class="p">{</span>
+        <span class="nx">lis</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+    <span class="p">}</span>
+
+    <span class="nx">s</span><span class="p">.</span><span class="nx">lis</span> <span class="p">=</span> <span class="kc">nil</span>
+    <span class="k">if</span> <span class="p">!</span><span class="nx">s</span><span class="p">.</span><span class="nx">drain</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="nx">st</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">s</span><span class="p">.</span><span class="nx">conns</span> <span class="p">{</span>
+            <span class="c1">// 给所有的客户端发布goaway信号
+</span><span class="c1"></span>            <span class="nx">st</span><span class="p">.</span><span class="nf">Drain</span><span class="p">()</span>  
+        <span class="p">}</span>
+        <span class="nx">s</span><span class="p">.</span><span class="nx">drain</span> <span class="p">=</span> <span class="kc">true</span>
+    <span class="p">}</span>
+
+
+    <span class="c1">// 等待所有handleRawConn协程退出，每个请求都是一个协程，通过waitgroup控制.
+</span><span class="c1"></span>    <span class="nx">s</span><span class="p">.</span><span class="nx">serveWG</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+
+    <span class="c1">// 当还有空闲连接时，需要等待。在退出serveStreams逻辑时，会进行Broadcast唤醒。只要有一个客户端退出就会触发removeConn继而进行唤醒。
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nb">len</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">conns</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nx">s</span><span class="p">.</span><span class="nx">cv</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+    <span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><p>看下drain方法的具体实现，构建goaway请求塞到controlbuf里，由grpc唯一的loopyWriter来写入报文。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 构建goaway请求塞入buf里，然后由统一的loopyWriter来发送报文。
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">http2Server</span><span class="p">)</span> <span class="nf">drain</span><span class="p">(</span><span class="nx">code</span> <span class="nx">http2</span><span class="p">.</span><span class="nx">ErrCode</span><span class="p">,</span> <span class="nx">debugData</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">t</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="k">defer</span> <span class="nx">t</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">t</span><span class="p">.</span><span class="nx">drainChan</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="nx">t</span><span class="p">.</span><span class="nx">drainChan</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+    <span class="nx">t</span><span class="p">.</span><span class="nx">controlBuf</span><span class="p">.</span><span class="nf">put</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">goAway</span><span class="p">{</span><span class="nx">code</span><span class="p">:</span> <span class="nx">code</span><span class="p">,</span> <span class="nx">debugData</span><span class="p">:</span> <span class="nx">debugData</span><span class="p">,</span> <span class="nx">headsUp</span><span class="p">:</span> <span class="kc">true</span><span class="p">})</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>stop方法相比gracefulStop来说，减少了goaway帧的发送，等待连接的退出。</p>
+<h3 id="client">client</h3>
+<p>grpc客户端会new一个协程来执行reader方法，一直监听新数据的到来，当帧类型为goaway时调用handleGoAway，该方法会调用closeStream关闭当前连接的所有活动stream。对于开发者来说，只需监听grpc接口中的ctx就得到状态变更。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 接收各类报文
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">http2Client</span><span class="p">)</span> <span class="nf">reader</span><span class="p">()</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="nx">t</span><span class="p">.</span><span class="nx">controlBuf</span><span class="p">.</span><span class="nf">throttle</span><span class="p">()</span>
+        <span class="nx">frame</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">t</span><span class="p">.</span><span class="nx">framer</span><span class="p">.</span><span class="nx">fr</span><span class="p">.</span><span class="nf">ReadFrame</span><span class="p">()</span>
+        <span class="k">switch</span> <span class="nx">frame</span> <span class="o">:=</span> <span class="nx">frame</span><span class="p">.(</span><span class="kd">type</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c1">// 接收goaway信号，回调handleGoAway方法
+</span><span class="c1"></span>			<span class="k">case</span> <span class="o">*</span><span class="nx">http2</span><span class="p">.</span><span class="nx">GoAwayFrame</span><span class="p">:</span>
+            	<span class="nx">t</span><span class="p">.</span><span class="nf">handleGoAway</span><span class="p">(</span><span class="nx">frame</span><span class="p">)</span>
+            	<span class="o">...</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// 当前连接里的所有的活动stream进行closeStream
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">http2Client</span><span class="p">)</span> <span class="nf">handleGoAway</span><span class="p">(</span><span class="nx">f</span><span class="o">*</span><span class="nx">http2</span><span class="p">.</span><span class="nx">GoAwayFrame</span><span class="p">)</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="k">for</span> <span class="nx">streamID</span><span class="p">,</span> <span class="nx">stream</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">t</span><span class="p">.</span><span class="nx">activeStreams</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">streamID</span> <span class="p">&gt;</span> <span class="nx">id</span> <span class="o">&amp;&amp;</span> <span class="nx">streamID</span> <span class="o">&lt;=</span> <span class="nx">upperLimit</span> <span class="p">{</span>
+            <span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreUint32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">stream</span><span class="p">.</span><span class="nx">unprocessed</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="nx">t</span><span class="p">.</span><span class="nf">closeStream</span><span class="p">(</span><span class="nx">stream</span><span class="p">,</span> <span class="nx">errStreamDrain</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="nx">http2</span><span class="p">.</span><span class="nx">ErrCodeNo</span><span class="p">,</span> <span class="nx">statusGoAway</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="nx">active</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">t</span><span class="p">.</span><span class="nx">activeStreams</span><span class="p">)</span>
+    <span class="nx">t</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">active</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nx">t</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+    <span class="p">}</span>
+<span class="o">...</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>通常该连接不可用后，如客户端再次进行unary或streming请求时，grpc会按照规则来实例化新的连接，比如通过dns或者grpc balancer来地址变更。</p>
+<h3 id="对比nethttp-和-grpc的graceful-shutdown">对比net/http 和 grpc的graceful shutdown</h3>
+<p>golang的net/http在graceful实现上不会主动的关闭连接，除非是配置了强制超时退出。因为当你去主动关闭长连接时，有些低质量的客户端可能会出现异常。所以，像nginx、netty、net/http这类服务端不会主动关闭客户端的连接。</p>
+<p>但grpc就不同了… 两端的代码本就是自动生成的，质量颇高。利用http2的goaway特性来通知关闭，规避了强制关闭引起的异常。</p>
+<h2 id="参考">参考</h2>
+<p><a href="https://cloud.tencent.com/developer/article/1523444">golang 服务平滑重启小结</a><br>
+<a href="https://blog.csdn.net/tomatomas/article/details/94839857">如何优雅地重启go程序&ndash;endless篇</a>
+<a href="http://xiaorui.cc/archives/5803">源码分析golang http shutdown优雅退出的原理</a><br>
+<a href="http://xiaorui.cc/archives/6402">源码分析grpc graceful shutdown优雅退出</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2020-12-11
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go/">Go</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/go%E7%9A%84%E9%A1%B9%E7%9B%AE%E5%B7%A5%E7%A8%8B%E5%8C%96/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Go的项目工程化</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/go%E4%B8%AD%E7%9A%84%E4%BF%A1%E5%8F%B7%E5%A4%84%E7%90%86/">
+            <span class="next-text nav-default">Go中的信号处理</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2020
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
