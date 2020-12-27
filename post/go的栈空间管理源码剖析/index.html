@@ -53,7 +53,7 @@
 <meta itemprop="description" content="设计原理 栈区的内存一般由编译器自动进行分配和释放，其中存储着函数的入参以及局部变量，这些参数会随着函数的创建而创建，函数的返回而消亡，一般不">
 <meta itemprop="datePublished" content="2020-12-18T17:46:19&#43;00:00" />
 <meta itemprop="dateModified" content="2020-12-18T17:46:19&#43;00:00" />
-<meta itemprop="wordCount" content="10386">
+<meta itemprop="wordCount" content="16717">
 
 
 
@@ -167,8 +167,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 10386 字 </span>
-          <span class="more-meta"> 预计阅读 21 分钟 </span>
+          <span class="more-meta"> 约 16717 字 </span>
+          <span class="more-meta"> 预计阅读 34 分钟 </span>
         
       </div>
     </header>
@@ -190,11 +190,10 @@
       <ul>
         <li><a href="#栈初始化">栈初始化</a></li>
         <li><a href="#栈分配">栈分配</a></li>
-        <li><a href="#栈扩容">栈扩容</a></li>
-        <li><a href="#栈缩容">栈缩容</a></li>
-        <li><a href="#栈拷贝">栈拷贝</a></li>
+        <li><a href="#执行栈的伸缩">执行栈的伸缩</a></li>
       </ul>
     </li>
+    <li><a href="#栈内存的申请与堆内存的申请">栈内存的申请与堆内存的申请</a></li>
     <li><a href="#小结">小结</a></li>
     <li><a href="#参考">参考</a></li>
   </ul>
@@ -818,6 +817,7 @@
 </span><span class="lnt">23
 </span><span class="lnt">24
 </span><span class="lnt">25
+</span><span class="lnt">26
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// stackcacherefill/stackcacherelease implement a global pool of stack segments.
@@ -834,7 +834,8 @@
 </span><span class="c1"></span>	<span class="kd">var</span> <span class="nx">list</span> <span class="nx">gclinkptr</span>
 	<span class="kd">var</span> <span class="nx">size</span> <span class="kt">uintptr</span>
 	<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">stackpool</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">item</span><span class="p">.</span><span class="nx">mu</span><span class="p">)</span>
-	<span class="k">for</span> <span class="nx">size</span> <span class="p">&lt;</span> <span class="nx">_StackCacheSize</span><span class="o">/</span><span class="mi">2</span> <span class="p">{</span>
+	<span class="c1">//这里有一个循环获取的方法，看起来是获取的大小要超过_StackCacheSize的一半，官方给出的解释是防止系统颠簸
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">size</span> <span class="p">&lt;</span> <span class="nx">_StackCacheSize</span><span class="o">/</span><span class="mi">2</span> <span class="p">{</span>
 		<span class="nx">x</span> <span class="o">:=</span> <span class="nf">stackpoolalloc</span><span class="p">(</span><span class="nx">order</span><span class="p">)</span>
 		<span class="nx">x</span><span class="p">.</span><span class="nf">ptr</span><span class="p">().</span><span class="nx">next</span> <span class="p">=</span> <span class="nx">list</span>
 		<span class="nx">list</span> <span class="p">=</span> <span class="nx">x</span>
@@ -847,7 +848,7 @@
 
 </code></pre></td></tr></table>
 </div>
-</div><p>runtime.stackpoolalloc 函数会在全局的栈缓存池 runtime.stackpool 中获取新的内存，如果栈缓存池中不包含剩余的内存，运行时会从堆上申请一片内存空间；如果线程缓存中包含足够的空间，我们可以从线程本地的缓存中获取内存，一旦发现空间不足就会调用 runtime.stackcacherefill 从堆上获取新的内存。</p>
+</div><p>runtime.stackpoolalloc 函数会在全局的栈缓存池 runtime.stackpool 中获取新的内存，如果栈缓存池中不包含剩余的内存，运行时会从堆上申请一片内存空间</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt"> 1
@@ -896,16 +897,21 @@
 </span><span class="lnt">44
 </span><span class="lnt">45
 </span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Allocates a stack from the free pool. Must be called with
 </span><span class="c1">// stackpool[order].item.mu held.
 </span><span class="c1"></span><span class="kd">func</span> <span class="nf">stackpoolalloc</span><span class="p">(</span><span class="nx">order</span> <span class="kt">uint8</span><span class="p">)</span> <span class="nx">gclinkptr</span> <span class="p">{</span>
-	<span class="nx">list</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">stackpool</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">item</span><span class="p">.</span><span class="nx">span</span>
+	<span class="c1">//我们有一个全局的缓存池，stackpool，存储的就是不同规格的spanlist，首先我们获取对应规格的spanlist 
+</span><span class="c1"></span>	<span class="nx">list</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">stackpool</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">item</span><span class="p">.</span><span class="nx">span</span>
 	<span class="c1">//s为指向span的指针
 </span><span class="c1"></span>	<span class="nx">s</span> <span class="o">:=</span> <span class="nx">list</span><span class="p">.</span><span class="nx">first</span>
 	<span class="nf">lockWithRankMayAcquire</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">mheap_</span><span class="p">.</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">lockRankMheap</span><span class="p">)</span>
-	<span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+	<span class="c1">//如果list是空的，我们就调用allocManual申请新的span
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
 		<span class="c1">// no free stacks. Allocate another span worth.
 </span><span class="c1"></span>		<span class="c1">//一次申请32KB内存即4页
 </span><span class="c1"></span>		<span class="nx">s</span> <span class="p">=</span> <span class="nx">mheap_</span><span class="p">.</span><span class="nf">allocManual</span><span class="p">(</span><span class="nx">_StackCacheSize</span><span class="o">&gt;&gt;</span><span class="nx">_PageShift</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">stacks_inuse</span><span class="p">)</span>
@@ -935,7 +941,8 @@
 	<span class="k">if</span> <span class="nx">x</span><span class="p">.</span><span class="nf">ptr</span><span class="p">()</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
 		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;span has no free stacks&#34;</span><span class="p">)</span>
 	<span class="p">}</span>
-	<span class="nx">s</span><span class="p">.</span><span class="nx">manualFreeList</span> <span class="p">=</span> <span class="nx">x</span><span class="p">.</span><span class="nf">ptr</span><span class="p">().</span><span class="nx">next</span>
+	<span class="c1">//获取到list后，我们读取第一个span，然后分配manualFreeList的第一个单元给栈即可，如果manualFreeList用完了，则直接移除该span即可。
+</span><span class="c1"></span>	<span class="nx">s</span><span class="p">.</span><span class="nx">manualFreeList</span> <span class="p">=</span> <span class="nx">x</span><span class="p">.</span><span class="nf">ptr</span><span class="p">().</span><span class="nx">next</span>
 	<span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span><span class="o">++</span>
 	<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nx">manualFreeList</span><span class="p">.</span><span class="nf">ptr</span><span class="p">()</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
 		<span class="c1">// all stacks in s are allocated.
@@ -946,13 +953,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>如果 Goroutine 申请的内存空间过大，运行时会查看 runtime.stackLarge 中是否有剩余的空间，如果不存在剩余空间，它也会从堆上申请新的内存：</p>
-<p>需要注意的是，因为 OpenBSD 6.4+ 对栈内存有特殊的需求，所以只要我们从堆上申请栈内存，就需要调用 runtime.osStackAlloc 函数做一些额外的处理，然而其他的操作系统就没有这种限制了。</p>
-<p>我们用一个流程图来归纳下栈空间分配的流程</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201222162303.png" alt=""></p>
-<h3 id="栈扩容">栈扩容</h3>
-<p>每一个函数执行都要占用栈空间，用于保存变量，参数等。运行在协程里的函数自然是占用运行它的协程栈。但协程的栈是有限的，如果发现不够用，会调用stackalloc分配一块新的栈，大小比原来大一倍。</p>
-<p>编译器会在 cmd/internal/obj/x86.stacksplit 函数中为函数调用插入 runtime.morestack 运行时检查，它会在几乎所有的函数调用之前检查当前 Goroutine 的栈内存是否充足,如果当前栈需要扩容，我们会保存一些栈的相关信息并调用 runtime.newstack 创建新的栈：</p>
+</div><p>无论是小栈分配还是大栈的分配，在分配失败时都会从 mheap 上分配重新分配新的缓存，使用 allocManual</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt">  1
@@ -1115,6 +1116,757 @@
 </span><span class="lnt">158
 </span><span class="lnt">159
 </span><span class="lnt">160
+</span><span class="lnt">161
+</span><span class="lnt">162
+</span><span class="lnt">163
+</span><span class="lnt">164
+</span><span class="lnt">165
+</span><span class="lnt">166
+</span><span class="lnt">167
+</span><span class="lnt">168
+</span><span class="lnt">169
+</span><span class="lnt">170
+</span><span class="lnt">171
+</span><span class="lnt">172
+</span><span class="lnt">173
+</span><span class="lnt">174
+</span><span class="lnt">175
+</span><span class="lnt">176
+</span><span class="lnt">177
+</span><span class="lnt">178
+</span><span class="lnt">179
+</span><span class="lnt">180
+</span><span class="lnt">181
+</span><span class="lnt">182
+</span><span class="lnt">183
+</span><span class="lnt">184
+</span><span class="lnt">185
+</span><span class="lnt">186
+</span><span class="lnt">187
+</span><span class="lnt">188
+</span><span class="lnt">189
+</span><span class="lnt">190
+</span><span class="lnt">191
+</span><span class="lnt">192
+</span><span class="lnt">193
+</span><span class="lnt">194
+</span><span class="lnt">195
+</span><span class="lnt">196
+</span><span class="lnt">197
+</span><span class="lnt">198
+</span><span class="lnt">199
+</span><span class="lnt">200
+</span><span class="lnt">201
+</span><span class="lnt">202
+</span><span class="lnt">203
+</span><span class="lnt">204
+</span><span class="lnt">205
+</span><span class="lnt">206
+</span><span class="lnt">207
+</span><span class="lnt">208
+</span><span class="lnt">209
+</span><span class="lnt">210
+</span><span class="lnt">211
+</span><span class="lnt">212
+</span><span class="lnt">213
+</span><span class="lnt">214
+</span><span class="lnt">215
+</span><span class="lnt">216
+</span><span class="lnt">217
+</span><span class="lnt">218
+</span><span class="lnt">219
+</span><span class="lnt">220
+</span><span class="lnt">221
+</span><span class="lnt">222
+</span><span class="lnt">223
+</span><span class="lnt">224
+</span><span class="lnt">225
+</span><span class="lnt">226
+</span><span class="lnt">227
+</span><span class="lnt">228
+</span><span class="lnt">229
+</span><span class="lnt">230
+</span><span class="lnt">231
+</span><span class="lnt">232
+</span><span class="lnt">233
+</span><span class="lnt">234
+</span><span class="lnt">235
+</span><span class="lnt">236
+</span><span class="lnt">237
+</span><span class="lnt">238
+</span><span class="lnt">239
+</span><span class="lnt">240
+</span><span class="lnt">241
+</span><span class="lnt">242
+</span><span class="lnt">243
+</span><span class="lnt">244
+</span><span class="lnt">245
+</span><span class="lnt">246
+</span><span class="lnt">247
+</span><span class="lnt">248
+</span><span class="lnt">249
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// allocManual allocates a manually-managed span of npage pages.
+</span><span class="c1">// allocManual returns nil if allocation fails.
+</span><span class="c1">//
+</span><span class="c1">// allocManual adds the bytes used to *stat, which should be a
+</span><span class="c1">// memstats in-use field. Unlike allocations in the GC&#39;d heap, the
+</span><span class="c1">// allocation does *not* count toward heap_inuse or heap_sys.
+</span><span class="c1">//
+</span><span class="c1">// The memory backing the returned span may not be zeroed if
+</span><span class="c1">// span.needzero is set.
+</span><span class="c1">//
+</span><span class="c1">// allocManual must be called on the system stack because it may
+</span><span class="c1">// acquire the heap lock via allocSpan. See mheap for details.
+</span><span class="c1">//
+</span><span class="c1">//go:systemstack
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">allocManual</span><span class="p">(</span><span class="nx">npages</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">stat</span> <span class="o">*</span><span class="kt">uint64</span><span class="p">)</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">h</span><span class="p">.</span><span class="nf">allocSpan</span><span class="p">(</span><span class="nx">npages</span><span class="p">,</span> <span class="kc">true</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">stat</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="c1">// allocSpan allocates an mspan which owns npages worth of memory.
+</span><span class="c1">//
+</span><span class="c1">// If manual == false, allocSpan allocates a heap span of class spanclass
+</span><span class="c1">// and updates heap accounting. If manual == true, allocSpan allocates a
+</span><span class="c1">// manually-managed span (spanclass is ignored), and the caller is
+</span><span class="c1">// responsible for any accounting related to its use of the span. Either
+</span><span class="c1">// way, allocSpan will atomically add the bytes in the newly allocated
+</span><span class="c1">// span to *sysStat.
+</span><span class="c1">//
+</span><span class="c1">// The returned span is fully initialized.
+</span><span class="c1">//
+</span><span class="c1">// h must not be locked.
+</span><span class="c1">//
+</span><span class="c1">// allocSpan must be called on the system stack both because it acquires
+</span><span class="c1">// the heap lock and because it must block GC transitions.
+</span><span class="c1">//
+</span><span class="c1">//go:systemstack
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">allocSpan</span><span class="p">(</span><span class="nx">npages</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">manual</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">spanclass</span> <span class="nx">spanClass</span><span class="p">,</span> <span class="nx">sysStat</span> <span class="o">*</span><span class="kt">uint64</span><span class="p">)</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span><span class="p">)</span> <span class="p">{</span>
+	<span class="c1">// Function-global state.
+</span><span class="c1"></span>	<span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+	<span class="nx">base</span><span class="p">,</span> <span class="nx">scav</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+	<span class="c1">// If the allocation is small enough, try the page cache!
+</span><span class="c1"></span>	<span class="nx">pp</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">p</span><span class="p">.</span><span class="nf">ptr</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">pp</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">npages</span> <span class="p">&lt;</span> <span class="nx">pageCachePages</span><span class="o">/</span><span class="mi">4</span> <span class="p">{</span>
+		<span class="nx">c</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">pp</span><span class="p">.</span><span class="nx">pcache</span>
+
+		<span class="c1">// If the cache is empty, refill it.
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nf">empty</span><span class="p">()</span> <span class="p">{</span>
+			<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+			<span class="o">*</span><span class="nx">c</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">pages</span><span class="p">.</span><span class="nf">allocToCache</span><span class="p">()</span>
+			<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+		<span class="p">}</span>
+
+		<span class="c1">// Try to allocate from the cache.
+</span><span class="c1"></span>		<span class="nx">base</span><span class="p">,</span> <span class="nx">scav</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">base</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">s</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nf">tryAllocMSpan</span><span class="p">()</span>
+
+			<span class="k">if</span> <span class="nx">s</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">gcBlackenEnabled</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="nx">manual</span> <span class="o">||</span> <span class="nx">spanclass</span><span class="p">.</span><span class="nf">sizeclass</span><span class="p">()</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">goto</span> <span class="nx">HaveSpan</span>
+			<span class="p">}</span>
+			<span class="c1">// We&#39;re either running duing GC, failed to acquire a mspan,
+</span><span class="c1"></span>			<span class="c1">// or the allocation is for a large object. This means we
+</span><span class="c1"></span>			<span class="c1">// have to lock the heap and do a bunch of extra work,
+</span><span class="c1"></span>			<span class="c1">// so go down the HaveBaseLocked path.
+</span><span class="c1"></span>			<span class="c1">//
+</span><span class="c1"></span>			<span class="c1">// We must do this during GC to avoid skew with heap_scan
+</span><span class="c1"></span>			<span class="c1">// since we flush mcache stats whenever we lock.
+</span><span class="c1"></span>			<span class="c1">//
+</span><span class="c1"></span>			<span class="c1">// TODO(mknyszek): It would be nice to not have to
+</span><span class="c1"></span>			<span class="c1">// lock the heap if it&#39;s a large allocation, but
+</span><span class="c1"></span>			<span class="c1">// it&#39;s fine for now. The critical section here is
+</span><span class="c1"></span>			<span class="c1">// short and large object allocations are relatively
+</span><span class="c1"></span>			<span class="c1">// infrequent.
+</span><span class="c1"></span>		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="c1">// For one reason or another, we couldn&#39;t get the
+</span><span class="c1"></span>	<span class="c1">// whole job done without the heap lock.
+</span><span class="c1"></span>	<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+
+	<span class="k">if</span> <span class="nx">base</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="c1">// Try to acquire a base address.
+</span><span class="c1"></span>		<span class="nx">base</span><span class="p">,</span> <span class="nx">scav</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">pages</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">base</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="p">!</span><span class="nx">h</span><span class="p">.</span><span class="nf">grow</span><span class="p">(</span><span class="nx">npages</span><span class="p">)</span> <span class="p">{</span>
+				<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+				<span class="k">return</span> <span class="kc">nil</span>
+			<span class="p">}</span>
+			<span class="nx">base</span><span class="p">,</span> <span class="nx">scav</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">pages</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">base</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;grew heap, but no adequate free space found&#34;</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// We failed to get an mspan earlier, so grab
+</span><span class="c1"></span>		<span class="c1">// one now that we have the heap lock.
+</span><span class="c1"></span>		<span class="nx">s</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nf">allocMSpanLocked</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">manual</span> <span class="p">{</span>
+		<span class="c1">// This is a heap span, so we should do some additional accounting
+</span><span class="c1"></span>		<span class="c1">// which may only be done with the heap locked.
+</span><span class="c1"></span>
+		<span class="c1">// Transfer stats from mcache to global.
+</span><span class="c1"></span>		<span class="kd">var</span> <span class="nx">c</span> <span class="o">*</span><span class="nx">mcache</span>
+		<span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">p</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">c</span> <span class="p">=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">p</span><span class="p">.</span><span class="nf">ptr</span><span class="p">().</span><span class="nx">mcache</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="c1">// This case occurs while bootstrapping.
+</span><span class="c1"></span>			<span class="c1">// See the similar code in mallocgc.
+</span><span class="c1"></span>			<span class="nx">c</span> <span class="p">=</span> <span class="nx">mcache0</span>
+			<span class="k">if</span> <span class="nx">c</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;mheap.allocSpan called with no P&#34;</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_scan</span> <span class="o">+=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">local_scan</span><span class="p">)</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nx">local_scan</span> <span class="p">=</span> <span class="mi">0</span>
+		<span class="nx">memstats</span><span class="p">.</span><span class="nx">tinyallocs</span> <span class="o">+=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">local_tinyallocs</span><span class="p">)</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nx">local_tinyallocs</span> <span class="p">=</span> <span class="mi">0</span>
+
+		<span class="c1">// Do some additional accounting if it&#39;s a large allocation.
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">spanclass</span><span class="p">.</span><span class="nf">sizeclass</span><span class="p">()</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">mheap_</span><span class="p">.</span><span class="nx">largealloc</span> <span class="o">+=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">npages</span> <span class="o">*</span> <span class="nx">pageSize</span><span class="p">)</span>
+			<span class="nx">mheap_</span><span class="p">.</span><span class="nx">nlargealloc</span><span class="o">++</span>
+			<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_live</span><span class="p">,</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">npages</span><span class="o">*</span><span class="nx">pageSize</span><span class="p">))</span>
+		<span class="p">}</span>
+
+		<span class="c1">// Either heap_live or heap_scan could have been updated.
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">gcBlackenEnabled</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">gcController</span><span class="p">.</span><span class="nf">revise</span><span class="p">()</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+
+<span class="nx">HaveSpan</span><span class="p">:</span>
+	<span class="c1">// At this point, both s != nil and base != 0, and the heap
+</span><span class="c1"></span>	<span class="c1">// lock is no longer held. Initialize the span.
+</span><span class="c1"></span>	<span class="nx">s</span><span class="p">.</span><span class="nf">init</span><span class="p">(</span><span class="nx">base</span><span class="p">,</span> <span class="nx">npages</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">h</span><span class="p">.</span><span class="nf">allocNeedsZero</span><span class="p">(</span><span class="nx">base</span><span class="p">,</span> <span class="nx">npages</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">needzero</span> <span class="p">=</span> <span class="mi">1</span>
+	<span class="p">}</span>
+	<span class="nx">nbytes</span> <span class="o">:=</span> <span class="nx">npages</span> <span class="o">*</span> <span class="nx">pageSize</span>
+	<span class="k">if</span> <span class="nx">manual</span> <span class="p">{</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">manualFreeList</span> <span class="p">=</span> <span class="mi">0</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">=</span> <span class="mi">0</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">limit</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">()</span> <span class="o">+</span> <span class="nx">s</span><span class="p">.</span><span class="nx">npages</span><span class="o">*</span><span class="nx">pageSize</span>
+		<span class="c1">// Manually managed memory doesn&#39;t count toward heap_sys.
+</span><span class="c1"></span>		<span class="nf">mSysStatDec</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_sys</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">npages</span><span class="o">*</span><span class="nx">pageSize</span><span class="p">)</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">state</span><span class="p">.</span><span class="nf">set</span><span class="p">(</span><span class="nx">mSpanManual</span><span class="p">)</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="c1">// We must set span properties before the span is published anywhere
+</span><span class="c1"></span>		<span class="c1">// since we&#39;re not holding the heap lock.
+</span><span class="c1"></span>		<span class="nx">s</span><span class="p">.</span><span class="nx">spanclass</span> <span class="p">=</span> <span class="nx">spanclass</span>
+		<span class="k">if</span> <span class="nx">sizeclass</span> <span class="o">:=</span> <span class="nx">spanclass</span><span class="p">.</span><span class="nf">sizeclass</span><span class="p">();</span> <span class="nx">sizeclass</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">elemsize</span> <span class="p">=</span> <span class="nx">nbytes</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">=</span> <span class="mi">1</span>
+
+			<span class="nx">s</span><span class="p">.</span><span class="nx">divShift</span> <span class="p">=</span> <span class="mi">0</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">divMul</span> <span class="p">=</span> <span class="mi">0</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">divShift2</span> <span class="p">=</span> <span class="mi">0</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">baseMask</span> <span class="p">=</span> <span class="mi">0</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">elemsize</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">class_to_size</span><span class="p">[</span><span class="nx">sizeclass</span><span class="p">])</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">=</span> <span class="nx">nbytes</span> <span class="o">/</span> <span class="nx">s</span><span class="p">.</span><span class="nx">elemsize</span>
+
+			<span class="nx">m</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">class_to_divmagic</span><span class="p">[</span><span class="nx">sizeclass</span><span class="p">]</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">divShift</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">shift</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">divMul</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">mul</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">divShift2</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">shift2</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">baseMask</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">baseMask</span>
+		<span class="p">}</span>
+
+		<span class="c1">// Initialize mark and allocation structures.
+</span><span class="c1"></span>		<span class="nx">s</span><span class="p">.</span><span class="nx">freeindex</span> <span class="p">=</span> <span class="mi">0</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">allocCache</span> <span class="p">=</span> <span class="p">^</span><span class="nb">uint64</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="c1">// all 1s indicating all free.
+</span><span class="c1"></span>		<span class="nx">s</span><span class="p">.</span><span class="nx">gcmarkBits</span> <span class="p">=</span> <span class="nf">newMarkBits</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span><span class="p">)</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">allocBits</span> <span class="p">=</span> <span class="nf">newAllocBits</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span><span class="p">)</span>
+
+		<span class="c1">// It&#39;s safe to access h.sweepgen without the heap lock because it&#39;s
+</span><span class="c1"></span>		<span class="c1">// only ever updated with the world stopped and we run on the
+</span><span class="c1"></span>		<span class="c1">// systemstack which blocks a STW transition.
+</span><span class="c1"></span>		<span class="nx">atomic</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span><span class="p">,</span> <span class="nx">h</span><span class="p">.</span><span class="nx">sweepgen</span><span class="p">)</span>
+
+		<span class="c1">// Now that the span is filled in, set its state. This
+</span><span class="c1"></span>		<span class="c1">// is a publication barrier for the other fields in
+</span><span class="c1"></span>		<span class="c1">// the span. While valid pointers into this span
+</span><span class="c1"></span>		<span class="c1">// should never be visible until the span is returned,
+</span><span class="c1"></span>		<span class="c1">// if the garbage collector finds an invalid pointer,
+</span><span class="c1"></span>		<span class="c1">// access to the span may race with initialization of
+</span><span class="c1"></span>		<span class="c1">// the span. We resolve this race by atomically
+</span><span class="c1"></span>		<span class="c1">// setting the state after the span is fully
+</span><span class="c1"></span>		<span class="c1">// initialized, and atomically checking the state in
+</span><span class="c1"></span>		<span class="c1">// any situation where a pointer is suspect.
+</span><span class="c1"></span>		<span class="nx">s</span><span class="p">.</span><span class="nx">state</span><span class="p">.</span><span class="nf">set</span><span class="p">(</span><span class="nx">mSpanInUse</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Commit and account for any scavenged memory that the span now owns.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">scav</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="c1">// sysUsed all the pages that are actually available
+</span><span class="c1"></span>		<span class="c1">// in the span since some of them might be scavenged.
+</span><span class="c1"></span>		<span class="nf">sysUsed</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">base</span><span class="p">),</span> <span class="nx">nbytes</span><span class="p">)</span>
+		<span class="nf">mSysStatDec</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_released</span><span class="p">,</span> <span class="nx">scav</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="c1">// Update stats.
+</span><span class="c1"></span>	<span class="nf">mSysStatInc</span><span class="p">(</span><span class="nx">sysStat</span><span class="p">,</span> <span class="nx">nbytes</span><span class="p">)</span>
+	<span class="nf">mSysStatDec</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_idle</span><span class="p">,</span> <span class="nx">nbytes</span><span class="p">)</span>
+
+	<span class="c1">// Publish the span in various locations.
+</span><span class="c1"></span>
+	<span class="c1">// This is safe to call without the lock held because the slots
+</span><span class="c1"></span>	<span class="c1">// related to this span will only ever be read or modified by
+</span><span class="c1"></span>	<span class="c1">// this thread until pointers into the span are published (and
+</span><span class="c1"></span>	<span class="c1">// we execute a publication barrier at the end of this function
+</span><span class="c1"></span>	<span class="c1">// before that happens) or pageInUse is updated.
+</span><span class="c1"></span>	<span class="nx">h</span><span class="p">.</span><span class="nf">setSpans</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">(),</span> <span class="nx">npages</span><span class="p">,</span> <span class="nx">s</span><span class="p">)</span>
+
+	<span class="k">if</span> <span class="p">!</span><span class="nx">manual</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="p">!</span><span class="nx">go115NewMCentralImpl</span> <span class="p">{</span>
+			<span class="c1">// Add to swept in-use list.
+</span><span class="c1"></span>			<span class="c1">//
+</span><span class="c1"></span>			<span class="c1">// This publishes the span to root marking.
+</span><span class="c1"></span>			<span class="c1">//
+</span><span class="c1"></span>			<span class="c1">// h.sweepgen is guaranteed to only change during STW,
+</span><span class="c1"></span>			<span class="c1">// and preemption is disabled in the page allocator.
+</span><span class="c1"></span>			<span class="nx">h</span><span class="p">.</span><span class="nx">sweepSpans</span><span class="p">[</span><span class="nx">h</span><span class="p">.</span><span class="nx">sweepgen</span><span class="o">/</span><span class="mi">2</span><span class="o">%</span><span class="mi">2</span><span class="p">].</span><span class="nf">push</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+		<span class="p">}</span>
+
+		<span class="c1">// Mark in-use span in arena page bitmap.
+</span><span class="c1"></span>		<span class="c1">//
+</span><span class="c1"></span>		<span class="c1">// This publishes the span to the page sweeper, so
+</span><span class="c1"></span>		<span class="c1">// it&#39;s imperative that the span be completely initialized
+</span><span class="c1"></span>		<span class="c1">// prior to this line.
+</span><span class="c1"></span>		<span class="nx">arena</span><span class="p">,</span> <span class="nx">pageIdx</span><span class="p">,</span> <span class="nx">pageMask</span> <span class="o">:=</span> <span class="nf">pageIndexOf</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">())</span>
+		<span class="nx">atomic</span><span class="p">.</span><span class="nf">Or8</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">arena</span><span class="p">.</span><span class="nx">pageInUse</span><span class="p">[</span><span class="nx">pageIdx</span><span class="p">],</span> <span class="nx">pageMask</span><span class="p">)</span>
+
+		<span class="c1">// Update related page sweeper stats.
+</span><span class="c1"></span>		<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">pagesInUse</span><span class="p">,</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">npages</span><span class="p">))</span>
+
+		<span class="k">if</span> <span class="nx">trace</span><span class="p">.</span><span class="nx">enabled</span> <span class="p">{</span>
+			<span class="c1">// Trace that a heap alloc occurred.
+</span><span class="c1"></span>			<span class="nf">traceHeapAlloc</span><span class="p">()</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Make sure the newly allocated span will be observed
+</span><span class="c1"></span>	<span class="c1">// by the GC before pointers into the span are published.
+</span><span class="c1"></span>	<span class="nf">publicationBarrier</span><span class="p">()</span>
+
+	<span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们用一个流程图来归纳下栈空间分配的流程</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201222162303.png" alt=""></p>
+<h3 id="执行栈的伸缩">执行栈的伸缩</h3>
+<p>早年的 Go 运行时使用分段栈的机制，即当一个 Goroutine 的执行栈溢出时， 栈的扩张操作是在另一个栈上进行的，这两个栈彼此没有连续。 这种设计的缺陷很容易破坏缓存的局部性原理，从而降低程序的运行时性能。 因此现在 Go 运行时开始使用连续栈机制，当一个执行栈发生溢出时， 新建一个两倍于原栈大小的新栈，再将原栈整个拷贝到新栈上。 从而整个栈总是连续的。栈的拷贝并非想象中的那样简单，因为一个栈上可能保留指向被拷贝栈的指针， 从而当栈发生拷贝后，这个指针可能还指向原栈，从而造成错误。 此外，Goroutine 上原本的 gobuf 也需要被更新，这也是使用连续栈的难点之一。</p>
+<h4 id="分段标记">分段标记</h4>
+<p>分段标记是编译器的机制，涉及栈帧大小的计算。这个过程比较复杂，我们暂时假设编译器已经计算好了栈帧的大小， 这时，编译的预处理阶段，会为没有标记为 go:nosplit 的函数插入栈的分段检查：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// cmd/internal/obj/x86/obj6.go
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">preprocess</span><span class="p">(</span><span class="nx">ctxt</span> <span class="o">*</span><span class="nx">obj</span><span class="p">.</span><span class="nx">Link</span><span class="p">,</span> <span class="nx">cursym</span> <span class="o">*</span><span class="nx">obj</span><span class="p">.</span><span class="nx">LSym</span><span class="p">,</span> <span class="nx">newprog</span> <span class="nx">obj</span><span class="p">.</span><span class="nx">ProgAlloc</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="nx">p</span> <span class="o">:=</span> <span class="nx">cursym</span><span class="p">.</span><span class="nx">Func</span><span class="p">.</span><span class="nx">Text</span>
+	<span class="nx">autoffset</span> <span class="o">:=</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">p</span><span class="p">.</span><span class="nx">To</span><span class="p">.</span><span class="nx">Offset</span><span class="p">)</span> <span class="c1">// 栈帧大小
+</span><span class="c1"></span>	<span class="c1">// 一些额外的栈帧大小计算
+</span><span class="c1"></span>	<span class="o">...</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">cursym</span><span class="p">.</span><span class="nx">Func</span><span class="p">.</span><span class="nx">Text</span><span class="p">.</span><span class="nx">From</span><span class="p">.</span><span class="nx">Sym</span><span class="p">.</span><span class="nf">NoSplit</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">p</span> <span class="p">=</span> <span class="nf">stacksplit</span><span class="p">(</span><span class="nx">ctxt</span><span class="p">,</span> <span class="nx">cursym</span><span class="p">,</span> <span class="nx">p</span><span class="p">,</span> <span class="nx">newprog</span><span class="p">,</span> <span class="nx">autoffset</span><span class="p">,</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">textarg</span><span class="p">))</span> <span class="c1">// 触发分段检查
+</span><span class="c1"></span>	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>与处理阶段将栈帧大小传入 stacksplit，用于针对不同大小的栈进行不同的分段检查， 具体的代码相当繁琐，这里直接给出的是汇编的伪代码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">stacksplit</span><span class="p">(</span><span class="nx">ctxt</span> <span class="o">*</span><span class="nx">obj</span><span class="p">.</span><span class="nx">Link</span><span class="p">,</span> <span class="nx">cursym</span> <span class="o">*</span><span class="nx">obj</span><span class="p">.</span><span class="nx">LSym</span><span class="p">,</span> <span class="nx">p</span> <span class="o">*</span><span class="nx">obj</span><span class="p">.</span><span class="nx">Prog</span><span class="p">,</span> <span class="nx">newprog</span> <span class="nx">obj</span><span class="p">.</span><span class="nx">ProgAlloc</span><span class="p">,</span> <span class="nx">framesize</span> <span class="kt">int32</span><span class="p">,</span> <span class="nx">textarg</span> <span class="kt">int32</span><span class="p">)</span> <span class="o">*</span><span class="nx">obj</span><span class="p">.</span><span class="nx">Prog</span> <span class="p">{</span>
+	<span class="o">...</span>
+
+	<span class="kd">var</span> <span class="nx">q1</span> <span class="o">*</span><span class="nx">obj</span><span class="p">.</span><span class="nx">Prog</span>
+	<span class="k">if</span> <span class="nx">framesize</span> <span class="o">&lt;=</span> <span class="nx">objabi</span><span class="p">.</span><span class="nx">StackSmall</span> <span class="p">{</span>
+		<span class="c1">// 小栈: SP &lt;= stackguard，直接比较 SP 和 stackguard
+</span><span class="c1"></span>		<span class="c1">//	CMPQ SP, stackguard
+</span><span class="c1"></span>		<span class="o">...</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">framesize</span> <span class="o">&lt;=</span> <span class="nx">objabi</span><span class="p">.</span><span class="nx">StackBig</span> <span class="p">{</span>
+		<span class="c1">// 大栈: SP-framesize &lt;= stackguard-StackSmall
+</span><span class="c1"></span>		<span class="c1">//	LEAQ -xxx(SP), AX
+</span><span class="c1"></span>		<span class="c1">//	CMPQ AX, stackguard
+</span><span class="c1"></span>		<span class="o">...</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="c1">// 更大的栈需要防止 wraparound
+</span><span class="c1"></span>		<span class="c1">// 如果 SP 接近于零:
+</span><span class="c1"></span>		<span class="c1">//	SP-stackguard+StackGuard &lt;= framesize + (StackGuard-StackSmall)
+</span><span class="c1"></span>		<span class="c1">// 两端的 +StackGuard 是为了保证左侧大于零。
+</span><span class="c1"></span>		<span class="c1">// SP 允许位于 stackguard 下面一点点
+</span><span class="c1"></span>		<span class="c1">//
+</span><span class="c1"></span>		<span class="c1">// 抢占设置了 stackguard 为 StackPreempt，一个大到能够打破上面的数学计算的值，
+</span><span class="c1"></span>		<span class="c1">// 因此必须显式的进行检查：
+</span><span class="c1"></span>		<span class="c1">//	MOVQ	stackguard, CX
+</span><span class="c1"></span>		<span class="c1">//	CMPQ	CX, $StackPreempt
+</span><span class="c1"></span>		<span class="c1">//	JEQ	label-of-call-to-morestack
+</span><span class="c1"></span>		<span class="c1">//	LEAQ	StackGuard(SP), AX
+</span><span class="c1"></span>		<span class="c1">//	SUBQ	CX, AX
+</span><span class="c1"></span>		<span class="c1">//	CMPQ	AX, $(framesize+(StackGuard-StackSmall))
+</span><span class="c1"></span>		<span class="o">...</span>
+	<span class="p">}</span>
+
+	<span class="o">...</span>
+	<span class="c1">// 函数的尾声
+</span><span class="c1"></span>	<span class="nx">morestack</span> <span class="o">:=</span> <span class="s">&#34;runtime.morestack&#34;</span>
+	<span class="k">switch</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="nx">cursym</span><span class="p">.</span><span class="nf">CFunc</span><span class="p">():</span>
+		<span class="nx">morestack</span> <span class="p">=</span> <span class="s">&#34;runtime.morestackc&#34;</span> <span class="c1">// morestackc 会 panic，因为此时是系统栈上的 C 函数
+</span><span class="c1"></span>	<span class="k">case</span> <span class="p">!</span><span class="nx">cursym</span><span class="p">.</span><span class="nx">Func</span><span class="p">.</span><span class="nx">Text</span><span class="p">.</span><span class="nx">From</span><span class="p">.</span><span class="nx">Sym</span><span class="p">.</span><span class="nf">NeedCtxt</span><span class="p">():</span>
+		<span class="nx">morestack</span> <span class="p">=</span> <span class="s">&#34;runtime.morestack_noctxt&#34;</span>
+	<span class="p">}</span>
+	<span class="nx">call</span><span class="p">.</span><span class="nx">To</span><span class="p">.</span><span class="nx">Sym</span> <span class="p">=</span> <span class="nx">ctxt</span><span class="p">.</span><span class="nf">Lookup</span><span class="p">(</span><span class="nx">morestack</span><span class="p">)</span>
+	<span class="o">...</span>
+
+	<span class="k">return</span> <span class="nx">jls</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>总而言之，没有被 go:nosplit 标记的函数的序言部分会插入分段检查，从而在发生栈溢出的情况下， 触发 runtime.morestack 调用，如果函数不需要 ctxt，则会调用 runtime.morestack_noctxt 从而抛弃 ctxt 再调用 morestack：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">TEXT</span> <span class="nx">runtime</span><span class="err">·</span><span class="nf">morestack_noctxt</span><span class="p">(</span><span class="nx">SB</span><span class="p">),</span><span class="nx">NOSPLIT</span><span class="p">,</span><span class="err">$</span><span class="mi">0</span>
+	<span class="nx">MOVL</span>	<span class="err">$</span><span class="mi">0</span><span class="p">,</span> <span class="nx">DX</span>
+	<span class="nx">JMP</span>	<span class="nx">runtime</span><span class="err">·</span><span class="nf">morestack</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="栈扩容">栈扩容</h4>
+<p>每一个函数执行都要占用栈空间，用于保存变量，参数等。运行在协程里的函数自然是占用运行它的协程栈。但协程的栈是有限的，如果发现不够用，会调用stackalloc分配一块新的栈，大小比原来大一倍。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">TEXT</span> <span class="n">runtime</span>·<span class="nf">morestack</span><span class="p">(</span><span class="n">SB</span><span class="p">),</span><span class="n">NOSPLIT</span><span class="p">,</span><span class="o">$</span><span class="m">0-0</span>
+	<span class="o">//</span> 无法增长调度器的栈<span class="p">(</span><span class="n">m</span><span class="o">-&gt;</span><span class="n">g0</span><span class="p">)</span>
+	<span class="nf">get_tls</span><span class="p">(</span><span class="n">CX</span><span class="p">)</span>
+	<span class="n">MOVQ</span>	<span class="nf">g</span><span class="p">(</span><span class="n">CX</span><span class="p">),</span> <span class="n">BX</span>
+	<span class="n">MOVQ</span>	<span class="nf">g_m</span><span class="p">(</span><span class="n">BX</span><span class="p">),</span> <span class="n">BX</span>
+	<span class="n">MOVQ</span>	<span class="nf">m_g0</span><span class="p">(</span><span class="n">BX</span><span class="p">),</span> <span class="n">SI</span>
+	<span class="n">CMPQ</span>	<span class="nf">g</span><span class="p">(</span><span class="n">CX</span><span class="p">),</span> <span class="n">SI</span>
+	<span class="n">JNE</span>	<span class="m">3</span><span class="p">(</span><span class="n">PC</span><span class="p">)</span>
+	<span class="n">CALL</span>	<span class="n">runtime</span>·<span class="nf">badmorestackg0</span><span class="p">(</span><span class="n">SB</span><span class="p">)</span>
+	<span class="n">CALL</span>	<span class="n">runtime</span>·<span class="nf">abort</span><span class="p">(</span><span class="n">SB</span><span class="p">)</span>
+
+	<span class="o">//</span> 无法增长信号栈 <span class="p">(</span><span class="n">m</span><span class="o">-&gt;</span><span class="n">gsignal</span><span class="p">)</span>
+	<span class="n">MOVQ</span>	<span class="nf">m_gsignal</span><span class="p">(</span><span class="n">BX</span><span class="p">),</span> <span class="n">SI</span>
+	<span class="n">CMPQ</span>	<span class="nf">g</span><span class="p">(</span><span class="n">CX</span><span class="p">),</span> <span class="n">SI</span>
+	<span class="n">JNE</span>	<span class="m">3</span><span class="p">(</span><span class="n">PC</span><span class="p">)</span>
+	<span class="n">CALL</span>	<span class="n">runtime</span>·<span class="nf">badmorestackgsignal</span><span class="p">(</span><span class="n">SB</span><span class="p">)</span>
+	<span class="n">CALL</span>	<span class="n">runtime</span>·<span class="nf">abort</span><span class="p">(</span><span class="n">SB</span><span class="p">)</span>
+
+	<span class="o">//</span> 从 <span class="n">f</span> 调用
+	<span class="o">//</span> 将 <span class="n">m</span><span class="o">-&gt;</span><span class="n">morebuf</span> 设置为 <span class="n">f</span> 的调用方
+	<span class="n">MOVQ</span>	<span class="m">8</span><span class="p">(</span><span class="n">SP</span><span class="p">),</span> <span class="n">AX</span>	<span class="o">//</span> <span class="n">f</span> 的调用方 <span class="n">PC</span>
+	<span class="n">MOVQ</span>	<span class="n">AX</span><span class="p">,</span> <span class="p">(</span><span class="n">m_morebuf</span><span class="o">+</span><span class="n">gobuf_pc</span><span class="p">)(</span><span class="n">BX</span><span class="p">)</span>
+	<span class="n">LEAQ</span>	<span class="m">16</span><span class="p">(</span><span class="n">SP</span><span class="p">),</span> <span class="n">AX</span>	<span class="o">//</span> <span class="n">f</span> 的调用方 <span class="n">SP</span>
+	<span class="n">MOVQ</span>	<span class="n">AX</span><span class="p">,</span> <span class="p">(</span><span class="n">m_morebuf</span><span class="o">+</span><span class="n">gobuf_sp</span><span class="p">)(</span><span class="n">BX</span><span class="p">)</span>
+	<span class="nf">get_tls</span><span class="p">(</span><span class="n">CX</span><span class="p">)</span>
+	<span class="n">MOVQ</span>	<span class="nf">g</span><span class="p">(</span><span class="n">CX</span><span class="p">),</span> <span class="n">SI</span>
+	<span class="n">MOVQ</span>	<span class="n">SI</span><span class="p">,</span> <span class="p">(</span><span class="n">m_morebuf</span><span class="o">+</span><span class="n">gobuf_g</span><span class="p">)(</span><span class="n">BX</span><span class="p">)</span>
+
+	<span class="o">//</span> 将 <span class="n">g</span><span class="o">-&gt;</span><span class="n">sched</span> 设置为 <span class="n">f</span> 的 <span class="n">context</span>
+	<span class="n">MOVQ</span>	<span class="m">0</span><span class="p">(</span><span class="n">SP</span><span class="p">),</span> <span class="n">AX</span> <span class="o">//</span> <span class="n">f</span> 的 <span class="n">PC</span>
+	<span class="n">MOVQ</span>	<span class="n">AX</span><span class="p">,</span> <span class="p">(</span><span class="n">g_sched</span><span class="o">+</span><span class="n">gobuf_pc</span><span class="p">)(</span><span class="n">SI</span><span class="p">)</span>
+	<span class="n">MOVQ</span>	<span class="n">SI</span><span class="p">,</span> <span class="p">(</span><span class="n">g_sched</span><span class="o">+</span><span class="n">gobuf_g</span><span class="p">)(</span><span class="n">SI</span><span class="p">)</span>
+	<span class="n">LEAQ</span>	<span class="m">8</span><span class="p">(</span><span class="n">SP</span><span class="p">),</span> <span class="n">AX</span> <span class="o">//</span> <span class="n">f</span> 的 <span class="n">SP</span>
+	<span class="n">MOVQ</span>	<span class="n">AX</span><span class="p">,</span> <span class="p">(</span><span class="n">g_sched</span><span class="o">+</span><span class="n">gobuf_sp</span><span class="p">)(</span><span class="n">SI</span><span class="p">)</span>
+	<span class="n">MOVQ</span>	<span class="n">BP</span><span class="p">,</span> <span class="p">(</span><span class="n">g_sched</span><span class="o">+</span><span class="n">gobuf_bp</span><span class="p">)(</span><span class="n">SI</span><span class="p">)</span>
+	<span class="n">MOVQ</span>	<span class="n">DX</span><span class="p">,</span> <span class="p">(</span><span class="n">g_sched</span><span class="o">+</span><span class="n">gobuf_ctxt</span><span class="p">)(</span><span class="n">SI</span><span class="p">)</span>
+
+	<span class="o">//</span> 在 <span class="n">m</span><span class="o">-&gt;</span><span class="n">g0</span> 栈上调用 <span class="n">newstack.</span>
+	<span class="n">MOVQ</span>	<span class="nf">m_g0</span><span class="p">(</span><span class="n">BX</span><span class="p">),</span> <span class="n">BX</span>
+	<span class="n">MOVQ</span>	<span class="n">BX</span><span class="p">,</span> <span class="nf">g</span><span class="p">(</span><span class="n">CX</span><span class="p">)</span>
+	<span class="nf">MOVQ	</span><span class="p">(</span><span class="n">g_sched</span><span class="o">+</span><span class="n">gobuf_sp</span><span class="p">)(</span><span class="n">BX</span><span class="p">),</span> <span class="n">SP</span>
+	<span class="n">CALL</span>	<span class="n">runtime</span>·<span class="nf">newstack</span><span class="p">(</span><span class="n">SB</span><span class="p">)</span>
+	<span class="n">CALL</span>	<span class="n">runtime</span>·<span class="nf">abort</span><span class="p">(</span><span class="n">SB</span><span class="p">)</span>	<span class="o">//</span> 如果 <span class="n">newstack</span> 返回则崩溃
+	<span class="n">RET</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>编译器会在 cmd/internal/obj/x86.stacksplit 函数中为函数调用插入 runtime.morestack 运行时检查，它会在几乎所有的函数调用之前检查当前 Goroutine 的栈内存是否充足,如果当前栈需要扩容，我们会保存一些栈的相关信息并调用 runtime.newstack 创建新的栈：</p>
+<p>newstack 在前半部分承担了对 Goroutine 进行抢占的任务， 而在后半部分则是真正的栈扩张。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span><span class="lnt">103
+</span><span class="lnt">104
+</span><span class="lnt">105
+</span><span class="lnt">106
+</span><span class="lnt">107
+</span><span class="lnt">108
+</span><span class="lnt">109
+</span><span class="lnt">110
+</span><span class="lnt">111
+</span><span class="lnt">112
+</span><span class="lnt">113
+</span><span class="lnt">114
+</span><span class="lnt">115
+</span><span class="lnt">116
+</span><span class="lnt">117
+</span><span class="lnt">118
+</span><span class="lnt">119
+</span><span class="lnt">120
+</span><span class="lnt">121
+</span><span class="lnt">122
+</span><span class="lnt">123
+</span><span class="lnt">124
+</span><span class="lnt">125
+</span><span class="lnt">126
+</span><span class="lnt">127
+</span><span class="lnt">128
+</span><span class="lnt">129
+</span><span class="lnt">130
+</span><span class="lnt">131
+</span><span class="lnt">132
+</span><span class="lnt">133
+</span><span class="lnt">134
+</span><span class="lnt">135
+</span><span class="lnt">136
+</span><span class="lnt">137
+</span><span class="lnt">138
+</span><span class="lnt">139
+</span><span class="lnt">140
+</span><span class="lnt">141
+</span><span class="lnt">142
+</span><span class="lnt">143
+</span><span class="lnt">144
+</span><span class="lnt">145
+</span><span class="lnt">146
+</span><span class="lnt">147
+</span><span class="lnt">148
+</span><span class="lnt">149
+</span><span class="lnt">150
+</span><span class="lnt">151
+</span><span class="lnt">152
+</span><span class="lnt">153
+</span><span class="lnt">154
+</span><span class="lnt">155
+</span><span class="lnt">156
+</span><span class="lnt">157
+</span><span class="lnt">158
+</span><span class="lnt">159
+</span><span class="lnt">160
+</span><span class="lnt">161
+</span><span class="lnt">162
+</span><span class="lnt">163
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go">
@@ -1207,6 +1959,7 @@
 	<span class="nx">sp</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sp</span>
 	<span class="k">if</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">ArchFamily</span> <span class="o">==</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">AMD64</span> <span class="o">||</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">ArchFamily</span> <span class="o">==</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">I386</span> <span class="o">||</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">ArchFamily</span> <span class="o">==</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">WASM</span> <span class="p">{</span>
 		<span class="c1">// The call to morestack cost a word.
+</span><span class="c1"></span>		<span class="c1">// 到 morestack 的调用会消耗一个字
 </span><span class="c1"></span>		<span class="nx">sp</span> <span class="o">-=</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">PtrSize</span>
 	<span class="p">}</span>
 	<span class="k">if</span> <span class="nx">stackDebug</span> <span class="o">&gt;=</span> <span class="mi">1</span> <span class="o">||</span> <span class="nx">sp</span> <span class="p">&lt;</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">lo</span> <span class="p">{</span>
@@ -1245,6 +1998,7 @@
 </span><span class="c1"></span>	<span class="p">}</span>
 	<span class="c1">//如果当前 Goroutine 不需要被抢占，也就意味着我们需要新的栈空间来支持函数调用和本地变量的初始化，运行时会先检查目标大小的栈是否会溢出：
 </span><span class="c1"></span>	<span class="c1">// Allocate a bigger segment and move the stack.
+</span><span class="c1"></span>	<span class="c1">// 分配一个更大的段，并对栈进行移动
 </span><span class="c1"></span>	<span class="nx">oldsize</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">lo</span>
 	<span class="nx">newsize</span> <span class="o">:=</span> <span class="nx">oldsize</span> <span class="o">*</span> <span class="mi">2</span>	<span class="c1">// 比原来大一倍
 </span><span class="c1"></span>
@@ -1257,7 +2011,8 @@
 			<span class="nx">newsize</span> <span class="o">*=</span> <span class="mi">2</span>
 		<span class="p">}</span>
 	<span class="p">}</span>
-	<span class="k">if</span> <span class="nx">newsize</span> <span class="p">&gt;</span> <span class="nx">maxstacksize</span> <span class="p">{</span>
+	<span class="c1">// 需要的栈太大，直接溢出
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">newsize</span> <span class="p">&gt;</span> <span class="nx">maxstacksize</span> <span class="p">{</span>
 		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;runtime: goroutine stack exceeds &#34;</span><span class="p">,</span> <span class="nx">maxstacksize</span><span class="p">,</span> <span class="s">&#34;-byte limit\n&#34;</span><span class="p">)</span>
 		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;runtime: sp=&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">sp</span><span class="p">),</span> <span class="s">&#34; stack=[&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">lo</span><span class="p">),</span> <span class="s">&#34;, &#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">hi</span><span class="p">),</span> <span class="s">&#34;]\n&#34;</span><span class="p">)</span>
 		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;stack overflow&#34;</span><span class="p">)</span>
@@ -1279,7 +2034,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="栈缩容">栈缩容</h3>
+</div><h4 id="栈缩容">栈缩容</h4>
 <p>栈的缩容主要是发生在GC期间。一个协程变成常驻状态，繁忙时需要占用很大的内存，但空闲时占用很少，这样会浪费很多内存，为了避免浪费Go在GC时对协程的栈进行了缩容，缩容也是分配一块新的内存替换原来的，大小只有原来的1/2。</p>
 <p>runtime.shrinkstack 是用于栈缩容的函数，该函数的实现原理非常简单，其中大部分都是检查是否满足缩容前置条件的代码</p>
 <div class="highlight"><div class="chroma">
@@ -1421,13 +2176,375 @@
 </div><p>如果要触发栈的缩容，新栈的大小会是原始栈的一半，不过如果新栈的大小低于程序的最低限制 2KB，那么缩容的过程就会停止。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201221232206.png" alt=""></p>
 <p>运行时只会在栈内存使用不足 1/4 时进行缩容，缩容也会调用扩容时使用的 runtime.copystack 函数开辟新的栈空间。</p>
-<h3 id="栈拷贝">栈拷贝</h3>
-<p>新栈的初始化和数据的复制是一个比较简单的过程，不过这不是整个过程中最复杂的地方，我们还需要将指向源栈中内存指向新的栈，在这期间我们需要分别调整以下的指针：</p>
+<h4 id="栈拷贝">栈拷贝</h4>
+<p>前面我们已经提到了，栈拷贝的其中一个难点就是 Go 中栈上的变量会包含自己的地址， 当我们拷贝了一个指向原栈的指针时，拷贝后的指针会变为无效指针。 不难发现，只有栈上分配的指针才能指向栈上的地址，否则这个指针指向的对象会重新在堆中进行分配（逃逸）。在这期间我们需要分别调整以下的指针：</p>
 <ol>
 <li>调用 runtime.adjustsudogs 或者 runtime.syncadjustsudogs 调整 runtime.sudog 结构体的指针；</li>
 <li>调用 runtime.memmove 将源栈中的整片内存拷贝到新的栈中；</li>
 <li>调用 runtime.adjustctxt、runtime.adjustdefers 和 runtime.adjustpanics 调整剩余 Goroutine 相关数据结构的指针；</li>
 </ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span><span class="lnt">103
+</span><span class="lnt">104
+</span><span class="lnt">105
+</span><span class="lnt">106
+</span><span class="lnt">107
+</span><span class="lnt">108
+</span><span class="lnt">109
+</span><span class="lnt">110
+</span><span class="lnt">111
+</span><span class="lnt">112
+</span><span class="lnt">113
+</span><span class="lnt">114
+</span><span class="lnt">115
+</span><span class="lnt">116
+</span><span class="lnt">117
+</span><span class="lnt">118
+</span><span class="lnt">119
+</span><span class="lnt">120
+</span><span class="lnt">121
+</span><span class="lnt">122
+</span><span class="lnt">123
+</span><span class="lnt">124
+</span><span class="lnt">125
+</span><span class="lnt">126
+</span><span class="lnt">127
+</span><span class="lnt">128
+</span><span class="lnt">129
+</span><span class="lnt">130
+</span><span class="lnt">131
+</span><span class="lnt">132
+</span><span class="lnt">133
+</span><span class="lnt">134
+</span><span class="lnt">135
+</span><span class="lnt">136
+</span><span class="lnt">137
+</span><span class="lnt">138
+</span><span class="lnt">139
+</span><span class="lnt">140
+</span><span class="lnt">141
+</span><span class="lnt">142
+</span><span class="lnt">143
+</span><span class="lnt">144
+</span><span class="lnt">145
+</span><span class="lnt">146
+</span><span class="lnt">147
+</span><span class="lnt">148
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Copies gp&#39;s stack to a new stack of a different size.
+</span><span class="c1">// Caller must have changed gp status to Gcopystack.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">copystack</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">,</span> <span class="nx">newsize</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">syscallsp</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;stack growth not allowed in system call&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">old</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span>
+	<span class="k">if</span> <span class="nx">old</span><span class="p">.</span><span class="nx">lo</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;nil stackbase&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">used</span> <span class="o">:=</span> <span class="nx">old</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sp</span>
+
+	<span class="c1">// allocate new stack
+</span><span class="c1"></span>	<span class="c1">//在拷贝栈的内存之前，运行时会通过 runtime.stackalloc 函数分配新的栈空间
+</span><span class="c1"></span>	<span class="nx">new</span> <span class="o">:=</span> <span class="nf">stackalloc</span><span class="p">(</span><span class="nb">uint32</span><span class="p">(</span><span class="nx">newsize</span><span class="p">))</span>
+	<span class="k">if</span> <span class="nx">stackPoisonCopy</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">fillstack</span><span class="p">(</span><span class="nx">new</span><span class="p">,</span> <span class="mh">0xfd</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">stackDebug</span> <span class="o">&gt;=</span> <span class="mi">1</span> <span class="p">{</span>
+		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;copystack gp=&#34;</span><span class="p">,</span> <span class="nx">gp</span><span class="p">,</span> <span class="s">&#34; [&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">old</span><span class="p">.</span><span class="nx">lo</span><span class="p">),</span> <span class="s">&#34; &#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">old</span><span class="p">.</span><span class="nx">hi</span><span class="o">-</span><span class="nx">used</span><span class="p">),</span> <span class="s">&#34; &#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">old</span><span class="p">.</span><span class="nx">hi</span><span class="p">),</span> <span class="s">&#34;]&#34;</span><span class="p">,</span> <span class="s">&#34; -&gt; [&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">new</span><span class="p">.</span><span class="nx">lo</span><span class="p">),</span> <span class="s">&#34; &#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">new</span><span class="p">.</span><span class="nx">hi</span><span class="o">-</span><span class="nx">used</span><span class="p">),</span> <span class="s">&#34; &#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">new</span><span class="p">.</span><span class="nx">hi</span><span class="p">),</span> <span class="s">&#34;]/&#34;</span><span class="p">,</span> <span class="nx">newsize</span><span class="p">,</span> <span class="s">&#34;\n&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Compute adjustment.
+</span><span class="c1"></span>	<span class="c1">// 这里主要调整g的一些调度相关参数
+</span><span class="c1"></span>    <span class="c1">// 如果它们存储在老的栈上面，需要将它们拷贝到新栈上
+</span><span class="c1"></span>	<span class="kd">var</span> <span class="nx">adjinfo</span> <span class="nx">adjustinfo</span>
+	<span class="nx">adjinfo</span><span class="p">.</span><span class="nx">old</span> <span class="p">=</span> <span class="nx">old</span>
+	<span class="nx">adjinfo</span><span class="p">.</span><span class="nx">delta</span> <span class="p">=</span> <span class="nx">new</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">old</span><span class="p">.</span><span class="nx">hi</span>	<span class="c1">// 计算新栈和旧栈之间内存地址差
+</span><span class="c1"></span>
+	<span class="c1">// Adjust sudogs, synchronizing with channel ops if necessary.
+</span><span class="c1"></span>	<span class="nx">ncopy</span> <span class="o">:=</span> <span class="nx">used</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">gp</span><span class="p">.</span><span class="nx">activeStackChans</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">newsize</span> <span class="p">&lt;</span> <span class="nx">old</span><span class="p">.</span><span class="nx">hi</span><span class="o">-</span><span class="nx">old</span><span class="p">.</span><span class="nx">lo</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load8</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gp</span><span class="p">.</span><span class="nx">parkingOnChan</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="c1">// It&#39;s not safe for someone to shrink this stack while we&#39;re actively
+</span><span class="c1"></span>			<span class="c1">// parking on a channel, but it is safe to grow since we do that
+</span><span class="c1"></span>			<span class="c1">// ourselves and explicitly don&#39;t want to synchronize with channels
+</span><span class="c1"></span>			<span class="c1">// since we could self-deadlock.
+</span><span class="c1"></span>			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;racy sudog adjustment due to parking on channel&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nf">adjustsudogs</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="c1">// sudogs may be pointing in to the stack and gp has
+</span><span class="c1"></span>		<span class="c1">// released channel locks, so other goroutines could
+</span><span class="c1"></span>		<span class="c1">// be writing to gp&#39;s stack. Find the highest such
+</span><span class="c1"></span>		<span class="c1">// pointer so we can handle everything there and below
+</span><span class="c1"></span>		<span class="c1">// carefully. (This shouldn&#39;t be far from the bottom
+</span><span class="c1"></span>		<span class="c1">// of the stack, so there&#39;s little cost in handling
+</span><span class="c1"></span>		<span class="c1">// everything below it carefully.)
+</span><span class="c1"></span>		<span class="nx">adjinfo</span><span class="p">.</span><span class="nx">sghi</span> <span class="p">=</span> <span class="nf">findsghi</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">old</span><span class="p">)</span>
+
+		<span class="c1">// Synchronize with channel ops and copy the part of
+</span><span class="c1"></span>		<span class="c1">// the stack they may interact with.
+</span><span class="c1"></span>		<span class="nx">ncopy</span> <span class="o">-=</span> <span class="nf">syncadjustsudogs</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">used</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Copy the stack (or the rest of it) to the new location
+</span><span class="c1"></span>	<span class="c1">//把旧栈数据复制到新栈
+</span><span class="c1"></span>	<span class="nf">memmove</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">new</span><span class="p">.</span><span class="nx">hi</span><span class="o">-</span><span class="nx">ncopy</span><span class="p">),</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">old</span><span class="p">.</span><span class="nx">hi</span><span class="o">-</span><span class="nx">ncopy</span><span class="p">),</span> <span class="nx">ncopy</span><span class="p">)</span>
+
+	<span class="c1">// Adjust remaining structures that have pointers into stacks.
+</span><span class="c1"></span>	<span class="c1">// We have to do most of these before we traceback the new
+</span><span class="c1"></span>	<span class="c1">// stack because gentraceback uses them.
+</span><span class="c1"></span>	<span class="nf">adjustctxt</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)</span>
+	<span class="nf">adjustdefers</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)</span>
+	<span class="nf">adjustpanics</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">sghi</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">adjinfo</span><span class="p">.</span><span class="nx">sghi</span> <span class="o">+=</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">delta</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Swap out old stack for new one
+</span><span class="c1"></span>	<span class="c1">// 切换到新堆栈上工作
+</span><span class="c1"></span>	<span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span> <span class="p">=</span> <span class="nx">new</span>
+	<span class="nx">gp</span><span class="p">.</span><span class="nx">stackguard0</span> <span class="p">=</span> <span class="nx">new</span><span class="p">.</span><span class="nx">lo</span> <span class="o">+</span> <span class="nx">_StackGuard</span> <span class="c1">// NOTE: might clobber a preempt request
+</span><span class="c1"></span>	<span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sp</span> <span class="p">=</span> <span class="nx">new</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">used</span>
+	<span class="nx">gp</span><span class="p">.</span><span class="nx">stktopsp</span> <span class="o">+=</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">delta</span>
+
+	<span class="c1">// Adjust pointers in the new stack.
+</span><span class="c1"></span>	<span class="c1">// 在新栈重调整指针
+</span><span class="c1"></span>	<span class="nf">gentraceback</span><span class="p">(^</span><span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="p">^</span><span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">gp</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="mh">0x7fffffff</span><span class="p">,</span> <span class="nx">adjustframe</span><span class="p">,</span> <span class="nf">noescape</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)),</span> <span class="mi">0</span><span class="p">)</span>
+
+	<span class="c1">// free old stack
+</span><span class="c1"></span>	<span class="c1">// 释放老的堆栈
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">stackPoisonCopy</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">fillstack</span><span class="p">(</span><span class="nx">old</span><span class="p">,</span> <span class="mh">0xfc</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="c1">//调用runtime.stackfree销毁并回收旧栈的内存空间；
+</span><span class="c1"></span>	<span class="nf">stackfree</span><span class="p">(</span><span class="nx">old</span><span class="p">)</span>
+<span class="p">}</span>
+
+
+<span class="kd">func</span> <span class="nf">fillstack</span><span class="p">(</span><span class="nx">stk</span> <span class="nx">stack</span><span class="p">,</span> <span class="nx">b</span> <span class="kt">byte</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="nx">p</span> <span class="o">:=</span> <span class="nx">stk</span><span class="p">.</span><span class="nx">lo</span><span class="p">;</span> <span class="nx">p</span> <span class="p">&lt;</span> <span class="nx">stk</span><span class="p">.</span><span class="nx">hi</span><span class="p">;</span> <span class="nx">p</span><span class="o">++</span> <span class="p">{</span>
+		<span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">byte</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">p</span><span class="p">))</span> <span class="p">=</span> <span class="nx">b</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">findsghi</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">,</span> <span class="nx">stk</span> <span class="nx">stack</span><span class="p">)</span> <span class="kt">uintptr</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">sghi</span> <span class="kt">uintptr</span>
+	<span class="k">for</span> <span class="nx">sg</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">waiting</span><span class="p">;</span> <span class="nx">sg</span> <span class="o">!=</span> <span class="kc">nil</span><span class="p">;</span> <span class="nx">sg</span> <span class="p">=</span> <span class="nx">sg</span><span class="p">.</span><span class="nx">waitlink</span> <span class="p">{</span>
+		<span class="nx">p</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">sg</span><span class="p">.</span><span class="nx">elem</span><span class="p">)</span> <span class="o">+</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">sg</span><span class="p">.</span><span class="nx">c</span><span class="p">.</span><span class="nx">elemsize</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">stk</span><span class="p">.</span><span class="nx">lo</span> <span class="o">&lt;=</span> <span class="nx">p</span> <span class="o">&amp;&amp;</span> <span class="nx">p</span> <span class="p">&lt;</span> <span class="nx">stk</span><span class="p">.</span><span class="nx">hi</span> <span class="o">&amp;&amp;</span> <span class="nx">p</span> <span class="p">&gt;</span> <span class="nx">sghi</span> <span class="p">{</span>
+			<span class="nx">sghi</span> <span class="p">=</span> <span class="nx">p</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">sghi</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">syncadjustsudogs</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">,</span> <span class="nx">used</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">adjinfo</span> <span class="o">*</span><span class="nx">adjustinfo</span><span class="p">)</span> <span class="kt">uintptr</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">waiting</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="mi">0</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Lock channels to prevent concurrent send/receive.
+</span><span class="c1"></span>	<span class="c1">// It&#39;s important that we *only* do this for async
+</span><span class="c1"></span>	<span class="c1">// copystack; otherwise, gp may be in the middle of
+</span><span class="c1"></span>	<span class="c1">// putting itself on wait queues and this would
+</span><span class="c1"></span>	<span class="c1">// self-deadlock.
+</span><span class="c1"></span>	<span class="kd">var</span> <span class="nx">lastc</span> <span class="o">*</span><span class="nx">hchan</span>
+	<span class="k">for</span> <span class="nx">sg</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">waiting</span><span class="p">;</span> <span class="nx">sg</span> <span class="o">!=</span> <span class="kc">nil</span><span class="p">;</span> <span class="nx">sg</span> <span class="p">=</span> <span class="nx">sg</span><span class="p">.</span><span class="nx">waitlink</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">sg</span><span class="p">.</span><span class="nx">c</span> <span class="o">!=</span> <span class="nx">lastc</span> <span class="p">{</span>
+			<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sg</span><span class="p">.</span><span class="nx">c</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">lastc</span> <span class="p">=</span> <span class="nx">sg</span><span class="p">.</span><span class="nx">c</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Adjust sudogs.
+</span><span class="c1"></span>	<span class="nf">adjustsudogs</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">adjinfo</span><span class="p">)</span>
+
+	<span class="c1">// Copy the part of the stack the sudogs point in to
+</span><span class="c1"></span>	<span class="c1">// while holding the lock to prevent races on
+</span><span class="c1"></span>	<span class="c1">// send/receive slots.
+</span><span class="c1"></span>	<span class="kd">var</span> <span class="nx">sgsize</span> <span class="kt">uintptr</span>
+	<span class="k">if</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">sghi</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">oldBot</span> <span class="o">:=</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">old</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">used</span>
+		<span class="nx">newBot</span> <span class="o">:=</span> <span class="nx">oldBot</span> <span class="o">+</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">delta</span>
+		<span class="nx">sgsize</span> <span class="p">=</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">sghi</span> <span class="o">-</span> <span class="nx">oldBot</span>
+		<span class="nf">memmove</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">newBot</span><span class="p">),</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">oldBot</span><span class="p">),</span> <span class="nx">sgsize</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Unlock channels.
+</span><span class="c1"></span>	<span class="nx">lastc</span> <span class="p">=</span> <span class="kc">nil</span>
+	<span class="k">for</span> <span class="nx">sg</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">waiting</span><span class="p">;</span> <span class="nx">sg</span> <span class="o">!=</span> <span class="kc">nil</span><span class="p">;</span> <span class="nx">sg</span> <span class="p">=</span> <span class="nx">sg</span><span class="p">.</span><span class="nx">waitlink</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">sg</span><span class="p">.</span><span class="nx">c</span> <span class="o">!=</span> <span class="nx">lastc</span> <span class="p">{</span>
+			<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sg</span><span class="p">.</span><span class="nx">c</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">lastc</span> <span class="p">=</span> <span class="nx">sg</span><span class="p">.</span><span class="nx">c</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span> <span class="nx">sgsize</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在扩容和缩容这个过程中，做了很多调整。从连续栈的实现方式上我们了解到，不管是扩容还是缩容，都重新申请一块新栈，然后把旧栈的数据复制到新栈。协程占用的物理内存完全被替换了，而Go在运行时会把指针保存到内存里面，例如：gp.sched.ctxt ，gp._defer ，gp._panic，包括函数里的指针。这部分指针值会被转换成整数型uintptr，然后 + delta进行调整。</p>
+<p>调整指向栈内存的指针都会调用 runtime.adjustpointer，该函数会利用 runtime.adjustinfo 计算的新栈和旧栈之间的内存地址差来调整指针。所有的指针都被调整后，我们就可以更新 Goroutine 的几个变量并通过 runtime.stackfree 释放原始栈的内存空间了。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">//栈空间调整信息
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">adjustinfo</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">old</span>   <span class="nx">stack</span>    <span class="c1">//旧的栈空间，stack.hi,   stack.lo
+</span><span class="c1"></span>    <span class="nx">delta</span> <span class="kt">uintptr</span> <span class="c1">//旧栈栈底到新栈栈底的偏移量
+</span><span class="c1"></span>    <span class="nx">cache</span> <span class="nx">pcvalueCache</span>  <span class="c1">//调整栈帧时会用到
+</span><span class="c1"></span>
+    <span class="c1">//sudog.elem 在栈上的最高位置
+</span><span class="c1"></span>    <span class="nx">sghi</span> <span class="kt">uintptr</span>
+<span class="p">}</span>
+<span class="c1">// Adjustpointer checks whether *vpp is in the old stack described by adjinfo.
+</span><span class="c1">// If so, it rewrites *vpp to point into the new stack.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">adjustpointer</span><span class="p">(</span><span class="nx">adjinfo</span> <span class="o">*</span><span class="nx">adjustinfo</span><span class="p">,</span> <span class="nx">vpp</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">pp</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nx">vpp</span><span class="p">)</span>
+	<span class="nx">p</span> <span class="o">:=</span> <span class="o">*</span><span class="nx">pp</span>
+	<span class="k">if</span> <span class="nx">stackDebug</span> <span class="o">&gt;=</span> <span class="mi">4</span> <span class="p">{</span>
+		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;        &#34;</span><span class="p">,</span> <span class="nx">pp</span><span class="p">,</span> <span class="s">&#34;:&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">p</span><span class="p">),</span> <span class="s">&#34;\n&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="c1">//如果这个整数型数字在旧栈的范围，就调整
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">old</span><span class="p">.</span><span class="nx">lo</span> <span class="o">&lt;=</span> <span class="nx">p</span> <span class="o">&amp;&amp;</span> <span class="nx">p</span> <span class="p">&lt;</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">old</span><span class="p">.</span><span class="nx">hi</span> <span class="p">{</span>
+		<span class="o">*</span><span class="nx">pp</span> <span class="p">=</span> <span class="nx">p</span> <span class="o">+</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">delta</span>
+		<span class="k">if</span> <span class="nx">stackDebug</span> <span class="o">&gt;=</span> <span class="mi">3</span> <span class="p">{</span>
+			<span class="nb">print</span><span class="p">(</span><span class="s">&#34;        adjust ptr &#34;</span><span class="p">,</span> <span class="nx">pp</span><span class="p">,</span> <span class="s">&#34;:&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">p</span><span class="p">),</span> <span class="s">&#34; -&gt; &#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="o">*</span><span class="nx">pp</span><span class="p">),</span> <span class="s">&#34;\n&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们主要看下函数调用gentraceback进行新栈上的指针的调整，我们就不把这个函数贴出来了，太复杂(感兴趣的同学可以看源码runtime.stack.go)，我们看到它传进去的一个函数adjustframe,看函数名字，它应该就是我们要找的函数。</p>
+<p>2.我们来看下adjustframe</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt"> 1
@@ -1517,99 +2634,116 @@
 </span><span class="lnt">85
 </span><span class="lnt">86
 </span><span class="lnt">87
+</span><span class="lnt">88
+</span><span class="lnt">89
+</span><span class="lnt">90
+</span><span class="lnt">91
+</span><span class="lnt">92
+</span><span class="lnt">93
+</span><span class="lnt">94
 </span></code></pre></td>
 <td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Copies gp&#39;s stack to a new stack of a different size.
-</span><span class="c1">// Caller must have changed gp status to Gcopystack.
-</span><span class="c1"></span><span class="kd">func</span> <span class="nf">copystack</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">,</span> <span class="nx">newsize</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">{</span>
-	<span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">syscallsp</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;stack growth not allowed in system call&#34;</span><span class="p">)</span>
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Note: the argument/return area is adjusted by the callee.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">adjustframe</span><span class="p">(</span><span class="nx">frame</span> <span class="o">*</span><span class="nx">stkframe</span><span class="p">,</span> <span class="nx">arg</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="nx">adjinfo</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">adjustinfo</span><span class="p">)(</span><span class="nx">arg</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">frame</span><span class="p">.</span><span class="nx">continpc</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="c1">// Frame is dead.
+</span><span class="c1"></span>		<span class="k">return</span> <span class="kc">true</span>
 	<span class="p">}</span>
-	<span class="nx">old</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span>
-	<span class="k">if</span> <span class="nx">old</span><span class="p">.</span><span class="nx">lo</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;nil stackbase&#34;</span><span class="p">)</span>
+	<span class="nx">f</span> <span class="o">:=</span> <span class="nx">frame</span><span class="p">.</span><span class="nx">fn</span>
+	<span class="k">if</span> <span class="nx">stackDebug</span> <span class="o">&gt;=</span> <span class="mi">2</span> <span class="p">{</span>
+		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;    adjusting &#34;</span><span class="p">,</span> <span class="nf">funcname</span><span class="p">(</span><span class="nx">f</span><span class="p">),</span> <span class="s">&#34; frame=[&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">frame</span><span class="p">.</span><span class="nx">sp</span><span class="p">),</span> <span class="s">&#34;,&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">frame</span><span class="p">.</span><span class="nx">fp</span><span class="p">),</span> <span class="s">&#34;] pc=&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">frame</span><span class="p">.</span><span class="nx">pc</span><span class="p">),</span> <span class="s">&#34; continpc=&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">frame</span><span class="p">.</span><span class="nx">continpc</span><span class="p">),</span> <span class="s">&#34;\n&#34;</span><span class="p">)</span>
 	<span class="p">}</span>
-	<span class="nx">used</span> <span class="o">:=</span> <span class="nx">old</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sp</span>
-
-	<span class="c1">// allocate new stack
-</span><span class="c1"></span>	<span class="c1">//在拷贝栈的内存之前，运行时会通过 runtime.stackalloc 函数分配新的栈空间
-</span><span class="c1"></span>	<span class="nx">new</span> <span class="o">:=</span> <span class="nf">stackalloc</span><span class="p">(</span><span class="nb">uint32</span><span class="p">(</span><span class="nx">newsize</span><span class="p">))</span>
-	<span class="k">if</span> <span class="nx">stackPoisonCopy</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="nf">fillstack</span><span class="p">(</span><span class="nx">new</span><span class="p">,</span> <span class="mh">0xfd</span><span class="p">)</span>
-	<span class="p">}</span>
-	<span class="k">if</span> <span class="nx">stackDebug</span> <span class="o">&gt;=</span> <span class="mi">1</span> <span class="p">{</span>
-		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;copystack gp=&#34;</span><span class="p">,</span> <span class="nx">gp</span><span class="p">,</span> <span class="s">&#34; [&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">old</span><span class="p">.</span><span class="nx">lo</span><span class="p">),</span> <span class="s">&#34; &#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">old</span><span class="p">.</span><span class="nx">hi</span><span class="o">-</span><span class="nx">used</span><span class="p">),</span> <span class="s">&#34; &#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">old</span><span class="p">.</span><span class="nx">hi</span><span class="p">),</span> <span class="s">&#34;]&#34;</span><span class="p">,</span> <span class="s">&#34; -&gt; [&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">new</span><span class="p">.</span><span class="nx">lo</span><span class="p">),</span> <span class="s">&#34; &#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">new</span><span class="p">.</span><span class="nx">hi</span><span class="o">-</span><span class="nx">used</span><span class="p">),</span> <span class="s">&#34; &#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">new</span><span class="p">.</span><span class="nx">hi</span><span class="p">),</span> <span class="s">&#34;]/&#34;</span><span class="p">,</span> <span class="nx">newsize</span><span class="p">,</span> <span class="s">&#34;\n&#34;</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">f</span><span class="p">.</span><span class="nx">funcID</span> <span class="o">==</span> <span class="nx">funcID_systemstack_switch</span> <span class="p">{</span>
+		<span class="c1">// A special routine at the bottom of stack of a goroutine that does a systemstack call.
+</span><span class="c1"></span>		<span class="c1">// We will allow it to be copied even though we don&#39;t
+</span><span class="c1"></span>		<span class="c1">// have full GC info for it (because it is written in asm).
+</span><span class="c1"></span>		<span class="k">return</span> <span class="kc">true</span>
 	<span class="p">}</span>
 
-	<span class="c1">// Compute adjustment.
-</span><span class="c1"></span>	<span class="c1">// 这里主要调整g的一些调度相关参数
-</span><span class="c1"></span>    <span class="c1">// 如果它们存储在老的栈上面，需要将它们拷贝到新栈上
-</span><span class="c1"></span>	<span class="kd">var</span> <span class="nx">adjinfo</span> <span class="nx">adjustinfo</span>
-	<span class="nx">adjinfo</span><span class="p">.</span><span class="nx">old</span> <span class="p">=</span> <span class="nx">old</span>
-	<span class="nx">adjinfo</span><span class="p">.</span><span class="nx">delta</span> <span class="p">=</span> <span class="nx">new</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">old</span><span class="p">.</span><span class="nx">hi</span>	<span class="c1">// 计算新栈和旧栈之间内存地址差
-</span><span class="c1"></span>
-	<span class="c1">// Adjust sudogs, synchronizing with channel ops if necessary.
-</span><span class="c1"></span>	<span class="nx">ncopy</span> <span class="o">:=</span> <span class="nx">used</span>
-	<span class="k">if</span> <span class="p">!</span><span class="nx">gp</span><span class="p">.</span><span class="nx">activeStackChans</span> <span class="p">{</span>
-		<span class="k">if</span> <span class="nx">newsize</span> <span class="p">&lt;</span> <span class="nx">old</span><span class="p">.</span><span class="nx">hi</span><span class="o">-</span><span class="nx">old</span><span class="p">.</span><span class="nx">lo</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load8</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gp</span><span class="p">.</span><span class="nx">parkingOnChan</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
-			<span class="c1">// It&#39;s not safe for someone to shrink this stack while we&#39;re actively
-</span><span class="c1"></span>			<span class="c1">// parking on a channel, but it is safe to grow since we do that
-</span><span class="c1"></span>			<span class="c1">// ourselves and explicitly don&#39;t want to synchronize with channels
-</span><span class="c1"></span>			<span class="c1">// since we could self-deadlock.
-</span><span class="c1"></span>			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;racy sudog adjustment due to parking on channel&#34;</span><span class="p">)</span>
+	<span class="nx">locals</span><span class="p">,</span> <span class="nx">args</span><span class="p">,</span> <span class="nx">objs</span> <span class="o">:=</span> <span class="nf">getStackMap</span><span class="p">(</span><span class="nx">frame</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">.</span><span class="nx">cache</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+
+	<span class="c1">// Adjust local variables if stack frame has been allocated.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">locals</span><span class="p">.</span><span class="nx">n</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">size</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">locals</span><span class="p">.</span><span class="nx">n</span><span class="p">)</span> <span class="o">*</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">PtrSize</span>
+		<span class="nf">adjustpointers</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">frame</span><span class="p">.</span><span class="nx">varp</span><span class="o">-</span><span class="nx">size</span><span class="p">),</span> <span class="o">&amp;</span><span class="nx">locals</span><span class="p">,</span> <span class="nx">adjinfo</span><span class="p">,</span> <span class="nx">f</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Adjust saved base pointer if there is one.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">ArchFamily</span> <span class="o">==</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">AMD64</span> <span class="o">&amp;&amp;</span> <span class="nx">frame</span><span class="p">.</span><span class="nx">argp</span><span class="o">-</span><span class="nx">frame</span><span class="p">.</span><span class="nx">varp</span> <span class="o">==</span> <span class="mi">2</span><span class="o">*</span><span class="nx">sys</span><span class="p">.</span><span class="nx">RegSize</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="p">!</span><span class="nx">framepointer_enabled</span> <span class="p">{</span>
+			<span class="nb">print</span><span class="p">(</span><span class="s">&#34;runtime: found space for saved base pointer, but no framepointer experiment\n&#34;</span><span class="p">)</span>
+			<span class="nb">print</span><span class="p">(</span><span class="s">&#34;argp=&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">frame</span><span class="p">.</span><span class="nx">argp</span><span class="p">),</span> <span class="s">&#34; varp=&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">frame</span><span class="p">.</span><span class="nx">varp</span><span class="p">),</span> <span class="s">&#34;\n&#34;</span><span class="p">)</span>
+			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;bad frame layout&#34;</span><span class="p">)</span>
 		<span class="p">}</span>
-		<span class="nf">adjustsudogs</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)</span>
-	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
-		<span class="c1">// sudogs may be pointing in to the stack and gp has
-</span><span class="c1"></span>		<span class="c1">// released channel locks, so other goroutines could
-</span><span class="c1"></span>		<span class="c1">// be writing to gp&#39;s stack. Find the highest such
-</span><span class="c1"></span>		<span class="c1">// pointer so we can handle everything there and below
-</span><span class="c1"></span>		<span class="c1">// carefully. (This shouldn&#39;t be far from the bottom
-</span><span class="c1"></span>		<span class="c1">// of the stack, so there&#39;s little cost in handling
-</span><span class="c1"></span>		<span class="c1">// everything below it carefully.)
-</span><span class="c1"></span>		<span class="nx">adjinfo</span><span class="p">.</span><span class="nx">sghi</span> <span class="p">=</span> <span class="nf">findsghi</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">old</span><span class="p">)</span>
-
-		<span class="c1">// Synchronize with channel ops and copy the part of
-</span><span class="c1"></span>		<span class="c1">// the stack they may interact with.
-</span><span class="c1"></span>		<span class="nx">ncopy</span> <span class="o">-=</span> <span class="nf">syncadjustsudogs</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">used</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">stackDebug</span> <span class="o">&gt;=</span> <span class="mi">3</span> <span class="p">{</span>
+			<span class="nb">print</span><span class="p">(</span><span class="s">&#34;      saved bp\n&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">debugCheckBP</span> <span class="p">{</span>
+			<span class="c1">// Frame pointers should always point to the next higher frame on
+</span><span class="c1"></span>			<span class="c1">// the Go stack (or be nil, for the top frame on the stack).
+</span><span class="c1"></span>			<span class="nx">bp</span> <span class="o">:=</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">frame</span><span class="p">.</span><span class="nx">varp</span><span class="p">))</span>
+			<span class="k">if</span> <span class="nx">bp</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="nx">bp</span> <span class="p">&lt;</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">old</span><span class="p">.</span><span class="nx">lo</span> <span class="o">||</span> <span class="nx">bp</span> <span class="o">&gt;=</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">old</span><span class="p">.</span><span class="nx">hi</span><span class="p">)</span> <span class="p">{</span>
+				<span class="nb">println</span><span class="p">(</span><span class="s">&#34;runtime: found invalid frame pointer&#34;</span><span class="p">)</span>
+				<span class="nb">print</span><span class="p">(</span><span class="s">&#34;bp=&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">bp</span><span class="p">),</span> <span class="s">&#34; min=&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">adjinfo</span><span class="p">.</span><span class="nx">old</span><span class="p">.</span><span class="nx">lo</span><span class="p">),</span> <span class="s">&#34; max=&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">adjinfo</span><span class="p">.</span><span class="nx">old</span><span class="p">.</span><span class="nx">hi</span><span class="p">),</span> <span class="s">&#34;\n&#34;</span><span class="p">)</span>
+				<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;bad frame pointer&#34;</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="nf">adjustpointer</span><span class="p">(</span><span class="nx">adjinfo</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">frame</span><span class="p">.</span><span class="nx">varp</span><span class="p">))</span>
 	<span class="p">}</span>
 
-	<span class="c1">// Copy the stack (or the rest of it) to the new location
-</span><span class="c1"></span>	<span class="c1">//把旧栈数据复制到新栈
-</span><span class="c1"></span>	<span class="nf">memmove</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">new</span><span class="p">.</span><span class="nx">hi</span><span class="o">-</span><span class="nx">ncopy</span><span class="p">),</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">old</span><span class="p">.</span><span class="nx">hi</span><span class="o">-</span><span class="nx">ncopy</span><span class="p">),</span> <span class="nx">ncopy</span><span class="p">)</span>
-
-	<span class="c1">// Adjust remaining structures that have pointers into stacks.
-</span><span class="c1"></span>	<span class="c1">// We have to do most of these before we traceback the new
-</span><span class="c1"></span>	<span class="c1">// stack because gentraceback uses them.
-</span><span class="c1"></span>	<span class="nf">adjustctxt</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)</span>
-	<span class="nf">adjustdefers</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)</span>
-	<span class="nf">adjustpanics</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)</span>
-	<span class="k">if</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">sghi</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="nx">adjinfo</span><span class="p">.</span><span class="nx">sghi</span> <span class="o">+=</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">delta</span>
+	<span class="c1">// Adjust arguments.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">args</span><span class="p">.</span><span class="nx">n</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">stackDebug</span> <span class="o">&gt;=</span> <span class="mi">3</span> <span class="p">{</span>
+			<span class="nb">print</span><span class="p">(</span><span class="s">&#34;      args\n&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nf">adjustpointers</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">frame</span><span class="p">.</span><span class="nx">argp</span><span class="p">),</span> <span class="o">&amp;</span><span class="nx">args</span><span class="p">,</span> <span class="nx">adjinfo</span><span class="p">,</span> <span class="nx">funcInfo</span><span class="p">{})</span>
 	<span class="p">}</span>
 
-	<span class="c1">// Swap out old stack for new one
-</span><span class="c1"></span>	<span class="c1">// 切换到新堆栈上工作
-</span><span class="c1"></span>	<span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span> <span class="p">=</span> <span class="nx">new</span>
-	<span class="nx">gp</span><span class="p">.</span><span class="nx">stackguard0</span> <span class="p">=</span> <span class="nx">new</span><span class="p">.</span><span class="nx">lo</span> <span class="o">+</span> <span class="nx">_StackGuard</span> <span class="c1">// NOTE: might clobber a preempt request
-</span><span class="c1"></span>	<span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sp</span> <span class="p">=</span> <span class="nx">new</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">used</span>
-	<span class="nx">gp</span><span class="p">.</span><span class="nx">stktopsp</span> <span class="o">+=</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">delta</span>
-
-	<span class="c1">// Adjust pointers in the new stack.
-</span><span class="c1"></span>	<span class="nf">gentraceback</span><span class="p">(^</span><span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="p">^</span><span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">gp</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="mh">0x7fffffff</span><span class="p">,</span> <span class="nx">adjustframe</span><span class="p">,</span> <span class="nf">noescape</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)),</span> <span class="mi">0</span><span class="p">)</span>
-
-	<span class="c1">// free old stack
-</span><span class="c1"></span>	<span class="c1">// 释放老的堆栈
-</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">stackPoisonCopy</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="nf">fillstack</span><span class="p">(</span><span class="nx">old</span><span class="p">,</span> <span class="mh">0xfc</span><span class="p">)</span>
+	<span class="c1">// Adjust pointers in all stack objects (whether they are live or not).
+</span><span class="c1"></span>	<span class="c1">// See comments in mgcmark.go:scanframeworker.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">frame</span><span class="p">.</span><span class="nx">varp</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">obj</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">objs</span> <span class="p">{</span>
+			<span class="nx">off</span> <span class="o">:=</span> <span class="nx">obj</span><span class="p">.</span><span class="nx">off</span>
+			<span class="nx">base</span> <span class="o">:=</span> <span class="nx">frame</span><span class="p">.</span><span class="nx">varp</span> <span class="c1">// locals base pointer
+</span><span class="c1"></span>			<span class="k">if</span> <span class="nx">off</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nx">base</span> <span class="p">=</span> <span class="nx">frame</span><span class="p">.</span><span class="nx">argp</span> <span class="c1">// arguments and return values base pointer
+</span><span class="c1"></span>			<span class="p">}</span>
+			<span class="nx">p</span> <span class="o">:=</span> <span class="nx">base</span> <span class="o">+</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">off</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">p</span> <span class="p">&lt;</span> <span class="nx">frame</span><span class="p">.</span><span class="nx">sp</span> <span class="p">{</span>
+				<span class="c1">// Object hasn&#39;t been allocated in the frame yet.
+</span><span class="c1"></span>				<span class="c1">// (Happens when the stack bounds check fails and
+</span><span class="c1"></span>				<span class="c1">// we call into morestack.)
+</span><span class="c1"></span>				<span class="k">continue</span>
+			<span class="p">}</span>
+			<span class="nx">t</span> <span class="o">:=</span> <span class="nx">obj</span><span class="p">.</span><span class="nx">typ</span>
+			<span class="nx">gcdata</span> <span class="o">:=</span> <span class="nx">t</span><span class="p">.</span><span class="nx">gcdata</span>
+			<span class="kd">var</span> <span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span>
+			<span class="k">if</span> <span class="nx">t</span><span class="p">.</span><span class="nx">kind</span><span class="o">&amp;</span><span class="nx">kindGCProg</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="c1">// See comments in mgcmark.go:scanstack
+</span><span class="c1"></span>				<span class="nx">s</span> <span class="p">=</span> <span class="nf">materializeGCProg</span><span class="p">(</span><span class="nx">t</span><span class="p">.</span><span class="nx">ptrdata</span><span class="p">,</span> <span class="nx">gcdata</span><span class="p">)</span>
+				<span class="nx">gcdata</span> <span class="p">=</span> <span class="p">(</span><span class="o">*</span><span class="kt">byte</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">startAddr</span><span class="p">))</span>
+			<span class="p">}</span>
+			<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">t</span><span class="p">.</span><span class="nx">ptrdata</span><span class="p">;</span> <span class="nx">i</span> <span class="o">+=</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">PtrSize</span> <span class="p">{</span>
+				<span class="k">if</span> <span class="o">*</span><span class="nf">addb</span><span class="p">(</span><span class="nx">gcdata</span><span class="p">,</span> <span class="nx">i</span><span class="o">/</span><span class="p">(</span><span class="mi">8</span><span class="o">*</span><span class="nx">sys</span><span class="p">.</span><span class="nx">PtrSize</span><span class="p">))</span><span class="o">&gt;&gt;</span><span class="p">(</span><span class="nx">i</span><span class="o">/</span><span class="nx">sys</span><span class="p">.</span><span class="nx">PtrSize</span><span class="o">&amp;</span><span class="mi">7</span><span class="p">)</span><span class="o">&amp;</span><span class="mi">1</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+					<span class="nf">adjustpointer</span><span class="p">(</span><span class="nx">adjinfo</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">p</span><span class="o">+</span><span class="nx">i</span><span class="p">))</span>
+				<span class="p">}</span>
+			<span class="p">}</span>
+			<span class="k">if</span> <span class="nx">s</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nf">dematerializeGCProg</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
 	<span class="p">}</span>
-	<span class="c1">//调用runtime.stackfree销毁并回收旧栈的内存空间；
-</span><span class="c1"></span>	<span class="nf">stackfree</span><span class="p">(</span><span class="nx">old</span><span class="p">)</span>
+
+	<span class="k">return</span> <span class="kc">true</span>
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>在扩容和缩容这个过程中，做了很多调整。从连续栈的实现方式上我们了解到，不管是扩容还是缩容，都重新申请一块新栈，然后把旧栈的数据复制到新栈。协程占用的物理内存完全被替换了，而Go在运行时会把指针保存到内存里面，例如：gp.sched.ctxt ，gp._defer ，gp._panic，包括函数里的指针。这部分指针值会被转换成整数型uintptr，然后 + delta进行调整。</p>
-<p>调整指向栈内存的指针都会调用 runtime.adjustpointer，该函数会利用 runtime.adjustinfo 计算的新栈和旧栈之间的内存地址差来调整指针。所有的指针都被调整后，我们就可以更新 Goroutine 的几个变量并通过 runtime.stackfree 释放原始栈的内存空间了。</p>
+</div><p>栈扩容的示意图</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201222162556.png" alt=""></p>
+<h4 id="栈释放">栈释放</h4>
+<p>stackfree 就是栈申请空间的逆向操作，我们用图示表示其过程:</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201222162603.png" alt=""></p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt"> 1
@@ -1637,44 +2771,511 @@
 </span><span class="lnt">23
 </span><span class="lnt">24
 </span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
 </span></code></pre></td>
 <td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">//栈空间调整信息
-</span><span class="c1"></span><span class="kd">type</span> <span class="nx">adjustinfo</span> <span class="kd">struct</span> <span class="p">{</span>
-    <span class="nx">old</span>   <span class="nx">stack</span>    <span class="c1">//旧的栈空间，stack.hi,   stack.lo
-</span><span class="c1"></span>    <span class="nx">delta</span> <span class="kt">uintptr</span> <span class="c1">//旧栈栈底到新栈栈底的偏移量
-</span><span class="c1"></span>    <span class="nx">cache</span> <span class="nx">pcvalueCache</span>  <span class="c1">//调整栈帧时会用到
-</span><span class="c1"></span>
-    <span class="c1">//sudog.elem 在栈上的最高位置
-</span><span class="c1"></span>    <span class="nx">sghi</span> <span class="kt">uintptr</span>
-<span class="p">}</span>
-<span class="c1">// Adjustpointer checks whether *vpp is in the old stack described by adjinfo.
-</span><span class="c1">// If so, it rewrites *vpp to point into the new stack.
-</span><span class="c1"></span><span class="kd">func</span> <span class="nf">adjustpointer</span><span class="p">(</span><span class="nx">adjinfo</span> <span class="o">*</span><span class="nx">adjustinfo</span><span class="p">,</span> <span class="nx">vpp</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">pp</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nx">vpp</span><span class="p">)</span>
-	<span class="nx">p</span> <span class="o">:=</span> <span class="o">*</span><span class="nx">pp</span>
-	<span class="k">if</span> <span class="nx">stackDebug</span> <span class="o">&gt;=</span> <span class="mi">4</span> <span class="p">{</span>
-		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;        &#34;</span><span class="p">,</span> <span class="nx">pp</span><span class="p">,</span> <span class="s">&#34;:&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">p</span><span class="p">),</span> <span class="s">&#34;\n&#34;</span><span class="p">)</span>
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// stackfree frees an n byte stack allocation at stk.
+</span><span class="c1">//
+</span><span class="c1">// stackfree must run on the system stack because it uses per-P
+</span><span class="c1">// resources and must not split the stack.
+</span><span class="c1">//
+</span><span class="c1">//go:systemstack
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">stackfree</span><span class="p">(</span><span class="nx">stk</span> <span class="nx">stack</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+	<span class="nx">v</span> <span class="o">:=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">stk</span><span class="p">.</span><span class="nx">lo</span><span class="p">)</span>
+	<span class="nx">n</span> <span class="o">:=</span> <span class="nx">stk</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">stk</span><span class="p">.</span><span class="nx">lo</span>
+	<span class="k">if</span> <span class="nx">n</span><span class="o">&amp;</span><span class="p">(</span><span class="nx">n</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;stack not a power of 2&#34;</span><span class="p">)</span>
 	<span class="p">}</span>
-	<span class="c1">//如果这个整数型数字在旧栈的范围，就调整
-</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">old</span><span class="p">.</span><span class="nx">lo</span> <span class="o">&lt;=</span> <span class="nx">p</span> <span class="o">&amp;&amp;</span> <span class="nx">p</span> <span class="p">&lt;</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">old</span><span class="p">.</span><span class="nx">hi</span> <span class="p">{</span>
-		<span class="o">*</span><span class="nx">pp</span> <span class="p">=</span> <span class="nx">p</span> <span class="o">+</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">delta</span>
-		<span class="k">if</span> <span class="nx">stackDebug</span> <span class="o">&gt;=</span> <span class="mi">3</span> <span class="p">{</span>
-			<span class="nb">print</span><span class="p">(</span><span class="s">&#34;        adjust ptr &#34;</span><span class="p">,</span> <span class="nx">pp</span><span class="p">,</span> <span class="s">&#34;:&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">p</span><span class="p">),</span> <span class="s">&#34; -&gt; &#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="o">*</span><span class="nx">pp</span><span class="p">),</span> <span class="s">&#34;\n&#34;</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">stk</span><span class="p">.</span><span class="nx">lo</span><span class="o">+</span><span class="nx">n</span> <span class="p">&lt;</span> <span class="nx">stk</span><span class="p">.</span><span class="nx">hi</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;bad stack size&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">stackDebug</span> <span class="o">&gt;=</span> <span class="mi">1</span> <span class="p">{</span>
+		<span class="nb">println</span><span class="p">(</span><span class="s">&#34;stackfree&#34;</span><span class="p">,</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">n</span><span class="p">)</span>
+		<span class="nf">memclrNoHeapPointers</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">n</span><span class="p">)</span> <span class="c1">// for testing, clobber stack data
+</span><span class="c1"></span>	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">debug</span><span class="p">.</span><span class="nx">efence</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">stackFromSystem</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">debug</span><span class="p">.</span><span class="nx">efence</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">stackFaultOnFree</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nf">sysFault</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">n</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nf">sysFree</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">n</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">stacks_sys</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">msanenabled</span> <span class="p">{</span>
+		<span class="nf">msanfree</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">n</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="c1">//如果是小的栈，则直接放回缓存，看起来跟分配的时候很相似
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">n</span> <span class="p">&lt;</span> <span class="nx">_FixedStack</span><span class="o">&lt;&lt;</span><span class="nx">_NumStackOrders</span> <span class="o">&amp;&amp;</span> <span class="nx">n</span> <span class="p">&lt;</span> <span class="nx">_StackCacheSize</span> <span class="p">{</span>
+		<span class="nx">order</span> <span class="o">:=</span> <span class="nb">uint8</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+		<span class="nx">n2</span> <span class="o">:=</span> <span class="nx">n</span>
+		<span class="k">for</span> <span class="nx">n2</span> <span class="p">&gt;</span> <span class="nx">_FixedStack</span> <span class="p">{</span>
+			<span class="nx">order</span><span class="o">++</span>
+			<span class="nx">n2</span> <span class="o">&gt;&gt;=</span> <span class="mi">1</span>
+		<span class="p">}</span>
+		<span class="nx">x</span> <span class="o">:=</span> <span class="nf">gclinkptr</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span>
+		<span class="c1">//如果没有对应规格的缓存，则放回全局队列
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">stackNoCache</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">p</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">preemptoff</span> <span class="o">!=</span> <span class="s">&#34;&#34;</span> <span class="p">{</span>
+			<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">stackpool</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">item</span><span class="p">.</span><span class="nx">mu</span><span class="p">)</span>
+			<span class="nf">stackpoolfree</span><span class="p">(</span><span class="nx">x</span><span class="p">,</span> <span class="nx">order</span><span class="p">)</span>
+			<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">stackpool</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">item</span><span class="p">.</span><span class="nx">mu</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">c</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">p</span><span class="p">.</span><span class="nf">ptr</span><span class="p">().</span><span class="nx">mcache</span>
+			<span class="c1">//如果缓存满了，则调用stackcacherelease放回一部分到全局队列
+</span><span class="c1"></span>			<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">size</span> <span class="o">&gt;=</span> <span class="nx">_StackCacheSize</span> <span class="p">{</span>
+				<span class="nf">stackcacherelease</span><span class="p">(</span><span class="nx">c</span><span class="p">,</span> <span class="nx">order</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="c1">//放到我们的本地缓存中
+</span><span class="c1"></span>			<span class="nx">x</span><span class="p">.</span><span class="nf">ptr</span><span class="p">().</span><span class="nx">next</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">list</span>
+			<span class="nx">c</span><span class="p">.</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">list</span> <span class="p">=</span> <span class="nx">x</span>
+			<span class="nx">c</span><span class="p">.</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">size</span> <span class="o">+=</span> <span class="nx">n</span>
+		<span class="p">}</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="c1">//大的栈内存释放，还给mheap
+</span><span class="c1"></span>		<span class="nx">s</span> <span class="o">:=</span> <span class="nf">spanOfUnchecked</span><span class="p">(</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">v</span><span class="p">))</span>
+		<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nx">state</span><span class="p">.</span><span class="nf">get</span><span class="p">()</span> <span class="o">!=</span> <span class="nx">mSpanManual</span> <span class="p">{</span>
+			<span class="nb">println</span><span class="p">(</span><span class="nf">hex</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">()),</span> <span class="nx">v</span><span class="p">)</span>
+			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;bad span state&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">gcphase</span> <span class="o">==</span> <span class="nx">_GCoff</span> <span class="p">{</span>
+			<span class="c1">// Free the stack immediately if we&#39;re
+</span><span class="c1"></span>			<span class="c1">// sweeping.
+</span><span class="c1"></span>			<span class="nf">osStackFree</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+			<span class="nx">mheap_</span><span class="p">.</span><span class="nf">freeManual</span><span class="p">(</span><span class="nx">s</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">stacks_inuse</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="c1">//如果正在GC，则直接放到全局的stackLarge中去
+</span><span class="c1"></span>			<span class="c1">// If the GC is running, we can&#39;t return a
+</span><span class="c1"></span>			<span class="c1">// stack span to the heap because it could be
+</span><span class="c1"></span>			<span class="c1">// reused as a heap span, and this state
+</span><span class="c1"></span>			<span class="c1">// change would race with GC. Add it to the
+</span><span class="c1"></span>			<span class="c1">// large stack cache instead.
+</span><span class="c1"></span>			<span class="nx">log2npage</span> <span class="o">:=</span> <span class="nf">stacklog2</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">npages</span><span class="p">)</span>
+			<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">stackLarge</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+			<span class="nx">stackLarge</span><span class="p">.</span><span class="nx">free</span><span class="p">[</span><span class="nx">log2npage</span><span class="p">].</span><span class="nf">insert</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+			<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">stackLarge</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
 		<span class="p">}</span>
 	<span class="p">}</span>
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>栈扩容的示意图</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201222162556.png" alt=""></p>
-<p>其实stackfree 就是栈申请空间的逆向操作，我们仅用图示表示其过程</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201222162603.png" alt=""></p>
+</div><p>我们来分析下代码：</p>
+<p>1.首先我们判断要回收的栈的大小，如果是小栈，则直接返回缓存中即可，如果是大的栈则首先是否正在进行GC，如果是就放入到stackLarge中等待GC处理，否则直接返还给mheap</p>
+<p>2.我们看下放回缓存的操作，如果无本地的该规格的缓存，则直接返回给全局缓存，调用stackpoolfree</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Adds stack x to the free pool. Must be called with stackpool[order].item.mu held.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">stackpoolfree</span><span class="p">(</span><span class="nx">x</span> <span class="nx">gclinkptr</span><span class="p">,</span> <span class="nx">order</span> <span class="kt">uint8</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">s</span> <span class="o">:=</span> <span class="nf">spanOfUnchecked</span><span class="p">(</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">x</span><span class="p">))</span>
+	<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nx">state</span><span class="p">.</span><span class="nf">get</span><span class="p">()</span> <span class="o">!=</span> <span class="nx">mSpanManual</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;freeing stack not in a stack span&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nx">manualFreeList</span><span class="p">.</span><span class="nf">ptr</span><span class="p">()</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// s will now have a free stack
+</span><span class="c1"></span>		<span class="nx">stackpool</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">item</span><span class="p">.</span><span class="nx">span</span><span class="p">.</span><span class="nf">insert</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">x</span><span class="p">.</span><span class="nf">ptr</span><span class="p">().</span><span class="nx">next</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">manualFreeList</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">manualFreeList</span> <span class="p">=</span> <span class="nx">x</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span><span class="o">--</span>
+	<span class="k">if</span> <span class="nx">gcphase</span> <span class="o">==</span> <span class="nx">_GCoff</span> <span class="o">&amp;&amp;</span> <span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="c1">// Span is completely free. Return it to the heap
+</span><span class="c1"></span>		<span class="c1">// immediately if we&#39;re sweeping.
+</span><span class="c1"></span>		<span class="c1">//
+</span><span class="c1"></span>		<span class="c1">// If GC is active, we delay the free until the end of
+</span><span class="c1"></span>		<span class="c1">// GC to avoid the following type of situation:
+</span><span class="c1"></span>		<span class="c1">//
+</span><span class="c1"></span>		<span class="c1">// 1) GC starts, scans a SudoG but does not yet mark the SudoG.elem pointer
+</span><span class="c1"></span>		<span class="c1">// 2) The stack that pointer points to is copied
+</span><span class="c1"></span>		<span class="c1">// 3) The old stack is freed
+</span><span class="c1"></span>		<span class="c1">// 4) The containing span is marked free
+</span><span class="c1"></span>		<span class="c1">// 5) GC attempts to mark the SudoG.elem pointer. The
+</span><span class="c1"></span>		<span class="c1">//    marking fails because the pointer looks like a
+</span><span class="c1"></span>		<span class="c1">//    pointer into a free span.
+</span><span class="c1"></span>		<span class="c1">//
+</span><span class="c1"></span>		<span class="c1">// By not freeing, we prevent step #4 until GC is done.
+</span><span class="c1"></span>		<span class="nx">stackpool</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">item</span><span class="p">.</span><span class="nx">span</span><span class="p">.</span><span class="nf">remove</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">manualFreeList</span> <span class="p">=</span> <span class="mi">0</span>
+		<span class="nf">osStackFree</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+		<span class="nx">mheap_</span><span class="p">.</span><span class="nf">freeManual</span><span class="p">(</span><span class="nx">s</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">stacks_inuse</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们看到，返还给全局的缓存后，会检测下该span是否还有已经分配的内容，如果没有并且GC结束，则返还mheap</p>
+<p>3.如果本地有对应规格的缓存，则首先判断本地的缓存是否满了（大于_StackCacheSize），如果满了，则释放一些。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">//go:systemstack
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">stackcacherelease</span><span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcache</span><span class="p">,</span> <span class="nx">order</span> <span class="kt">uint8</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">stackDebug</span> <span class="o">&gt;=</span> <span class="mi">1</span> <span class="p">{</span>
+		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;stackcacherelease order=&#34;</span><span class="p">,</span> <span class="nx">order</span><span class="p">,</span> <span class="s">&#34;\n&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">x</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">list</span>
+	<span class="nx">size</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">size</span>
+	<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">stackpool</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">item</span><span class="p">.</span><span class="nx">mu</span><span class="p">)</span>
+	<span class="k">for</span> <span class="nx">size</span> <span class="p">&gt;</span> <span class="nx">_StackCacheSize</span><span class="o">/</span><span class="mi">2</span> <span class="p">{</span>
+		<span class="nx">y</span> <span class="o">:=</span> <span class="nx">x</span><span class="p">.</span><span class="nf">ptr</span><span class="p">().</span><span class="nx">next</span>
+		<span class="nf">stackpoolfree</span><span class="p">(</span><span class="nx">x</span><span class="p">,</span> <span class="nx">order</span><span class="p">)</span>
+		<span class="nx">x</span> <span class="p">=</span> <span class="nx">y</span>
+		<span class="nx">size</span> <span class="o">-=</span> <span class="nx">_FixedStack</span> <span class="o">&lt;&lt;</span> <span class="nx">order</span>
+	<span class="p">}</span>
+	<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">stackpool</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">item</span><span class="p">.</span><span class="nx">mu</span><span class="p">)</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">list</span> <span class="p">=</span> <span class="nx">x</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">size</span> <span class="p">=</span> <span class="nx">size</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们看到释放的方式是，首先通过调用stackpoolfree释放一半给mheap，然后再还给全局的缓存</p>
+<p>4.如果本地还没满，则直接放入本地队列即可</p>
+<h5 id="其他触发时机">其他触发时机</h5>
+<p>垃圾回收期间也会触发栈的释放。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">markroot</span><span class="p">(</span><span class="nx">gcw</span> <span class="o">*</span><span class="nx">gcWork</span><span class="p">,</span> <span class="nx">i</span> <span class="kt">uint32</span><span class="p">)</span> <span class="p">{</span>
+    <span class="o">...</span><span class="p">.</span>
+    <span class="k">switch</span> <span class="p">{</span>
+    <span class="k">case</span> <span class="nx">baseFlushCache</span> <span class="o">&lt;=</span> <span class="nx">i</span> <span class="o">&amp;&amp;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">baseData</span><span class="p">:</span>
+       <span class="c1">//这里会对该p所对应的栈缓存清掉
+</span><span class="c1"></span>        <span class="nf">flushmcache</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="nx">i</span> <span class="o">-</span> <span class="nx">baseFlushCache</span><span class="p">))</span>
+    <span class="o">...</span><span class="p">.</span>
+    <span class="k">case</span> <span class="nx">i</span> <span class="o">==</span> <span class="nx">fixedRootFinalizers</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nx">work</span><span class="p">.</span><span class="nx">markrootDone</span> <span class="p">{</span>
+            <span class="k">break</span>
+        <span class="p">}</span>
+    <span class="o">......</span>
+    <span class="k">case</span> <span class="nx">i</span> <span class="o">==</span> <span class="nx">fixedRootFreeGStacks</span><span class="p">:</span>
+        <span class="k">if</span> <span class="p">!</span><span class="nx">work</span><span class="p">.</span><span class="nx">markrootDone</span> <span class="p">{</span>
+           <span class="c1">//此处调用了栈收缩
+</span><span class="c1"></span>            <span class="nf">systemstack</span><span class="p">(</span><span class="nx">markrootFreeGStacks</span><span class="p">)</span>
+        <span class="p">}</span>
+
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们来看下flushmcacheh会释放掉当前P上的缓存，我们看下这个函数</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// flushmcache flushes the mcache of allp[i].
+</span><span class="c1">//
+</span><span class="c1">// The world must be stopped.
+</span><span class="c1">//
+</span><span class="c1">//go:nowritebarrier
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">flushmcache</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">p</span> <span class="o">:=</span> <span class="nx">allp</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
+	<span class="nx">c</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">mcache</span>
+	<span class="k">if</span> <span class="nx">c</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nf">releaseAll</span><span class="p">()</span>
+	<span class="nf">stackcache_clear</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>看到没有，释放的就是那个mcache,释放栈的是stackcache_clear(c)，我们来看下</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">//go:systemstack
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">stackcache_clear</span><span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcache</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">stackDebug</span> <span class="o">&gt;=</span> <span class="mi">1</span> <span class="p">{</span>
+		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;stackcache clear\n&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">for</span> <span class="nx">order</span> <span class="o">:=</span> <span class="nb">uint8</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span> <span class="nx">order</span> <span class="p">&lt;</span> <span class="nx">_NumStackOrders</span><span class="p">;</span> <span class="nx">order</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">stackpool</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">item</span><span class="p">.</span><span class="nx">mu</span><span class="p">)</span>
+		<span class="nx">x</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">list</span>
+		<span class="k">for</span> <span class="nx">x</span><span class="p">.</span><span class="nf">ptr</span><span class="p">()</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">y</span> <span class="o">:=</span> <span class="nx">x</span><span class="p">.</span><span class="nf">ptr</span><span class="p">().</span><span class="nx">next</span>
+			<span class="nf">stackpoolfree</span><span class="p">(</span><span class="nx">x</span><span class="p">,</span> <span class="nx">order</span><span class="p">)</span>
+			<span class="nx">x</span> <span class="p">=</span> <span class="nx">y</span>
+		<span class="p">}</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">list</span> <span class="p">=</span> <span class="mi">0</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">size</span> <span class="p">=</span> <span class="mi">0</span>
+		<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">stackpool</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">item</span><span class="p">.</span><span class="nx">mu</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>调用的就是stackpoolfree释放的。 继续看markroot，里面还有一个操作systemstack(markrootFreeGStacks)，这个函数实际上调用的是shrinkstack，我们直接追过去</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">shrinkstack</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">gstatus</span> <span class="o">:=</span> <span class="nf">readgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">gstatus</span><span class="o">&amp;^</span><span class="nx">_Gscan</span> <span class="o">==</span> <span class="nx">_Gdead</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">lo</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+            <span class="c1">// Free whole stack - it will get reallocated
+</span><span class="c1"></span>            <span class="c1">// if G is used again.
+</span><span class="c1"></span>            <span class="nf">stackfree</span><span class="p">(</span><span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">)</span>
+            <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">lo</span> <span class="p">=</span> <span class="mi">0</span>
+            <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">hi</span> <span class="p">=</span> <span class="mi">0</span>
+        <span class="p">}</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="o">...</span><span class="p">.</span>
+
+    <span class="nx">oldsize</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">lo</span>
+    <span class="c1">//缩小为原来的1/2
+</span><span class="c1"></span>    <span class="nx">newsize</span> <span class="o">:=</span> <span class="nx">oldsize</span> <span class="o">/</span> <span class="mi">2</span>
+    <span class="k">if</span> <span class="nx">newsize</span> <span class="p">&lt;</span> <span class="nx">_FixedStack</span> <span class="p">{</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="nx">avail</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">lo</span>
+    <span class="c1">//判断使用是否超过了1/4
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">used</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sp</span> <span class="o">+</span> <span class="nx">_StackLimit</span><span class="p">;</span> <span class="nx">used</span> <span class="o">&gt;=</span> <span class="nx">avail</span><span class="o">/</span><span class="mi">4</span> <span class="p">{</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">syscallsp</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">GoosWindows</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">libcallsp</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+
+    <span class="k">if</span> <span class="nx">stackDebug</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s">&#34;shrinking stack &#34;</span><span class="p">,</span> <span class="nx">oldsize</span><span class="p">,</span> <span class="s">&#34;-&gt;&#34;</span><span class="p">,</span> <span class="nx">newsize</span><span class="p">,</span> <span class="s">&#34;\n&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="c1">//栈拷贝
+</span><span class="c1"></span>    <span class="nf">copystack</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">newsize</span><span class="p">,</span> <span class="kc">false</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>ok，看下这里的逻辑，如果当前栈的使用量超过1/4则不进行收缩，否则缩为原来的1/2释放空间，并进行栈拷贝。到这里栈的管理结束了。</p>
+<h2 id="栈内存的申请与堆内存的申请">栈内存的申请与堆内存的申请</h2>
+<p>我们看到貌似栈内存的申请与堆内存的申请很相似，并且到最后都是用的mheap_这个全局的heap，那么我们知道垃圾回收的时候，只会回收堆上的内存，而我们的golang的虚拟地址实际上没有堆区与栈区的概念，他们的内存都是在arena区域，那么垃圾回收的时候怎么判断哪些span是堆哪些是栈的呢？堆申请span的时候调用的是cacheSpan函数，该函数最终调用的mcentral的grow函数,函数内部有一个更新bitmap的操作:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nf">heapBitsForSpan</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">()).</span><span class="nf">initSpan</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>但是栈的申请实际上是直接调用的mheap的grow函数，它并不会标记bitmap.</p>
+<p>另外一个是我们知道golang的垃圾回收是三色标记法，需要提前知道根对象，而且根对象是从协程栈上拿到的，那么我们怎么知道协程栈上哪些是指针呢? 首先，我们要理清楚以下几点：</p>
+<ol>
+<li>
+<p>我们看起来堆内存的申请与栈内存的申请很相似，但是实际上二者有些地方还是不同的，最重要的一点，我们的堆是为单个对象或者变量申请内存的，而我们的分配栈是为整个协程的栈申请的内存，并非为单个变量。</p>
+</li>
+<li>
+<p>既然我们栈内存的申请并非为单个变量申请的，所以我们在这也发现不了哪些地方存储了指针。</p>
+</li>
+</ol>
 <h2 id="小结">小结</h2>
 <p>栈内存是应用程序中重要的内存空间，它能够支持本地的局部变量和函数调用，栈空间中的变量会与栈一同创建和销毁，这部分内存空间不需要工程师过多的干预和管理，现代的编程语言通过逃逸分析减少了我们的工作量，理解栈空间的分配对于理解 Go 语言的运行时有很大的帮助。</p>
 <h2 id="参考">参考</h2>
 <p><a href="https://draveness.me/golang/docs/part3-runtime/ch07-memory/golang-stack-management/">7.3 栈空间管理</a>
-<a href="https://www.codenong.com/js9c1e05c223c6/">栈内存管理</a></p>
+<a href="https://www.codenong.com/js9c1e05c223c6/">栈内存管理</a><br>
+<a href="https://golang.design/under-the-hood/zh-cn/part2runtime/ch06sched/stack/#673-g-">6.7 执行栈管理</a><br>
+<a href="https://zhuanlan.zhihu.com/p/53928867">从垃圾回收解开Golang内存管理的面纱之二Golang的堆栈分析</a></p>
 
     </div>
 
@@ -1698,7 +3299,11 @@
           <a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a>
           </div>
       <nav class="post-nav">
-        
+        <a class="prev" href="/post/database-sql%E5%8C%85%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Sql包源码剖析</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
         <a class="next" href="/post/go%E6%9C%8D%E5%8A%A1%E7%9A%84%E4%BC%98%E9%9B%85%E5%85%B3%E9%97%AD%E4%B8%8E%E9%87%8D%E5%90%AF/">
             <span class="next-text nav-default">Go服务的优雅关闭与重启</span>
             <span class="next-text nav-mobile">下一篇</span>

@@ -53,7 +53,7 @@
 <meta itemprop="description" content="设计原理 分级分配 线程缓存分配（Thread-Caching Malloc，TCMalloc）是用于分配内存的机制，它比 glibc 中的 malloc 函数还要快很多.">
 <meta itemprop="datePublished" content="2020-11-23T10:26:14&#43;00:00" />
 <meta itemprop="dateModified" content="2020-11-23T10:26:14&#43;00:00" />
-<meta itemprop="wordCount" content="24065">
+<meta itemprop="wordCount" content="27241">
 
 
 
@@ -167,8 +167,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 24065 字 </span>
-          <span class="more-meta"> 预计阅读 49 分钟 </span>
+          <span class="more-meta"> 约 27241 字 </span>
+          <span class="more-meta"> 预计阅读 55 分钟 </span>
         
       </div>
     </header>
@@ -203,6 +203,7 @@
         <li><a href="#nextfreefast">nextFreeFast</a></li>
         <li><a href="#nextfree">nextFree</a></li>
         <li><a href="#memclrnoheappointers">memclrNoHeapPointers</a></li>
+        <li><a href="#堆内存释放">堆内存释放</a></li>
       </ul>
     </li>
     <li><a href="#程序初始化">程序初始化</a></li>
@@ -528,104 +529,109 @@
 <p>mspan 是相同大小等级的 span 的双向链表的一个节点，每个节点还记录了自己的起始地址、 指向的 span 中页的数量。它要么位于</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code><span class="lnt"> 1
-</span><span class="lnt"> 2
-</span><span class="lnt"> 3
-</span><span class="lnt"> 4
-</span><span class="lnt"> 5
-</span><span class="lnt"> 6
-</span><span class="lnt"> 7
-</span><span class="lnt"> 8
-</span><span class="lnt"> 9
-</span><span class="lnt">10
-</span><span class="lnt">11
-</span><span class="lnt">12
-</span><span class="lnt">13
-</span><span class="lnt">14
-</span><span class="lnt">15
-</span><span class="lnt">16
-</span><span class="lnt">17
-</span><span class="lnt">18
-</span><span class="lnt">19
-</span><span class="lnt">20
-</span><span class="lnt">21
-</span><span class="lnt">22
-</span><span class="lnt">23
-</span><span class="lnt">24
-</span><span class="lnt">25
-</span><span class="lnt">26
-</span><span class="lnt">27
-</span><span class="lnt">28
-</span><span class="lnt">29
-</span><span class="lnt">30
-</span><span class="lnt">31
-</span><span class="lnt">32
-</span><span class="lnt">33
-</span><span class="lnt">34
-</span><span class="lnt">35
-</span><span class="lnt">36
-</span><span class="lnt">37
-</span><span class="lnt">38
-</span><span class="lnt">39
-</span><span class="lnt">40
-</span><span class="lnt">41
-</span><span class="lnt">42
-</span><span class="lnt">43
-</span><span class="lnt">44
-</span><span class="lnt">45
-</span><span class="lnt">46
-</span><span class="lnt">47
-</span><span class="lnt">48
-</span><span class="lnt">49
-</span><span class="lnt">50
-</span><span class="lnt">51
-</span><span class="lnt">52
-</span><span class="lnt">53
-</span><span class="lnt">54
-</span><span class="lnt">55
-</span><span class="lnt">56
-</span><span class="lnt">57
-</span><span class="lnt">58
-</span><span class="lnt">59
-</span><span class="lnt">60
-</span><span class="lnt">61
-</span><span class="lnt">62
-</span><span class="lnt">63
-</span><span class="lnt">64
-</span><span class="lnt">65
-</span><span class="lnt">66
-</span><span class="lnt">67
-</span><span class="lnt">68
-</span><span class="lnt">69
-</span><span class="lnt">70
-</span><span class="lnt">71
-</span><span class="lnt">72
-</span><span class="lnt">73
-</span><span class="lnt">74
-</span><span class="lnt">75
-</span><span class="lnt">76
-</span><span class="lnt">77
-</span><span class="lnt">78
-</span><span class="lnt">79
-</span><span class="lnt">80
-</span><span class="lnt">81
-</span><span class="lnt">82
-</span><span class="lnt">83
-</span><span class="lnt">84
-</span><span class="lnt">85
-</span><span class="lnt">86
-</span><span class="lnt">87
-</span><span class="lnt">88
-</span><span class="lnt">89
-</span><span class="lnt">90
-</span><span class="lnt">91
-</span><span class="lnt">92
-</span><span class="lnt">93
-</span><span class="lnt">94
-</span><span class="lnt">95
-</span><span class="lnt">96
-</span><span class="lnt">97
-</span><span class="lnt">98
+<pre class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span><span class="lnt">103
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">//go:notinheap
@@ -717,11 +723,16 @@
 </span><span class="c1"></span>	<span class="c1">// 大小等级与 noscan (uint8)
 </span><span class="c1"></span>	<span class="nx">spanclass</span>   <span class="nx">spanClass</span>     <span class="c1">// size class and noscan (uint8)
 </span><span class="c1"></span>	<span class="c1">// mspaninuse 等等信息
+</span><span class="c1"></span>	<span class="c1">// mspan状态，共有四种状态
+</span><span class="c1"></span>  	<span class="c1">// _MSpanDead、_MSpanInUse、_MSpanManual、_MSpanFree
 </span><span class="c1"></span>	<span class="nx">state</span>       <span class="nx">mSpanStateBox</span> <span class="c1">// mSpanInUse etc; accessed atomically (get/set methods)
+</span><span class="c1"></span> 	<span class="c1">// 从当前mspan分配对象时，是否需要将对象的内存空间初始化为0
 </span><span class="c1"></span>	<span class="nx">needzero</span>    <span class="kt">uint8</span>         <span class="c1">// needs to be zeroed before allocation
 </span><span class="c1"></span>	<span class="nx">divShift</span>    <span class="kt">uint8</span>         <span class="c1">// for divide by elemsize - divMagic.shift
 </span><span class="c1"></span>	<span class="nx">divShift2</span>   <span class="kt">uint8</span>         <span class="c1">// for divide by elemsize - divMagic.shift2
+</span><span class="c1"></span>	<span class="c1">// mspan能分配的对象大小
 </span><span class="c1"></span>	<span class="nx">elemsize</span>    <span class="kt">uintptr</span>       <span class="c1">// computed from sizeclass or from npages
+</span><span class="c1"></span>	<span class="c1">// 当前mspan指向空间的结束为止+1字节
 </span><span class="c1"></span>	<span class="nx">limit</span>       <span class="kt">uintptr</span>       <span class="c1">// end of data in span
 </span><span class="c1"></span>	<span class="nx">speciallock</span> <span class="nx">mutex</span>         <span class="c1">// guards specials list
 </span><span class="c1"></span>	<span class="nx">specials</span>    <span class="o">*</span><span class="nx">special</span>      <span class="c1">// linked list of special records sorted by offset.
@@ -729,10 +740,35 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>串联后的上述结构体会构成如下双向链表，运行时会使用 runtime.mSpanList 存储双向链表的头结点和尾节点并在线程缓存以及中心缓存中使用。</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201123151356.png" alt=""></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">mSpanList</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">first</span> <span class="o">*</span><span class="nx">mspan</span> <span class="c1">// first span in list, or nil if none
+</span><span class="c1"></span>	<span class="nx">last</span>  <span class="o">*</span><span class="nx">mspan</span> <span class="c1">// last span in list, or nil if none
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201123151356.png" alt=""></p>
 <p>因为相邻的管理单元会互相引用，所以我们可以从任意一个结构体访问双向链表中的其他节点。</p>
 <h4 id="页和内存">页和内存</h4>
-<p>每个 runtime.mspan 都管理 npages 个大小为 8KB 的页，这里的页不是操作系统中的内存页，它们是操作系统内存页的整数倍，该结构体会使用下面的这些字段来管理内存页的分配和回收：</p>
+<p>每个 runtime.mspan 都管理 npages 个大小为 8KB 的页，这里的页不是操作系统中的内存页，它们是操作系统内存页的整数倍</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">_PageShift</span>      <span class="p">=</span> <span class="mi">13</span>
+<span class="nx">_PageSize</span> <span class="p">=</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="nx">_PageShift</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>该结构体会使用下面的这些字段来管理内存页的分配和回收：</p>
 <ul>
 <li>startAddr 和 npages — 确定该结构体管理的多个页所在的内存，每个页的大小都是 8KB；</li>
 <li>freeindex — 扫描页中空闲对象的初始索引；</li>
@@ -746,17 +782,62 @@
 <p>如果我们能在内存中找到空闲的内存单元，就会直接返回，当内存中不包含空闲的内存时，上一级的组件 runtime.mcache 会为调用 runtime.mcache.refill 更新mspan以满足为更多对象分配内存的需求。</p>
 <h4 id="状态">状态</h4>
 <p>运行时会使用 runtime.mSpanStateBox 结构体存储mspan的状态 runtime.mSpanState：</p>
-<p>该状态可能处于 mSpanDead、mSpanInUse、mSpanManual 和 mSpanFree 四种情况。当 runtime.mspan 在空闲堆中，它会处于 mSpanFree 状态；当 runtime.mspan 已经被分配时，它会处于 mSpanInUse、mSpanManual 状态，这些状态会在遵循以下规则发生转换：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="p">(</span>
+	<span class="c1">// 当mspan被创建和初始化时，状态为dead
+</span><span class="c1"></span>	<span class="nx">_MSpanDead</span>   <span class="nx">mSpanState</span> <span class="p">=</span> <span class="kc">iota</span>
+	<span class="c1">// 无论是在mcentral、mcache中缓存的mspan，还是通过largeAlloc分配的大
+</span><span class="c1"></span>	<span class="c1">// 内存mspan，只要是存在于mheap的busy列表中的mspan，都会被置为inuse状态
+</span><span class="c1"></span>	<span class="nx">_MSpanInUse</span>
+	<span class="c1">// Manual申请的内存，会被标记为Manual，这部分内存不会通过GC来归还，需要
+</span><span class="c1"></span>	<span class="c1">// 使用者显式调用freeManual归还到堆缓存
+</span><span class="c1"></span>	<span class="c1">// 此外allocSpanLocked中堆返回内存量大于请求量时，归还部分内存会暂时把
+</span><span class="c1"></span>	<span class="c1">// 两个连续mspan的状态置为Manual，避免free合并刚申请的空间。
+</span><span class="c1"></span>	<span class="nx">_MSpanManual</span>
+	<span class="c1">// 处于堆缓存free列表和mtreap的mspan会被置为free状态。
+</span><span class="c1"></span>	<span class="nx">_MSpanFree</span>
+<span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>该状态可能处于 mSpanDead、mSpanInUse、mSpanManual 和 mSpanFree 四种情况。当 runtime.mspan 在空闲堆中，它会处于 mSpanFree 状态；当 runtime.mspan 已经被分配时，它会处于 mSpanInUse、mSpanManual 状态，这些状态会在遵循以下规则发生转换：</p>
 <ul>
 <li>在垃圾回收的任意阶段，可能从 mSpanFree 转换到 mSpanInUse 和 mSpanManual；</li>
 <li>在垃圾回收的清除阶段，可能从 mSpanInUse 和 mSpanManual 转换到 mSpanFree；</li>
 <li>在垃圾回收的标记阶段，不能从 mSpanInUse 和 mSpanManual 转换到 mSpanFree；</li>
 </ul>
 <p>设置 runtime.mspan 结构体状态的读写操作必须是原子性的避免垃圾回收造成的线程竞争问题。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201227175238.png" alt=""></p>
 <h4 id="跨度类">跨度类</h4>
 <p>runtime.spanClass 是 runtime.mspan 结构体的跨度类，它决定了mspan中存储的对象大小和个数：</p>
 <p>Go 语言的内存管理模块中一共包含 67 种跨度类，每一个跨度类都会存储特定大小的对象并且包含特定数量的页数以及对象，所有的数据都会被预选计算好并存储在 runtime.class_to_size 和 runtime.class_to_allocnpages 等变量中：</p>
-<table>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">class_to_size</span> <span class="p">=</span> <span class="p">[</span><span class="nx">_NumSizeClasses</span><span class="p">]</span><span class="kt">uint16</span><span class="p">{</span><span class="mi">0</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">16</span><span class="p">,</span> <span class="mi">32</span><span class="p">,</span> <span class="mi">48</span><span class="p">,</span> <span class="mi">64</span><span class="p">,</span> <span class="mi">80</span><span class="p">,</span> <span class="mi">96</span><span class="p">,</span> <span class="mi">112</span><span class="p">,</span> <span class="mi">128</span><span class="p">,</span> <span class="mi">144</span><span class="p">,</span> <span class="mi">160</span><span class="p">,</span> <span class="mi">176</span><span class="p">,</span> <span class="mi">192</span><span class="p">,</span> <span class="mi">208</span><span class="p">,</span> <span class="mi">224</span><span class="p">,</span> <span class="mi">240</span><span class="p">,</span> <span class="mi">256</span><span class="p">,</span> <span class="mi">288</span><span class="p">,</span> <span class="mi">320</span><span class="p">,</span> <span class="mi">352</span><span class="p">,</span> <span class="mi">384</span><span class="p">,</span> <span class="mi">416</span><span class="p">,</span> <span class="mi">448</span><span class="p">,</span> <span class="mi">480</span><span class="p">,</span> <span class="mi">512</span><span class="p">,</span> <span class="mi">576</span><span class="p">,</span> <span class="mi">640</span><span class="p">,</span> <span class="mi">704</span><span class="p">,</span> <span class="mi">768</span><span class="p">,</span> <span class="mi">896</span><span class="p">,</span> <span class="mi">1024</span><span class="p">,</span> <span class="mi">1152</span><span class="p">,</span> <span class="mi">1280</span><span class="p">,</span> <span class="mi">1408</span><span class="p">,</span> <span class="mi">1536</span><span class="p">,</span> <span class="mi">1792</span><span class="p">,</span> <span class="mi">2048</span><span class="p">,</span> <span class="mi">2304</span><span class="p">,</span> <span class="mi">2688</span><span class="p">,</span> <span class="mi">3072</span><span class="p">,</span> <span class="mi">3200</span><span class="p">,</span> <span class="mi">3456</span><span class="p">,</span> <span class="mi">4096</span><span class="p">,</span> <span class="mi">4864</span><span class="p">,</span> <span class="mi">5376</span><span class="p">,</span> <span class="mi">6144</span><span class="p">,</span> <span class="mi">6528</span><span class="p">,</span> <span class="mi">6784</span><span class="p">,</span> <span class="mi">6912</span><span class="p">,</span> <span class="mi">8192</span><span class="p">,</span> <span class="mi">9472</span><span class="p">,</span> <span class="mi">9728</span><span class="p">,</span> <span class="mi">10240</span><span class="p">,</span> <span class="mi">10880</span><span class="p">,</span> <span class="mi">12288</span><span class="p">,</span> <span class="mi">13568</span><span class="p">,</span> <span class="mi">14336</span><span class="p">,</span> <span class="mi">16384</span><span class="p">,</span> <span class="mi">18432</span><span class="p">,</span> <span class="mi">19072</span><span class="p">,</span> <span class="mi">20480</span><span class="p">,</span> <span class="mi">21760</span><span class="p">,</span> <span class="mi">24576</span><span class="p">,</span> <span class="mi">27264</span><span class="p">,</span> <span class="mi">28672</span><span class="p">,</span> <span class="mi">32768</span><span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><table>
 <thead>
 <tr>
 <th>class</th>
@@ -868,6 +949,22 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>runtime.spanClass 是一个 uint8 类型的整数，它的前 7 位存储着跨度类的 ID，最后一位表示是否包含指针，该类型提供的两个方法能够帮我们快速获取对应的字段。</p>
+<p>我们如何判定一个span占用几页呢？ 实际上占用的页数与我们刚才选定的切分的大小是一一对应的，在sizeclasses.go中还有一个长度为67的数组。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">class_to_allocnpages</span> <span class="p">=</span> <span class="p">[</span><span class="nx">_NumSizeClasses</span><span class="p">]</span><span class="kt">uint8</span><span class="p">{</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">6</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">6</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">9</span><span class="p">,</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">4</span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>比如说，当我们选定spanclass为3时，我们要切分的大小为32字节，那么我们分配span的页数就是1。</p>
+<h4 id="mspan的分配">mspan的分配</h4>
+<p>堆中无论是空闲还是使用中的内存，都使用mspan对象来表达。mspan中持有系统页整数倍的内存空间。通过state状态标记来标识当前mspan是被使用中还是空闲中。</p>
+<p>mspan中持有的空间，可用来分配一个或多个相同类型的对象空间，elemsize表明了对象类型占用的空间大小。nelems表明了当前mspan下可以分配对象的最大数量。</p>
+<p>mspan在mheap、mcentral、mcache中都有缓存。</p>
+<p>区别在于，在mheap中缓存的mspan对象是以page为单位的，npages表明了mheap中的mspan对象所持有的系统页数量。mheap分配空间时，根据需求的page数量，分配合适的mspan给使用者。mheap不会分配半个mspan给使用者。</p>
+<p>而在mcentral、mcache中的mspan，是以spanclass来划分的，spanclass可以理解为一个限定的对象大小。一个mspan被分配到mcentral或mcache后，它的spanclass是固定的，意味着在这个mspan上，只能分配大小固定的对象。详见spanclass。</p>
 <h3 id="mcache">mcache</h3>
 <p>runtime.mcache 是 Go 语言中的线程缓存，它会与线程上的处理器一一绑定，是一个 per-P 的缓存,主要用来缓存用户程序申请的微小对象。每一个线程缓存都持有 67 * 2 个 runtime.mspan，这些mspan都存储在结构体的 alloc 字段中：</p>
 <p>mcache 是一个 per-P 的缓存，因此每个线程都只访问自身的 mcache，因此也就不会出现 并发，也就省去了对其进行加锁步骤。</p>
@@ -4535,7 +4632,366 @@
 	<span class="p">(</span><span class="kc">...</span><span class="p">)</span>
 </code></pre></td></tr></table>
 </div>
-</div><h2 id="程序初始化">程序初始化</h2>
+</div><h3 id="堆内存释放">堆内存释放</h3>
+<p>堆内存的分配释放主要通过allocSpanLocked和freeSpanLocked完成。</p>
+<ul>
+<li>allocSpanLocked优先从已分配堆内存中进行分配，如果没有合适的堆内存块（mspan），则触发堆增长，并再次申请。</li>
+<li>freeSpanLocked将内存块归还到已分配堆内存队列中。一个额外动作是，通过检查当前mspan空间的和其连续空间的前后mspan是否均处于_MSpanFree状态，来决定是否要合并这些mspan。</li>
+</ul>
+<p>注意这两个方法的命名。Locked表示对这两个方法的调用需要使用mheap.lock加锁，因为其内部操作了mheap的缓存队列或mTreap。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">allocSpanLocked</span><span class="p">(</span><span class="nx">npage</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">stat</span> <span class="o">*</span><span class="kt">uint64</span><span class="p">)</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">list</span> <span class="o">*</span><span class="nx">mSpanList</span>
+	<span class="kd">var</span> <span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span>
+
+	<span class="c1">// 如果需求page数量小于128，则优先从mheap.free中获取满足npage数量的mspan
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="nb">int</span><span class="p">(</span><span class="nx">npage</span><span class="p">);</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">h</span><span class="p">.</span><span class="nx">free</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">list</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">free</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
+		<span class="k">if</span> <span class="p">!</span><span class="nx">list</span><span class="p">.</span><span class="nf">isEmpty</span><span class="p">()</span> <span class="p">{</span>
+			<span class="nx">s</span> <span class="p">=</span> <span class="nx">list</span><span class="p">.</span><span class="nx">first</span>
+			<span class="nx">list</span><span class="p">.</span><span class="nf">remove</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+			<span class="k">goto</span> <span class="nx">HaveSpan</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="c1">// 如果npage大于128，则从mheap.freelarge树堆中分配满足npage数量的mspan
+</span><span class="c1"></span>	<span class="nx">s</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nf">allocLarge</span><span class="p">(</span><span class="nx">npage</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// mheap.freelarge树堆中没有满足条件可用的mspan，则扩张堆空间。
+</span><span class="c1"></span>		<span class="k">if</span> <span class="p">!</span><span class="nx">h</span><span class="p">.</span><span class="nf">grow</span><span class="p">(</span><span class="nx">npage</span><span class="p">)</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="kc">nil</span>
+		<span class="p">}</span>
+		<span class="c1">// 再次尝试从堆中申请
+</span><span class="c1"></span>		<span class="nx">s</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nf">allocLarge</span><span class="p">(</span><span class="nx">npage</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="kc">nil</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+<span class="nx">HaveSpan</span><span class="p">:</span>
+	<span class="c1">// ...
+</span><span class="c1"></span>
+	<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nx">npages</span> <span class="p">&gt;</span> <span class="nx">npage</span> <span class="p">{</span>
+		<span class="c1">// 从mtreap中获得mspan为最小的满足npage需求的mspan，其实际空间可能大于需求量
+</span><span class="c1"></span>		<span class="c1">// 如果实际分配的空间大于需求的空间，则使用多余出来的空间构造出一个新的mspan
+</span><span class="c1"></span>		<span class="c1">// 将新的mspan归还给堆缓存
+</span><span class="c1"></span>		<span class="nx">t</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">mspan</span><span class="p">)(</span><span class="nx">h</span><span class="p">.</span><span class="nx">spanalloc</span><span class="p">.</span><span class="nf">alloc</span><span class="p">())</span>
+		<span class="nx">t</span><span class="p">.</span><span class="nf">init</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">()</span><span class="o">+</span><span class="nx">npage</span><span class="o">&lt;&lt;</span><span class="nx">_PageShift</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">npages</span><span class="o">-</span><span class="nx">npage</span><span class="p">)</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">npages</span> <span class="p">=</span> <span class="nx">npage</span>
+		<span class="nx">h</span><span class="p">.</span><span class="nf">setSpan</span><span class="p">(</span><span class="nx">t</span><span class="p">.</span><span class="nf">base</span><span class="p">()</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="nx">s</span><span class="p">)</span>
+		<span class="nx">h</span><span class="p">.</span><span class="nf">setSpan</span><span class="p">(</span><span class="nx">t</span><span class="p">.</span><span class="nf">base</span><span class="p">(),</span> <span class="nx">t</span><span class="p">)</span>
+		<span class="nx">h</span><span class="p">.</span><span class="nf">setSpan</span><span class="p">(</span><span class="nx">t</span><span class="p">.</span><span class="nf">base</span><span class="p">()</span><span class="o">+</span><span class="nx">t</span><span class="p">.</span><span class="nx">npages</span><span class="o">*</span><span class="nx">pageSize</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="nx">t</span><span class="p">)</span>
+		<span class="nx">t</span><span class="p">.</span><span class="nx">needzero</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">needzero</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">state</span> <span class="p">=</span> <span class="nx">_MSpanManual</span>	<span class="c1">// s是最终要返回的mspan对象，由于其与t是连续的，为了避免free t时发生合并，暂时将s状态置为非_MSpanFree
+</span><span class="c1"></span>		<span class="nx">t</span><span class="p">.</span><span class="nx">state</span> <span class="p">=</span> <span class="nx">_MSpanManual</span>
+		<span class="nx">h</span><span class="p">.</span><span class="nf">freeSpanLocked</span><span class="p">(</span><span class="nx">t</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">unusedsince</span><span class="p">)</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">state</span> <span class="p">=</span> <span class="nx">_MSpanFree</span>
+	<span class="p">}</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">unusedsince</span> <span class="p">=</span> <span class="mi">0</span>
+
+	<span class="c1">// 更新heapArena
+</span><span class="c1"></span>	<span class="nx">h</span><span class="p">.</span><span class="nf">setSpans</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">(),</span> <span class="nx">npage</span><span class="p">,</span> <span class="nx">s</span><span class="p">)</span>
+
+	<span class="c1">// ...
+</span><span class="c1"></span>	<span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>allocSpanLocked仅会返回满足需求页数量的内存空间，如果查找到堆中的mspan拥有的系统页数量超过需求量，多余的系统页将被额外新创建的mspan持有，并写回堆缓存中。</p>
+<p>allocSpanLocked主要完成空闲mspan从free、freelarge的脱链，返回的mspan处于_MSpanFree状态。</p>
+<p>查找mheap.free时时间复杂度最大为O（N）</p>
+<p>freeSpanLocked</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">freeSpanLocked</span><span class="p">(</span><span class="nx">s</span><span class="o">*</span><span class="nx">mspan</span><span class="p">,</span> <span class="nx">acctinuse</span><span class="p">,</span> <span class="nx">acctidle</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">unusedsince</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">{</span>
+  <span class="c1">// ...
+</span><span class="c1"></span>
+	<span class="c1">// 将mspan从使用中列表脱链，修改状态为空闲状态
+</span><span class="c1"></span>	<span class="nx">s</span><span class="p">.</span><span class="nx">state</span> <span class="p">=</span> <span class="nx">_MSpanFree</span>
+	<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nf">inList</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">h</span><span class="p">.</span><span class="nf">busyList</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">npages</span><span class="p">).</span><span class="nf">remove</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="c1">// 如果与s连续内存的低地址方向也是一个已分配的空闲的mspan，则合并s和before
+</span><span class="c1"></span>	<span class="c1">// 两个mspan
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">before</span> <span class="o">:=</span> <span class="nf">spanOf</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">()</span> <span class="o">-</span> <span class="mi">1</span><span class="p">);</span> <span class="nx">before</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">before</span><span class="p">.</span><span class="nx">state</span> <span class="o">==</span> <span class="nx">_MSpanFree</span> <span class="p">{</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">startAddr</span> <span class="p">=</span> <span class="nx">before</span><span class="p">.</span><span class="nx">startAddr</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">npages</span> <span class="o">+=</span> <span class="nx">before</span><span class="p">.</span><span class="nx">npages</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">npreleased</span> <span class="p">=</span> <span class="nx">before</span><span class="p">.</span><span class="nx">npreleased</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">needzero</span> <span class="o">|=</span> <span class="nx">before</span><span class="p">.</span><span class="nx">needzero</span>
+		<span class="nx">h</span><span class="p">.</span><span class="nf">setSpan</span><span class="p">(</span><span class="nx">before</span><span class="p">.</span><span class="nf">base</span><span class="p">(),</span> <span class="nx">s</span><span class="p">)</span>
+
+		<span class="c1">// 从空闲列表中移除before mspan
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">h</span><span class="p">.</span><span class="nf">isLargeSpan</span><span class="p">(</span><span class="nx">before</span><span class="p">.</span><span class="nx">npages</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">h</span><span class="p">.</span><span class="nx">freelarge</span><span class="p">.</span><span class="nf">removeSpan</span><span class="p">(</span><span class="nx">before</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">h</span><span class="p">.</span><span class="nf">freeList</span><span class="p">(</span><span class="nx">before</span><span class="p">.</span><span class="nx">npages</span><span class="p">).</span><span class="nf">remove</span><span class="p">(</span><span class="nx">before</span><span class="p">)</span>
+		<span class="p">}</span>
+    <span class="c1">// 释放before mspan对象，归还到spanalloc固定对象分配器中
+</span><span class="c1"></span>		<span class="nx">before</span><span class="p">.</span><span class="nx">state</span> <span class="p">=</span> <span class="nx">_MSpanDead</span>
+		<span class="nx">h</span><span class="p">.</span><span class="nx">spanalloc</span><span class="p">.</span><span class="nf">free</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">before</span><span class="p">))</span>
+	<span class="p">}</span>
+
+	<span class="c1">// 与before一样
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">after</span> <span class="o">:=</span> <span class="nf">spanOf</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">()</span> <span class="o">+</span> <span class="nx">s</span><span class="p">.</span><span class="nx">npages</span><span class="o">*</span><span class="nx">pageSize</span><span class="p">);</span> <span class="nx">after</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">after</span><span class="p">.</span><span class="nx">state</span> <span class="o">==</span> <span class="nx">_MSpanFree</span> <span class="p">{</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">npages</span> <span class="o">+=</span> <span class="nx">after</span><span class="p">.</span><span class="nx">npages</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">npreleased</span> <span class="o">+=</span> <span class="nx">after</span><span class="p">.</span><span class="nx">npreleased</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">needzero</span> <span class="o">|=</span> <span class="nx">after</span><span class="p">.</span><span class="nx">needzero</span>
+		<span class="nx">h</span><span class="p">.</span><span class="nf">setSpan</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">()</span><span class="o">+</span><span class="nx">s</span><span class="p">.</span><span class="nx">npages</span><span class="o">*</span><span class="nx">pageSize</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="nx">s</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">h</span><span class="p">.</span><span class="nf">isLargeSpan</span><span class="p">(</span><span class="nx">after</span><span class="p">.</span><span class="nx">npages</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">h</span><span class="p">.</span><span class="nx">freelarge</span><span class="p">.</span><span class="nf">removeSpan</span><span class="p">(</span><span class="nx">after</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">h</span><span class="p">.</span><span class="nf">freeList</span><span class="p">(</span><span class="nx">after</span><span class="p">.</span><span class="nx">npages</span><span class="p">).</span><span class="nf">remove</span><span class="p">(</span><span class="nx">after</span><span class="p">)</span>
+		<span class="p">}</span>
+    <span class="c1">// 释放after mspan对象，归还到spanalloc固定对象分配器中，固定对象分配器
+</span><span class="c1"></span>		<span class="c1">// 要求传入的mspan状态必须为_MSpanDead
+</span><span class="c1"></span>		<span class="nx">after</span><span class="p">.</span><span class="nx">state</span> <span class="p">=</span> <span class="nx">_MSpanDead</span>
+		<span class="nx">h</span><span class="p">.</span><span class="nx">spanalloc</span><span class="p">.</span><span class="nf">free</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">after</span><span class="p">))</span>
+	<span class="p">}</span>
+
+	<span class="c1">// 将前后合并后的s放到空闲mspan列表中。
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">h</span><span class="p">.</span><span class="nf">isLargeSpan</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">npages</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// 如果是大于1MB的mspan，则插入到树堆中
+</span><span class="c1"></span>		<span class="nx">h</span><span class="p">.</span><span class="nx">freelarge</span><span class="p">.</span><span class="nf">insert</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="c1">// 如果是小于1MB的mspan，则插入到指定page数量的mspan链表中
+</span><span class="c1"></span>		<span class="nx">h</span><span class="p">.</span><span class="nf">freeList</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">npages</span><span class="p">).</span><span class="nf">insert</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在busy列表中查找使用中的mspan，时间复杂度为常数级。</p>
+<p>alloc/alloc_m</p>
+<p>alloc通过调用alloc_m方法实现mspan的分配，并对分配空间进行了必要的清零工作。</p>
+<p>实际内存分配的过程在alloc_m中</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// alloc
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">alloc</span><span class="p">(</span><span class="nx">npage</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">spanclass</span> <span class="nx">spanClass</span><span class="p">,</span> <span class="nx">large</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span><span class="o">*</span><span class="nx">mspan</span>
+
+<span class="c1">// alloc_m
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">alloc_m</span><span class="p">(</span><span class="nx">npage</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">spanclass</span> <span class="nx">spanClass</span><span class="p">,</span> <span class="nx">large</span> <span class="kt">bool</span><span class="p">)</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
+	<span class="c1">//...
+</span><span class="c1"></span>	<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+	<span class="c1">//...
+</span><span class="c1"></span>
+	<span class="c1">// 向堆中申请持有npage数量的mspan
+</span><span class="c1"></span>	<span class="nx">s</span> <span class="o">:=</span> <span class="nx">h</span><span class="p">.</span><span class="nf">allocSpanLocked</span><span class="p">(</span><span class="nx">npage</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_inuse</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">s</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+
+		<span class="c1">//...
+</span><span class="c1"></span>		<span class="c1">// 初始化mspan成员
+</span><span class="c1"></span>		<span class="nx">s</span><span class="p">.</span><span class="nx">state</span> <span class="p">=</span> <span class="nx">_MSpanInUse</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span> <span class="p">=</span> <span class="mi">0</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">spanclass</span> <span class="p">=</span> <span class="nx">spanclass</span>
+		<span class="k">if</span> <span class="nx">sizeclass</span> <span class="o">:=</span> <span class="nx">spanclass</span><span class="p">.</span><span class="nf">sizeclass</span><span class="p">();</span> <span class="nx">sizeclass</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">elemsize</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">npages</span> <span class="o">&lt;&lt;</span> <span class="nx">_PageShift</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">divShift</span> <span class="p">=</span> <span class="mi">0</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">divMul</span> <span class="p">=</span> <span class="mi">0</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">divShift2</span> <span class="p">=</span> <span class="mi">0</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">baseMask</span> <span class="p">=</span> <span class="mi">0</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">elemsize</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">class_to_size</span><span class="p">[</span><span class="nx">sizeclass</span><span class="p">])</span>
+			<span class="nx">m</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">class_to_divmagic</span><span class="p">[</span><span class="nx">sizeclass</span><span class="p">]</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">divShift</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">shift</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">divMul</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">mul</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">divShift2</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">shift2</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">baseMask</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">baseMask</span>
+		<span class="p">}</span>
+
+		<span class="c1">// 记录大内存使用量，并将mspan添加到busy链表
+</span><span class="c1"></span>		<span class="nx">h</span><span class="p">.</span><span class="nx">pagesInUse</span> <span class="o">+=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">npage</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">large</span> <span class="p">{</span>
+			<span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_objects</span><span class="o">++</span>
+			<span class="nx">mheap_</span><span class="p">.</span><span class="nx">largealloc</span> <span class="o">+=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">elemsize</span><span class="p">)</span>
+			<span class="nx">mheap_</span><span class="p">.</span><span class="nx">nlargealloc</span><span class="o">++</span>
+			<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_live</span><span class="p">,</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">npage</span><span class="o">&lt;&lt;</span><span class="nx">_PageShift</span><span class="p">))</span>
+			<span class="c1">// 
+</span><span class="c1"></span>			<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nx">npages</span> <span class="p">&lt;</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">h</span><span class="p">.</span><span class="nx">busy</span><span class="p">))</span> <span class="p">{</span>
+				<span class="nx">h</span><span class="p">.</span><span class="nx">busy</span><span class="p">[</span><span class="nx">s</span><span class="p">.</span><span class="nx">npages</span><span class="p">].</span><span class="nf">insertBack</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+				<span class="nx">h</span><span class="p">.</span><span class="nx">busylarge</span><span class="p">.</span><span class="nf">insertBack</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+  
+	<span class="c1">//...
+</span><span class="c1"></span>	<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>alloc_m调用allocSpanLocked分配了合适的mspan，完成了mspan的初始化，修改mspan状态为_MSpanInUse，并将mspan追加到mheap的busy链表中。</p>
+<p>此外，由于allocSpanLocked/freeSpanLocked是对堆缓存的主要操作方法，所以在调用这两个方法的位置需要加锁，使用的是mheap.lock对象。</p>
+<h2 id="程序初始化">程序初始化</h2>
 <p>除去执行栈外，内存分配器是最先完成初始化的，我们先来看这个初始化的过程。 内存分配器的初始化除去一些例行的检查之外，就是对堆的初始化了：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
