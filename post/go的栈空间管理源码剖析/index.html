@@ -186,11 +186,12 @@
         <li><a href="#栈内存空间">栈内存空间</a></li>
       </ul>
     </li>
-    <li><a href="#栈操作">栈操作</a>
+    <li><a href="#协程栈">协程栈</a></li>
+    <li><a href="#栈初始化">栈初始化</a></li>
+    <li><a href="#栈分配">栈分配</a></li>
+    <li><a href="#执行栈的伸缩">执行栈的伸缩</a>
       <ul>
-        <li><a href="#栈初始化">栈初始化</a></li>
-        <li><a href="#栈分配">栈分配</a></li>
-        <li><a href="#执行栈的伸缩">执行栈的伸缩</a></li>
+        <li></li>
       </ul>
     </li>
     <li><a href="#栈内存的申请与堆内存的申请">栈内存的申请与堆内存的申请</a></li>
@@ -347,7 +348,7 @@
 <p>在扩容的过程中，最重要的是调整指针的第三步，这一步能够保证指向栈的指针的正确性，因为栈中的所有变量内存都会发生变化，所以原本指向栈中变量的指针也需要调整。我们在前面提到过经过逃逸分析的 Go 语言程序的遵循以下不变性 —— 指向栈对象的指针不能存在于堆中，所以指向栈中变量的指针只能在栈上，我们只需要调整栈中的所有变量就可以保证内存的安全了。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201221223811.png" alt=""></p>
 <p>因为需要拷贝变量和调整指针，连续栈增加了栈扩容时的额外开销，但是通过合理栈缩容机制就能避免热分裂带来的性能问题，在 GC 期间如果 Goroutine 使用了栈内存的四分之一，那就将其内存减少一半，这样在栈内存几乎充满时也只会扩容一次，不会因为函数调用频繁扩缩容。</p>
-<h2 id="栈操作">栈操作</h2>
+<h2 id="协程栈">协程栈</h2>
 <p>Go 语言中的执行栈由 runtime.stack 结构体表示，该结构体中只包含两个字段，分别表示栈的顶部和栈的底部，每个栈结构体都表示范围 [lo, hi) 的内存空间：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -410,7 +411,7 @@
 </li>
 </ol>
 <p>需要注意的是，Go 语言的编译器不会为所有的函数插入 runtime.morestack，它只会在必要时插入指令以减少运行时的额外开销，编译指令 nosplit 可以跳过栈溢出的检查，虽然这能降低一些开销，不过固定大小的栈也存在溢出的风险。本节将分别分析栈的初始化、创建 Goroutine 时栈的分配、编译器和运行时协作完成的栈扩容以及当栈空间利用率不足时的缩容过程。</p>
-<h3 id="栈初始化">栈初始化</h3>
+<h2 id="栈初始化">栈初始化</h2>
 <p>栈空间在运行时中包含两个重要的全局变量，分别是 runtime.stackpool 和 runtime.stackLarge，这两个变量分别表示全局的栈缓存和大栈缓存，前者可以分配小于 32KB 的内存，后者用来分配大于 32KB 的栈空间：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -526,7 +527,7 @@
 </div>
 </div><p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201221231210.png" alt=""></p>
 <p>运行时使用全局的 runtime.stackpool 和线程缓存中的空闲链表分配 32KB 以下的栈内存，使用全局的 runtime.stackLarge 和堆内存分配 32KB 以上的栈内存，提高本地分配栈内存的性能。</p>
-<h3 id="栈分配">栈分配</h3>
+<h2 id="栈分配">栈分配</h2>
 <p>运行时会在 Goroutine 的初始化函数 runtime.malg 中调用 runtime.stackalloc 分配一个大小足够栈内存空间，根据线程缓存和申请栈的大小，</p>
 <p>我们在这里会按照栈的大小分两部分介绍运行时对栈空间的分配。在 Linux 上，_FixedStack = 2048、_NumStackOrders = 4、_StackCacheSize = 32768，也就是如果申请的栈空间小于 32KB 时，我们会在全局栈缓存池或者线程的栈缓存中初始化内存：</p>
 <div class="highlight"><div class="chroma">
@@ -1460,7 +1461,7 @@
 </div>
 </div><p>我们用一个流程图来归纳下栈空间分配的流程</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201222162303.png" alt=""></p>
-<h3 id="执行栈的伸缩">执行栈的伸缩</h3>
+<h2 id="执行栈的伸缩">执行栈的伸缩</h2>
 <p>早年的 Go 运行时使用分段栈的机制，即当一个 Goroutine 的执行栈溢出时， 栈的扩张操作是在另一个栈上进行的，这两个栈彼此没有连续。 这种设计的缺陷很容易破坏缓存的局部性原理，从而降低程序的运行时性能。 因此现在 Go 运行时开始使用连续栈机制，当一个执行栈发生溢出时， 新建一个两倍于原栈大小的新栈，再将原栈整个拷贝到新栈上。 从而整个栈总是连续的。栈的拷贝并非想象中的那样简单，因为一个栈上可能保留指向被拷贝栈的指针， 从而当栈发生拷贝后，这个指针可能还指向原栈，从而造成错误。 此外，Goroutine 上原本的 gobuf 也需要被更新，这也是使用连续栈的难点之一。</p>
 <h4 id="分段标记">分段标记</h4>
 <p>分段标记是编译器的机制，涉及栈帧大小的计算。这个过程比较复杂，我们暂时假设编译器已经计算好了栈帧的大小， 这时，编译的预处理阶段，会为没有标记为 go:nosplit 的函数插入栈的分段检查：</p>
@@ -3299,9 +3300,9 @@
           <a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a>
           </div>
       <nav class="post-nav">
-        <a class="prev" href="/post/database-sql%E5%8C%85%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+        <a class="prev" href="/post/yaml%E8%AF%AD%E6%B3%95%E4%BB%8B%E7%BB%8D/">
             <i class="iconfont icon-left"></i>
-            <span class="prev-text nav-default">Sql包源码剖析</span>
+            <span class="prev-text nav-default">Yaml语法介绍</span>
             <span class="prev-text nav-mobile">上一篇</span>
           </a>
         <a class="next" href="/post/go%E6%9C%8D%E5%8A%A1%E7%9A%84%E4%BC%98%E9%9B%85%E5%85%B3%E9%97%AD%E4%B8%8E%E9%87%8D%E5%90%AF/">
@@ -3350,7 +3351,7 @@
   <span class="copyright-year">
     &copy; 
     2017 - 
-    2020
+    2021
     <span class="heart">
       <i class="iconfont icon-heart"></i>
     </span>
