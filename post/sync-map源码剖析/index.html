@@ -17,7 +17,7 @@
 
 
 <meta name="author"
-  content="Forz" /><meta name="description" content="在Go 1.6之前， 内置的map类型是部分goroutine安全的，并发的读没有问题，并发的写可能有问题。自go 1.6之后， 并发地读写map会" /><meta name="keywords"
+  content="Forz" /><meta name="description" content="通过引入两个map将读写分离到不同的map，其中read map提供并发读和已存元素原子写，而dirty map则负责读写。 这样read map就" /><meta name="keywords"
   content="Hugo, theme, even" />
 
 
@@ -44,22 +44,22 @@
 
 
 <meta property="og:title" content="sync.Map源码剖析" />
-<meta property="og:description" content="在Go 1.6之前， 内置的map类型是部分goroutine安全的，并发的读没有问题，并发的写可能有问题。自go 1.6之后， 并发地读写map会" />
+<meta property="og:description" content="通过引入两个map将读写分离到不同的map，其中read map提供并发读和已存元素原子写，而dirty map则负责读写。 这样read map就" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/sync-map%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
 <meta property="article:published_time" content="2019-01-19T21:11:24+00:00" />
 <meta property="article:modified_time" content="2019-01-19T21:11:24+00:00" />
 <meta itemprop="name" content="sync.Map源码剖析">
-<meta itemprop="description" content="在Go 1.6之前， 内置的map类型是部分goroutine安全的，并发的读没有问题，并发的写可能有问题。自go 1.6之后， 并发地读写map会">
+<meta itemprop="description" content="通过引入两个map将读写分离到不同的map，其中read map提供并发读和已存元素原子写，而dirty map则负责读写。 这样read map就">
 <meta itemprop="datePublished" content="2019-01-19T21:11:24&#43;00:00" />
 <meta itemprop="dateModified" content="2019-01-19T21:11:24&#43;00:00" />
-<meta itemprop="wordCount" content="13693">
+<meta itemprop="wordCount" content="11697">
 
 
 
 <meta itemprop="keywords" content="sync," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="sync.Map源码剖析"/>
-<meta name="twitter:description" content="在Go 1.6之前， 内置的map类型是部分goroutine安全的，并发的读没有问题，并发的写可能有问题。自go 1.6之后， 并发地读写map会"/>
+<meta name="twitter:description" content="通过引入两个map将读写分离到不同的map，其中read map提供并发读和已存元素原子写，而dirty map则负责读写。 这样read map就"/>
 
 <!--[if lte IE 9]>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
@@ -167,8 +167,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 13693 字 </span>
-          <span class="more-meta"> 预计阅读 28 分钟 </span>
+          <span class="more-meta"> 约 11697 字 </span>
+          <span class="more-meta"> 预计阅读 24 分钟 </span>
         
       </div>
     </header>
@@ -195,166 +195,7 @@
   </div>
 </div>
     <div class="post-content">
-      <p>在Go 1.6之前， 内置的map类型是部分goroutine安全的，并发的读没有问题，并发的写可能有问题。自go 1.6之后， 并发地读写map会报错，这在一些知名的开源库中都存在这个问题，所以go 1.9之前的解决方案是额外绑定一个锁，封装成一个新的struct或者单独使用锁都可以。</p>
-<p>本文带你深入到sync.Map的具体实现中，看看为了增加一个功能，代码是如何变的复杂的,以及作者在实现sync.Map的一些思想。</p>
-<h1 id="有并发问题的map">有并发问题的map</h1>
-<p>官方的faq已经提到内建的map不是线程(goroutine)安全的。</p>
-<p>首先，让我们看一段并发读写的代码,下列程序中一个goroutine一直读，一个goroutine一只写同一个键值，即即使读写的键不相同，而且map也没有&quot;扩容&quot;等操作，代码还是会报错。</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code><span class="lnt"> 1
-</span><span class="lnt"> 2
-</span><span class="lnt"> 3
-</span><span class="lnt"> 4
-</span><span class="lnt"> 5
-</span><span class="lnt"> 6
-</span><span class="lnt"> 7
-</span><span class="lnt"> 8
-</span><span class="lnt"> 9
-</span><span class="lnt">10
-</span><span class="lnt">11
-</span><span class="lnt">12
-</span><span class="lnt">13
-</span><span class="lnt">14
-</span><span class="lnt">15
-</span></code></pre></td>
-<td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
-<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
-	<span class="nx">m</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">int</span><span class="p">]</span><span class="kt">int</span><span class="p">)</span>
-	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
-		<span class="k">for</span> <span class="p">{</span>
-			<span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
-		<span class="p">}</span>
-	<span class="p">}()</span>
-	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
-		<span class="k">for</span> <span class="p">{</span>
-			<span class="nx">m</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="p">=</span> <span class="mi">2</span>
-		<span class="p">}</span>
-	<span class="p">}()</span>
-	<span class="k">select</span> <span class="p">{}</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>错误信息是: fatal error: concurrent map read and map write。</p>
-<p>如果你查看Go的源代码: hashmap_fast.go#L118,会看到读的时候会检查hashWriting标志， 如果有这个标志，就会报并发错误。</p>
-<p>写的时候会设置这个标志: hashmap.go#L542</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code><span class="lnt">1
-</span></code></pre></td>
-<td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">h</span><span class="p">.</span><span class="nx">flags</span> <span class="o">|=</span> <span class="nx">hashWriting</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>hashmap.go#L628设置完之后会取消这个标记。</p>
-<p>当然，代码中还有好几处并发读写的检查， 比如写的时候也会检查是不是有并发的写，删除键的时候类似写，遍历的时候并发读写问题等。</p>
-<p>有时候，map的并发问题不是那么容易被发现, 你可以利用-race参数来检查。</p>
-<h1 id="go-19之前的解决方案">Go 1.9之前的解决方案</h1>
-<p>但是，很多时候，我们会并发地使用map对象，尤其是在一定规模的项目中，map总会保存goroutine共享的数据。在Go官方blog的Go maps in action一文中，提供了一种简便的解决方案。</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code><span class="lnt">1
-</span><span class="lnt">2
-</span><span class="lnt">3
-</span><span class="lnt">4
-</span></code></pre></td>
-<td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">counter</span> <span class="p">=</span> <span class="kd">struct</span><span class="p">{</span>
-    <span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>
-    <span class="nx">m</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">int</span>
-<span class="p">}{</span><span class="nx">m</span><span class="p">:</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">int</span><span class="p">)}</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>它使用嵌入struct为map增加一个读写锁,把读写操作变成单线程操作来实现。</p>
-<p>下面是我们使用sync.RWMutex实现的一个简单的线程安全Map。</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code><span class="lnt"> 1
-</span><span class="lnt"> 2
-</span><span class="lnt"> 3
-</span><span class="lnt"> 4
-</span><span class="lnt"> 5
-</span><span class="lnt"> 6
-</span><span class="lnt"> 7
-</span><span class="lnt"> 8
-</span><span class="lnt"> 9
-</span><span class="lnt">10
-</span><span class="lnt">11
-</span><span class="lnt">12
-</span><span class="lnt">13
-</span><span class="lnt">14
-</span><span class="lnt">15
-</span><span class="lnt">16
-</span><span class="lnt">17
-</span><span class="lnt">18
-</span><span class="lnt">19
-</span><span class="lnt">20
-</span><span class="lnt">21
-</span><span class="lnt">22
-</span><span class="lnt">23
-</span><span class="lnt">24
-</span><span class="lnt">25
-</span><span class="lnt">26
-</span><span class="lnt">27
-</span><span class="lnt">28
-</span><span class="lnt">29
-</span><span class="lnt">30
-</span><span class="lnt">31
-</span><span class="lnt">32
-</span></code></pre></td>
-<td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">RegularIntMap</span>
-
-<span class="kd">type</span> <span class="nx">RegularIntMap</span> <span class="kd">struct</span> <span class="p">{</span>
-    <span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>
-    <span class="nx">internal</span> <span class="kd">map</span><span class="p">[</span><span class="kt">int</span><span class="p">]</span><span class="kt">int</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="nf">NewRegularIntMap</span><span class="p">()</span> <span class="o">*</span><span class="nx">RegularIntMap</span> <span class="p">{</span>
-    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">RegularIntMap</span><span class="p">{</span>
-        <span class="nx">internal</span><span class="p">:</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">int</span><span class="p">]</span><span class="kt">int</span><span class="p">),</span>
-    <span class="p">}</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="p">(</span><span class="nx">rm</span> <span class="o">*</span><span class="nx">RegularIntMap</span><span class="p">)</span> <span class="nf">Load</span><span class="p">(</span><span class="nx">key</span> <span class="kt">int</span><span class="p">)</span> <span class="p">(</span><span class="nx">value</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">ok</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
-    <span class="nx">rm</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span><span class="c1">//读锁，可并发
-</span><span class="c1"></span>    <span class="nx">result</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">rm</span><span class="p">.</span><span class="nx">internal</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
-    <span class="nx">rm</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
-    <span class="k">return</span> <span class="nx">result</span><span class="p">,</span> <span class="nx">ok</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="p">(</span><span class="nx">rm</span> <span class="o">*</span><span class="nx">RegularIntMap</span><span class="p">)</span> <span class="nf">Delete</span><span class="p">(</span><span class="nx">key</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
-    <span class="nx">rm</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-    <span class="nb">delete</span><span class="p">(</span><span class="nx">rm</span><span class="p">.</span><span class="nx">internal</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
-    <span class="nx">rm</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="p">(</span><span class="nx">rm</span> <span class="o">*</span><span class="nx">RegularIntMap</span><span class="p">)</span> <span class="nf">Store</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
-    <span class="nx">rm</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-    <span class="nx">rm</span><span class="p">.</span><span class="nx">internal</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">value</span>
-    <span class="nx">rm</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-<span class="p">}</span>
-
-</code></pre></td></tr></table>
-</div>
-</div><p>但是，在对标准库做了额外的审查和性能分析之后，很多Go团队成员发现当使用sync.RWMutex的代码被部署在有很多、很多核的CPU上的时候，它的性能远低于理想值。对于这里提到的“很多”，我并不是在说你的典型的8核或者16核的系统，重要的是那些系统配置可能远超这个。在这些地方CPU的核数能够呈现出代码的高度竞争性，就像使用sync.RWMutex一样。</p>
-<p>现在我们已经基本明了为什么会创建一个新的Sync.Map了。Go团队确认了一个标准库的性能不佳的情况。在部署在一个有很多CPU核的系统上的高读取场景下，从使用sync.RWMutex封装的数据结构中读取数据的性能会受到很大影响。</p>
-<p>但哪怕使用了读写分离锁，当代码运行在多核CPU下(通常情况下是超过8/16核以上的服务器)性能依然堪忧。因为以下几个原因：</p>
-<ol>
-<li>reflect.New很慢(map类型安全的底层是通过反射机制来实现的)</li>
-<li>sync.RWMutex很慢</li>
-<li>atomic.AddUint32很慢</li>
-<li>所有的cpu都在读写同一个内存地址</li>
-</ol>
-<h1 id="syncmap">sync.Map</h1>
-<p>并发hashmap的方案有很多，下面简单提一下几种，然后再讨论golang实现时的考虑。</p>
-<p>第一种是最简单的，直接在不支持并发的hashmap上，使用一个读写锁的保护，这也是golang sync map还没出来前，大家常用的方法。这种方法的缺点是写会堵塞读。</p>
-<p>第二种是数据库常用的方法，分段锁，内部使用多个锁，每个区间共享一把锁，这样减少了数据共享一把锁带来的性能影响，orcaman提供了这个思路的一个实现： concurrent-map。java的ConcurrentHashMap也是这么实现的。平均情况下这样的性能还挺好的，但是极端情况下，如果某个区间有热点写，那么那个区间的读请求也会受到影响。</p>
-<p>第三种方法是我们C++自己造轮子时经常用的，使用使用链表法解决冲突，然后链表使用CAS去解决并发下冲突，这样读写都是无锁，我觉得这种挺好的，性能非常高，不知为啥其他语言不这么实现。</p>
-<p>然后在《An overview of sync.Map》中有提到，在cpu核数很多的情况下，因为cache contention，reflect.New、sync.RWMutex、atomic.AddUint32都会很慢，golang团队为了适应cpu核很多的情况，没有采用上面的几种常见的方案。</p>
-<p>golang sync map的目标是实现适合读多写少的场景、并且要求稳定性很好，不能出现像分段锁那样读经常被阻塞的情况。golang sync map基于map做了一层封装，在大部分情况下，不过写入性能比较差。下面来详细说说实现。</p>
-<p>通过引入两个map将读写分离到不同的map，其中read map提供并发读和已存元素原子写，而dirty map则负责读写。 这样read map就可以在不加锁的情况下进行并发读取,当read map中没有读取到值时,再加锁进行后续读取,并累加未命中数,当未命中数大于等于dirty map长度,将dirty map上升为read map。从之前的结构体的定义可以发现，虽然引入了两个map，但是底层数据存储的是指针，指向的是同一份值。</p>
+      <p>通过引入两个map将读写分离到不同的map，其中read map提供并发读和已存元素原子写，而dirty map则负责读写。 这样read map就可以在不加锁的情况下进行并发读取,当read map中没有读取到值时,再加锁进行后续读取,并累加未命中数,当未命中数大于等于dirty map长度,将dirty map上升为read map。从之前的结构体的定义可以发现，虽然引入了两个map，但是底层数据存储的是指针，指向的是同一份值。</p>
 <p>下面我们介绍sync.Map的重点代码，以便理解它的实现思想。</p>
 <p>首先，我们看一下sync.Map的数据结构：</p>
 <div class="highlight"><div class="chroma">
@@ -1855,9 +1696,9 @@ read的数据结构是：</p>
           <a href="/tags/sync/">sync</a>
           </div>
       <nav class="post-nav">
-        <a class="prev" href="/post/sync-atomic%E5%8C%85%E8%A7%A3%E6%9E%90/">
+        <a class="prev" href="/post/go%E5%AE%9E%E7%8E%B0%E9%87%8D%E5%85%A5%E9%94%81/">
             <i class="iconfont icon-left"></i>
-            <span class="prev-text nav-default">sync/atomic包解析</span>
+            <span class="prev-text nav-default">Go实现重入锁</span>
             <span class="prev-text nav-mobile">上一篇</span>
           </a>
         <a class="next" href="/post/go%E8%AF%AD%E8%A8%80%E7%9A%84%E5%8F%AF%E5%8F%98%E5%8F%82%E6%95%B0%E8%AF%A6%E8%A7%A3/">

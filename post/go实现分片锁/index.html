@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Go实现分片锁 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="虽然使用读写锁可以提供线程安全的 map,但是在大量并发读写的情况下,锁的竞争会非常激烈。锁是性能下降的万恶之源之一。 在并发编程中,我们的一条" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
+
+
+<link rel="canonical" href="/post/go%E5%AE%9E%E7%8E%B0%E5%88%86%E7%89%87%E9%94%81/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Go实现分片锁" />
+<meta property="og:description" content="虽然使用读写锁可以提供线程安全的 map,但是在大量并发读写的情况下,锁的竞争会非常激烈。锁是性能下降的万恶之源之一。 在并发编程中,我们的一条" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/go%E5%AE%9E%E7%8E%B0%E5%88%86%E7%89%87%E9%94%81/" />
+<meta property="article:published_time" content="2021-01-19T17:01:41+00:00" />
+<meta property="article:modified_time" content="2021-01-19T17:01:41+00:00" />
+<meta itemprop="name" content="Go实现分片锁">
+<meta itemprop="description" content="虽然使用读写锁可以提供线程安全的 map,但是在大量并发读写的情况下,锁的竞争会非常激烈。锁是性能下降的万恶之源之一。 在并发编程中,我们的一条">
+<meta itemprop="datePublished" content="2021-01-19T17:01:41&#43;00:00" />
+<meta itemprop="dateModified" content="2021-01-19T17:01:41&#43;00:00" />
+<meta itemprop="wordCount" content="2271">
+
+
+
+<meta itemprop="keywords" content="Go," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Go实现分片锁"/>
+<meta name="twitter:description" content="虽然使用读写锁可以提供线程安全的 map,但是在大量并发读写的情况下,锁的竞争会非常激烈。锁是性能下降的万恶之源之一。 在并发编程中,我们的一条"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Go实现分片锁</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-01-19 </span>
+        <div class="post-category">
+            <a href="/categories/go/"> Go </a>
+            </div>
+          <span class="more-meta"> 约 2271 字 </span>
+          <span class="more-meta"> 预计阅读 5 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents"></nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>虽然使用读写锁可以提供线程安全的 map,但是在大量并发读写的情况下,锁的竞争会非常激烈。锁是性能下降的万恶之源之一。</p>
+<p>在并发编程中,我们的一条原则就是尽量减少锁的使用。一些单线程单进程的应用(比如 Redis 等),基本上不需要使用锁去解决并发线程访问的问题,所以可以取得很高的性能。但是对于 Go 开发的应用程序来说,并发是常用的一个特性,在这种情况下,我们能做的就是,尽量减少锁的粒度和锁的持有时间。</p>
+<p>你可以优化业务处理的代码,以此来减少锁的持有时间,比如将串行的操作变成并行的子任务执行。不过,这就是另外的故事了,今天我们还是主要讲对同步原语的优化,所以这里我重点讲如何减少锁的粒度。</p>
+<p>减少锁的粒度常用的方法就是分片(Shard),将一把锁分成几把锁,每个锁控制一个分片。Go 比较知名的分片并发 map 的实现是 orcaman/concurrent-map。</p>
+<p>它默认采用 32 个分片,GetShard 是一个关键的方法,能够根据 key 计算出分片索引。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span><span class="lnt">103
+</span><span class="lnt">104
+</span><span class="lnt">105
+</span><span class="lnt">106
+</span><span class="lnt">107
+</span><span class="lnt">108
+</span><span class="lnt">109
+</span><span class="lnt">110
+</span><span class="lnt">111
+</span><span class="lnt">112
+</span><span class="lnt">113
+</span><span class="lnt">114
+</span><span class="lnt">115
+</span><span class="lnt">116
+</span><span class="lnt">117
+</span><span class="lnt">118
+</span><span class="lnt">119
+</span><span class="lnt">120
+</span><span class="lnt">121
+</span><span class="lnt">122
+</span><span class="lnt">123
+</span><span class="lnt">124
+</span><span class="lnt">125
+</span><span class="lnt">126
+</span><span class="lnt">127
+</span><span class="lnt">128
+</span><span class="lnt">129
+</span><span class="lnt">130
+</span><span class="lnt">131
+</span><span class="lnt">132
+</span><span class="lnt">133
+</span><span class="lnt">134
+</span><span class="lnt">135
+</span><span class="lnt">136
+</span><span class="lnt">137
+</span><span class="lnt">138
+</span><span class="lnt">139
+</span><span class="lnt">140
+</span><span class="lnt">141
+</span><span class="lnt">142
+</span><span class="lnt">143
+</span><span class="lnt">144
+</span><span class="lnt">145
+</span><span class="lnt">146
+</span><span class="lnt">147
+</span><span class="lnt">148
+</span><span class="lnt">149
+</span><span class="lnt">150
+</span><span class="lnt">151
+</span><span class="lnt">152
+</span><span class="lnt">153
+</span><span class="lnt">154
+</span><span class="lnt">155
+</span><span class="lnt">156
+</span><span class="lnt">157
+</span><span class="lnt">158
+</span><span class="lnt">159
+</span><span class="lnt">160
+</span><span class="lnt">161
+</span><span class="lnt">162
+</span><span class="lnt">163
+</span><span class="lnt">164
+</span><span class="lnt">165
+</span><span class="lnt">166
+</span><span class="lnt">167
+</span><span class="lnt">168
+</span><span class="lnt">169
+</span><span class="lnt">170
+</span><span class="lnt">171
+</span><span class="lnt">172
+</span><span class="lnt">173
+</span><span class="lnt">174
+</span><span class="lnt">175
+</span><span class="lnt">176
+</span><span class="lnt">177
+</span><span class="lnt">178
+</span><span class="lnt">179
+</span><span class="lnt">180
+</span><span class="lnt">181
+</span><span class="lnt">182
+</span><span class="lnt">183
+</span><span class="lnt">184
+</span><span class="lnt">185
+</span><span class="lnt">186
+</span><span class="lnt">187
+</span><span class="lnt">188
+</span><span class="lnt">189
+</span><span class="lnt">190
+</span><span class="lnt">191
+</span><span class="lnt">192
+</span><span class="lnt">193
+</span><span class="lnt">194
+</span><span class="lnt">195
+</span><span class="lnt">196
+</span><span class="lnt">197
+</span><span class="lnt">198
+</span><span class="lnt">199
+</span><span class="lnt">200
+</span><span class="lnt">201
+</span><span class="lnt">202
+</span><span class="lnt">203
+</span><span class="lnt">204
+</span><span class="lnt">205
+</span><span class="lnt">206
+</span><span class="lnt">207
+</span><span class="lnt">208
+</span><span class="lnt">209
+</span><span class="lnt">210
+</span><span class="lnt">211
+</span><span class="lnt">212
+</span><span class="lnt">213
+</span><span class="lnt">214
+</span><span class="lnt">215
+</span><span class="lnt">216
+</span><span class="lnt">217
+</span><span class="lnt">218
+</span><span class="lnt">219
+</span><span class="lnt">220
+</span><span class="lnt">221
+</span><span class="lnt">222
+</span><span class="lnt">223
+</span><span class="lnt">224
+</span><span class="lnt">225
+</span><span class="lnt">226
+</span><span class="lnt">227
+</span><span class="lnt">228
+</span><span class="lnt">229
+</span><span class="lnt">230
+</span><span class="lnt">231
+</span><span class="lnt">232
+</span><span class="lnt">233
+</span><span class="lnt">234
+</span><span class="lnt">235
+</span><span class="lnt">236
+</span><span class="lnt">237
+</span><span class="lnt">238
+</span><span class="lnt">239
+</span><span class="lnt">240
+</span><span class="lnt">241
+</span><span class="lnt">242
+</span><span class="lnt">243
+</span><span class="lnt">244
+</span><span class="lnt">245
+</span><span class="lnt">246
+</span><span class="lnt">247
+</span><span class="lnt">248
+</span><span class="lnt">249
+</span><span class="lnt">250
+</span><span class="lnt">251
+</span><span class="lnt">252
+</span><span class="lnt">253
+</span><span class="lnt">254
+</span><span class="lnt">255
+</span><span class="lnt">256
+</span><span class="lnt">257
+</span><span class="lnt">258
+</span><span class="lnt">259
+</span><span class="lnt">260
+</span><span class="lnt">261
+</span><span class="lnt">262
+</span><span class="lnt">263
+</span><span class="lnt">264
+</span><span class="lnt">265
+</span><span class="lnt">266
+</span><span class="lnt">267
+</span><span class="lnt">268
+</span><span class="lnt">269
+</span><span class="lnt">270
+</span><span class="lnt">271
+</span><span class="lnt">272
+</span><span class="lnt">273
+</span><span class="lnt">274
+</span><span class="lnt">275
+</span><span class="lnt">276
+</span><span class="lnt">277
+</span><span class="lnt">278
+</span><span class="lnt">279
+</span><span class="lnt">280
+</span><span class="lnt">281
+</span><span class="lnt">282
+</span><span class="lnt">283
+</span><span class="lnt">284
+</span><span class="lnt">285
+</span><span class="lnt">286
+</span><span class="lnt">287
+</span><span class="lnt">288
+</span><span class="lnt">289
+</span><span class="lnt">290
+</span><span class="lnt">291
+</span><span class="lnt">292
+</span><span class="lnt">293
+</span><span class="lnt">294
+</span><span class="lnt">295
+</span><span class="lnt">296
+</span><span class="lnt">297
+</span><span class="lnt">298
+</span><span class="lnt">299
+</span><span class="lnt">300
+</span><span class="lnt">301
+</span><span class="lnt">302
+</span><span class="lnt">303
+</span><span class="lnt">304
+</span><span class="lnt">305
+</span><span class="lnt">306
+</span><span class="lnt">307
+</span><span class="lnt">308
+</span><span class="lnt">309
+</span><span class="lnt">310
+</span><span class="lnt">311
+</span><span class="lnt">312
+</span><span class="lnt">313
+</span><span class="lnt">314
+</span><span class="lnt">315
+</span><span class="lnt">316
+</span><span class="lnt">317
+</span><span class="lnt">318
+</span><span class="lnt">319
+</span><span class="lnt">320
+</span><span class="lnt">321
+</span><span class="lnt">322
+</span><span class="lnt">323
+</span><span class="lnt">324
+</span><span class="lnt">325
+</span><span class="lnt">326
+</span><span class="lnt">327
+</span><span class="lnt">328
+</span><span class="lnt">329
+</span><span class="lnt">330
+</span><span class="lnt">331
+</span><span class="lnt">332
+</span><span class="lnt">333
+</span><span class="lnt">334
+</span><span class="lnt">335
+</span><span class="lnt">336
+</span><span class="lnt">337
+</span><span class="lnt">338
+</span><span class="lnt">339
+</span><span class="lnt">340
+</span><span class="lnt">341
+</span><span class="lnt">342
+</span><span class="lnt">343
+</span><span class="lnt">344
+</span><span class="lnt">345
+</span><span class="lnt">346
+</span><span class="lnt">347
+</span><span class="lnt">348
+</span><span class="lnt">349
+</span><span class="lnt">350
+</span><span class="lnt">351
+</span><span class="lnt">352
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">cmap</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;encoding/json&#34;</span>
+	<span class="s">&#34;sync&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">var</span> <span class="nx">SHARD_COUNT</span> <span class="p">=</span> <span class="mi">32</span>
+
+<span class="c1">// A &#34;thread&#34; safe map of type string:Anything.
+</span><span class="c1">// To avoid lock bottlenecks this map is dived to several (SHARD_COUNT) map shards.
+</span><span class="c1">// 分成SHARD_COUNT个分片的map
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">ConcurrentMap</span> <span class="p">[]</span><span class="o">*</span><span class="nx">ConcurrentMapShared</span>
+
+<span class="c1">// A &#34;thread&#34; safe string to anything map.
+</span><span class="c1">// 通过RWMutex保护的线程安全的分片,包含一个map
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">ConcurrentMapShared</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">items</span>        <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{}</span>
+	<span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span> <span class="c1">// Read Write mutex, guards access to internal map.
+</span><span class="c1"></span><span class="p">}</span>
+
+<span class="c1">// Creates a new concurrent map.
+</span><span class="c1">// 创建并发map
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">New</span><span class="p">()</span> <span class="nx">ConcurrentMap</span> <span class="p">{</span>
+	<span class="nx">m</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="nx">ConcurrentMap</span><span class="p">,</span> <span class="nx">SHARD_COUNT</span><span class="p">)</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">SHARD_COUNT</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">m</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">ConcurrentMapShared</span><span class="p">{</span><span class="nx">items</span><span class="p">:</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{})}</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">m</span>
+<span class="p">}</span>
+
+<span class="c1">// GetShard returns shard under given key
+</span><span class="c1">// 根据key计算分片索引
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="o">*</span><span class="nx">ConcurrentMapShared</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">m</span><span class="p">[</span><span class="nb">uint</span><span class="p">(</span><span class="nf">fnv32</span><span class="p">(</span><span class="nx">key</span><span class="p">))</span><span class="o">%</span><span class="nb">uint</span><span class="p">(</span><span class="nx">SHARD_COUNT</span><span class="p">)]</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">MSet</span><span class="p">(</span><span class="nx">data</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">data</span> <span class="p">{</span>
+		<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+		<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+		<span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">value</span>
+		<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// Sets the given value under the specified key.
+</span><span class="c1">//增加或者查询的时候,首先根据分片索引得到分片对象,然后对分片对象加锁进行操作:
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Set</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+    <span class="c1">// Get map shard.
+</span><span class="c1"></span>    <span class="c1">// 根据key计算出对应的分片
+</span><span class="c1"></span>    <span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+    <span class="c1">//对这个分片加锁,执行业务操作
+</span><span class="c1"></span>	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">value</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="c1">// Callback to return new element to be inserted into the map
+</span><span class="c1">// It is called while lock is held, therefore it MUST NOT
+</span><span class="c1">// try to access other keys in same map, as it can lead to deadlock since
+</span><span class="c1">// Go sync.RWLock is not reentrant
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">UpsertCb</span> <span class="kd">func</span><span class="p">(</span><span class="nx">exist</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">valueInMap</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">newValue</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{}</span>
+
+<span class="c1">// Insert or Update - updates existing element or inserts a new one using UpsertCb
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Upsert</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">cb</span> <span class="nx">UpsertCb</span><span class="p">)</span> <span class="p">(</span><span class="nx">res</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="nx">v</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+	<span class="nx">res</span> <span class="p">=</span> <span class="nf">cb</span><span class="p">(</span><span class="nx">ok</span><span class="p">,</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">value</span><span class="p">)</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">res</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="k">return</span> <span class="nx">res</span>
+<span class="p">}</span>
+
+<span class="c1">// Sets the given value under the specified key if no value was associated with it.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">SetIfAbsent</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="c1">// Get map shard.
+</span><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+		<span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">value</span>
+	<span class="p">}</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="k">return</span> <span class="p">!</span><span class="nx">ok</span>
+<span class="p">}</span>
+
+<span class="c1">// Get retrieves an element from map under given key.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="kd">interface</span><span class="p">{},</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// Get shard
+</span><span class="c1"></span>    <span class="c1">// 根据key计算出对应的分片
+</span><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+    <span class="c1">// Get item from shard.
+</span><span class="c1"></span>    <span class="c1">// 从这个分片读取key的值
+</span><span class="c1"></span>	<span class="nx">val</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+	<span class="k">return</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">ok</span>
+<span class="p">}</span>
+
+<span class="c1">// Count returns the number of elements within the map.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Count</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
+	<span class="nx">count</span> <span class="o">:=</span> <span class="mi">0</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">SHARD_COUNT</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
+		<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+		<span class="nx">count</span> <span class="o">+=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">)</span>
+		<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">count</span>
+<span class="p">}</span>
+
+<span class="c1">// Looks up an item under specified key
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Has</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="c1">// Get shard
+</span><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+	<span class="c1">// See if element is within shard.
+</span><span class="c1"></span>	<span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+	<span class="k">return</span> <span class="nx">ok</span>
+<span class="p">}</span>
+
+<span class="c1">// Remove removes an element from the map.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Remove</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
+	<span class="c1">// Try to get shard.
+</span><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="nb">delete</span><span class="p">(</span><span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="c1">// RemoveCb is a callback executed in a map.RemoveCb() call, while Lock is held
+</span><span class="c1">// If returns true, the element will be removed from the map
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">RemoveCb</span> <span class="kd">func</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">v</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">exists</span> <span class="kt">bool</span><span class="p">)</span> <span class="kt">bool</span>
+
+<span class="c1">// RemoveCb locks the shard containing the key, retrieves its current value and calls the callback with those params
+</span><span class="c1">// If callback returns true and element exists, it will remove it from the map
+</span><span class="c1">// Returns the value returned by the callback (even if element was not present in the map)
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">RemoveCb</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">cb</span> <span class="nx">RemoveCb</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="c1">// Try to get shard.
+</span><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="nx">v</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+	<span class="nx">remove</span> <span class="o">:=</span> <span class="nf">cb</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">ok</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">remove</span> <span class="o">&amp;&amp;</span> <span class="nx">ok</span> <span class="p">{</span>
+		<span class="nb">delete</span><span class="p">(</span><span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="k">return</span> <span class="nx">remove</span>
+<span class="p">}</span>
+
+<span class="c1">// Pop removes an element from the map and returns it
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Pop</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">v</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">exists</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="c1">// Try to get shard.
+</span><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="nx">v</span><span class="p">,</span> <span class="nx">exists</span> <span class="p">=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+	<span class="nb">delete</span><span class="p">(</span><span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
+	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="k">return</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">exists</span>
+<span class="p">}</span>
+
+<span class="c1">// IsEmpty checks if map is empty.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">IsEmpty</span><span class="p">()</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">m</span><span class="p">.</span><span class="nf">Count</span><span class="p">()</span> <span class="o">==</span> <span class="mi">0</span>
+<span class="p">}</span>
+
+<span class="c1">// Used by the Iter &amp; IterBuffered functions to wrap two variables together over a channel,
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Tuple</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">Key</span> <span class="kt">string</span>
+	<span class="nx">Val</span> <span class="kd">interface</span><span class="p">{}</span>
+<span class="p">}</span>
+
+<span class="c1">// Iter returns an iterator which could be used in a for range loop.
+</span><span class="c1">//
+</span><span class="c1">// Deprecated: using IterBuffered() will get a better performence
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Iter</span><span class="p">()</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">Tuple</span> <span class="p">{</span>
+	<span class="nx">chans</span> <span class="o">:=</span> <span class="nf">snapshot</span><span class="p">(</span><span class="nx">m</span><span class="p">)</span>
+	<span class="nx">ch</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">)</span>
+	<span class="k">go</span> <span class="nf">fanIn</span><span class="p">(</span><span class="nx">chans</span><span class="p">,</span> <span class="nx">ch</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">ch</span>
+<span class="p">}</span>
+
+<span class="c1">// IterBuffered returns a buffered iterator which could be used in a for range loop.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">IterBuffered</span><span class="p">()</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">Tuple</span> <span class="p">{</span>
+	<span class="nx">chans</span> <span class="o">:=</span> <span class="nf">snapshot</span><span class="p">(</span><span class="nx">m</span><span class="p">)</span>
+	<span class="nx">total</span> <span class="o">:=</span> <span class="mi">0</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">c</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">chans</span> <span class="p">{</span>
+		<span class="nx">total</span> <span class="o">+=</span> <span class="nb">cap</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">ch</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">,</span> <span class="nx">total</span><span class="p">)</span>
+	<span class="k">go</span> <span class="nf">fanIn</span><span class="p">(</span><span class="nx">chans</span><span class="p">,</span> <span class="nx">ch</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">ch</span>
+<span class="p">}</span>
+
+<span class="c1">// Clear removes all items from map.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Clear</span><span class="p">()</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="nx">item</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span><span class="p">.</span><span class="nf">IterBuffered</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">m</span><span class="p">.</span><span class="nf">Remove</span><span class="p">(</span><span class="nx">item</span><span class="p">.</span><span class="nx">Key</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// Returns a array of channels that contains elements in each shard,
+</span><span class="c1">// which likely takes a snapshot of `m`.
+</span><span class="c1">// It returns once the size of each buffered channel is determined,
+</span><span class="c1">// before all the channels are populated using goroutines.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">snapshot</span><span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="p">(</span><span class="nx">chans</span> <span class="p">[]</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">chans</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">,</span> <span class="nx">SHARD_COUNT</span><span class="p">)</span>
+	<span class="nx">wg</span> <span class="o">:=</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">{}</span>
+	<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">SHARD_COUNT</span><span class="p">)</span>
+	<span class="c1">// Foreach shard.
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">index</span><span class="p">,</span> <span class="nx">shard</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span> <span class="p">{</span>
+		<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">index</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">shard</span> <span class="o">*</span><span class="nx">ConcurrentMapShared</span><span class="p">)</span> <span class="p">{</span>
+			<span class="c1">// Foreach key, value pair.
+</span><span class="c1"></span>			<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+			<span class="nx">chans</span><span class="p">[</span><span class="nx">index</span><span class="p">]</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">))</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+			<span class="k">for</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">val</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span> <span class="p">{</span>
+				<span class="nx">chans</span><span class="p">[</span><span class="nx">index</span><span class="p">]</span> <span class="o">&lt;-</span> <span class="nx">Tuple</span><span class="p">{</span><span class="nx">key</span><span class="p">,</span> <span class="nx">val</span><span class="p">}</span>
+			<span class="p">}</span>
+			<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+			<span class="nb">close</span><span class="p">(</span><span class="nx">chans</span><span class="p">[</span><span class="nx">index</span><span class="p">])</span>
+		<span class="p">}(</span><span class="nx">index</span><span class="p">,</span> <span class="nx">shard</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+	<span class="k">return</span> <span class="nx">chans</span>
+<span class="p">}</span>
+
+<span class="c1">// fanIn reads elements from channels `chans` into channel `out`
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">fanIn</span><span class="p">(</span><span class="nx">chans</span> <span class="p">[]</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">,</span> <span class="nx">out</span> <span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">wg</span> <span class="o">:=</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">{}</span>
+	<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">chans</span><span class="p">))</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ch</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">chans</span> <span class="p">{</span>
+		<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">ch</span> <span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">)</span> <span class="p">{</span>
+			<span class="k">for</span> <span class="nx">t</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">ch</span> <span class="p">{</span>
+				<span class="nx">out</span> <span class="o">&lt;-</span> <span class="nx">t</span>
+			<span class="p">}</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+		<span class="p">}(</span><span class="nx">ch</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+	<span class="nb">close</span><span class="p">(</span><span class="nx">out</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">// Items returns all items as map[string]interface{}
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Items</span><span class="p">()</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+	<span class="nx">tmp</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{})</span>
+
+	<span class="c1">// Insert items to temporary map.
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">item</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span><span class="p">.</span><span class="nf">IterBuffered</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">tmp</span><span class="p">[</span><span class="nx">item</span><span class="p">.</span><span class="nx">Key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">item</span><span class="p">.</span><span class="nx">Val</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span> <span class="nx">tmp</span>
+<span class="p">}</span>
+
+<span class="c1">// Iterator callback,called for every key,value found in
+</span><span class="c1">// maps. RLock is held for all calls for a given shard
+</span><span class="c1">// therefore callback sess consistent view of a shard,
+</span><span class="c1">// but not across the shards
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">IterCb</span> <span class="kd">func</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span>
+
+<span class="c1">// Callback based iterator, cheapest way to read
+</span><span class="c1">// all elements in a map.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">IterCb</span><span class="p">(</span><span class="nx">fn</span> <span class="nx">IterCb</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="nx">idx</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span> <span class="p">{</span>
+		<span class="nx">shard</span> <span class="o">:=</span> <span class="p">(</span><span class="nx">m</span><span class="p">)[</span><span class="nx">idx</span><span class="p">]</span>
+		<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span> <span class="p">{</span>
+			<span class="nf">fn</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// Keys returns all keys as []string
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Keys</span><span class="p">()</span> <span class="p">[]</span><span class="kt">string</span> <span class="p">{</span>
+	<span class="nx">count</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">Count</span><span class="p">()</span>
+	<span class="nx">ch</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">count</span><span class="p">)</span>
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="c1">// Foreach shard.
+</span><span class="c1"></span>		<span class="nx">wg</span> <span class="o">:=</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">{}</span>
+		<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">SHARD_COUNT</span><span class="p">)</span>
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">shard</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span> <span class="p">{</span>
+			<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">shard</span> <span class="o">*</span><span class="nx">ConcurrentMapShared</span><span class="p">)</span> <span class="p">{</span>
+				<span class="c1">// Foreach key, value pair.
+</span><span class="c1"></span>				<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+				<span class="k">for</span> <span class="nx">key</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span> <span class="p">{</span>
+					<span class="nx">ch</span> <span class="o">&lt;-</span> <span class="nx">key</span>
+				<span class="p">}</span>
+				<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+				<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+			<span class="p">}(</span><span class="nx">shard</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+		<span class="nb">close</span><span class="p">(</span><span class="nx">ch</span><span class="p">)</span>
+	<span class="p">}()</span>
+
+	<span class="c1">// Generate keys
+</span><span class="c1"></span>	<span class="nx">keys</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">string</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">count</span><span class="p">)</span>
+	<span class="k">for</span> <span class="nx">k</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">ch</span> <span class="p">{</span>
+		<span class="nx">keys</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">keys</span><span class="p">,</span> <span class="nx">k</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">keys</span>
+<span class="p">}</span>
+
+<span class="c1">//Reviles ConcurrentMap &#34;private&#34; variables to json marshal.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">MarshalJSON</span><span class="p">()</span> <span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="c1">// Create a temporary map, which will hold all item spread across shards.
+</span><span class="c1"></span>	<span class="nx">tmp</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{})</span>
+
+	<span class="c1">// Insert items to temporary map.
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">item</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span><span class="p">.</span><span class="nf">IterBuffered</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">tmp</span><span class="p">[</span><span class="nx">item</span><span class="p">.</span><span class="nx">Key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">item</span><span class="p">.</span><span class="nx">Val</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">json</span><span class="p">.</span><span class="nf">Marshal</span><span class="p">(</span><span class="nx">tmp</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">fnv32</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">uint32</span> <span class="p">{</span>
+	<span class="nx">hash</span> <span class="o">:=</span> <span class="nb">uint32</span><span class="p">(</span><span class="mi">2166136261</span><span class="p">)</span>
+	<span class="kd">const</span> <span class="nx">prime32</span> <span class="p">=</span> <span class="nb">uint32</span><span class="p">(</span><span class="mi">16777619</span><span class="p">)</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">key</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">hash</span> <span class="o">*=</span> <span class="nx">prime32</span>
+		<span class="nx">hash</span> <span class="p">^=</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">key</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">hash</span>
+<span class="p">}</span>
+
+<span class="c1">// Concurrent map uses Interface{} as its value, therefor JSON Unmarshal
+</span><span class="c1">// will probably won&#39;t know which to type to unmarshal into, in such case
+</span><span class="c1">// we&#39;ll end up with a value of type map[string]interface{}, In most cases this isn&#39;t
+</span><span class="c1">// out value type, this is why we&#39;ve decided to remove this functionality.
+</span><span class="c1"></span>
+<span class="c1">// func (m *ConcurrentMap) UnmarshalJSON(b []byte) (err error) {
+</span><span class="c1">// 	// Reverse process of Marshal.
+</span><span class="c1"></span>
+<span class="c1">// 	tmp := make(map[string]interface{})
+</span><span class="c1"></span>
+<span class="c1">// 	// Unmarshal into a single map.
+</span><span class="c1">// 	if err := json.Unmarshal(b, &amp;tmp); err != nil {
+</span><span class="c1">// 		return nil
+</span><span class="c1">// 	}
+</span><span class="c1"></span>
+<span class="c1">// 	// foreach key,value pair in temporary map insert into our concurrent map.
+</span><span class="c1">// 	for key, val := range tmp {
+</span><span class="c1">// 		m.Set(key, val)
+</span><span class="c1">// 	}
+</span><span class="c1">// 	return nil
+</span><span class="c1">// }
+</span><span class="c1"></span>
+</code></pre></td></tr></table>
+</div>
+</div>
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-01-19
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go/">Go</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/grpc%E7%9A%84clientconn%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">GRPC的ClientConn源码剖析</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/go%E7%9A%84%E5%90%8C%E6%AD%A5%E5%8E%9F%E8%AF%AD%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <span class="next-text nav-default">Go的同步原语源码剖析</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
