@@ -53,7 +53,7 @@
 <meta itemprop="description" content="基本原语 Go 语言在 sync 包中提供了用于同步的一些基本原语，包括常见的 sync.Mutex、sync.RWMutex、sync.WaitGroup、">
 <meta itemprop="datePublished" content="2021-01-14T15:58:21&#43;00:00" />
 <meta itemprop="dateModified" content="2021-01-14T15:58:21&#43;00:00" />
-<meta itemprop="wordCount" content="26613">
+<meta itemprop="wordCount" content="31283">
 
 
 
@@ -167,8 +167,8 @@
         <div class="post-category">
             <a href="/categories/go/"> Go </a>
             </div>
-          <span class="more-meta"> 约 26613 字 </span>
-          <span class="more-meta"> 预计阅读 54 分钟 </span>
+          <span class="more-meta"> 约 31283 字 </span>
+          <span class="more-meta"> 预计阅读 63 分钟 </span>
         
       </div>
     </header>
@@ -3569,7 +3569,401 @@
 <li>sync.Pool 本身就是线程安全的,多个 goroutine 可以并发地调用它的方法存取对象;</li>
 <li>sync.Pool 不可在使用之后再复制使用。</li>
 </ol>
-<h4 id="数据结构-1">数据结构</h4>
+<h4 id="pool-1">Pool</h4>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210126160150.png" alt=""></p>
+<p>Pool 最重要的两个字段是 local 和 victim,因为它们两个主要用来存储空闲的元素。弄清楚这两个字段的处理逻辑,你就能完全掌握 sync.Pool 的实现了。下面我们来看看这两个字段的关系。</p>
+<p>每次垃圾回收的时候,Pool 会把 victim 中的对象移除,然后把 local 的数据给 victim, 这样的话,local 就会被清空,而 victim 就像一个垃圾分拣站,里面的东西可能会被当做垃圾丢弃了,但是里面有用的东西也可能被捡回来重新使用。</p>
+<p>victim 中的元素如果被 Get 取走,那么这个元素就很幸运,因为它又“活”过来了。但是,如果这个时候 Get 的并发不是很大,元素没有被 Get 取走,那么就会被移除掉,因为没有别人引用它的话,就会被垃圾回收掉。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// A Pool is a set of temporary objects that may be individually saved and
+</span><span class="c1">// retrieved.
+</span><span class="c1">//
+</span><span class="c1">// Any item stored in the Pool may be removed automatically at any time without
+</span><span class="c1">// notification. If the Pool holds the only reference when this happens, the
+</span><span class="c1">// item might be deallocated.
+</span><span class="c1">//
+</span><span class="c1">// A Pool is safe for use by multiple goroutines simultaneously.
+</span><span class="c1">//
+</span><span class="c1">// Pool&#39;s purpose is to cache allocated but unused items for later reuse,
+</span><span class="c1">// relieving pressure on the garbage collector. That is, it makes it easy to
+</span><span class="c1">// build efficient, thread-safe free lists. However, it is not suitable for all
+</span><span class="c1">// free lists.
+</span><span class="c1">//
+</span><span class="c1">// An appropriate use of a Pool is to manage a group of temporary items
+</span><span class="c1">// silently shared among and potentially reused by concurrent independent
+</span><span class="c1">// clients of a package. Pool provides a way to amortize allocation overhead
+</span><span class="c1">// across many clients.
+</span><span class="c1">//
+</span><span class="c1">// An example of good use of a Pool is in the fmt package, which maintains a
+</span><span class="c1">// dynamically-sized store of temporary output buffers. The store scales under
+</span><span class="c1">// load (when many goroutines are actively printing) and shrinks when
+</span><span class="c1">// quiescent.
+</span><span class="c1">//
+</span><span class="c1">// On the other hand, a free list maintained as part of a short-lived object is
+</span><span class="c1">// not a suitable use for a Pool, since the overhead does not amortize well in
+</span><span class="c1">// that scenario. It is more efficient to have such objects implement their own
+</span><span class="c1">// free list.
+</span><span class="c1">//
+</span><span class="c1">// A Pool must not be copied after first use.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Pool</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="c1">// 用来标记，当前的 struct 是不能够被 copy 的
+</span><span class="c1"></span>	<span class="nx">noCopy</span> <span class="nx">noCopy</span>
+	<span class="c1">// local字段存储的是一个poolLocal数组的指针，poolLocal数组大小是goroutine中P的数量，访问时，P的id对应poolLocal数组下标索引，所以Pool的最大个数runtime.GOMAXPROCS()
+</span><span class="c1"></span>	<span class="c1">// 通过这样的设计，每个P都有了自己的本地空间，多个 goroutine 使用同一个 Pool 时，减少了竞争，提升了性能。
+</span><span class="c1"></span>	<span class="c1">//有当前主要的空闲可用的元素都存放在 local 字段中,请求元素时也是优先从 local 字段中查找可用的元素。
+</span><span class="c1"></span>	<span class="nx">local</span>     <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// local fixed-size per-P pool, actual type is [P]poolLocal
+</span><span class="c1"></span>	<span class="c1">// 上面数组的大小，即 P 的个数
+</span><span class="c1"></span>	<span class="nx">localSize</span> <span class="kt">uintptr</span>        <span class="c1">// size of the local array
+</span><span class="c1"></span>	<span class="c1">// 同 local 和 localSize，只是在 gc 的过程中保留一次
+</span><span class="c1"></span>	<span class="nx">victim</span>     <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// local from previous cycle
+</span><span class="c1"></span>	<span class="nx">victimSize</span> <span class="kt">uintptr</span>        <span class="c1">// size of victims array
+</span><span class="c1"></span>
+	<span class="c1">// New optionally specifies a function to generate
+</span><span class="c1"></span>	<span class="c1">// a value when Get would otherwise return nil.
+</span><span class="c1"></span>	<span class="c1">// It may not be changed concurrently with calls to Get.
+</span><span class="c1"></span>	<span class="c1">// New函数是在创建pool的时候设置的，当pool没有缓存对象的时候，会调用New方法生成一个新的对象
+</span><span class="c1"></span>	<span class="nx">New</span> <span class="kd">func</span><span class="p">()</span> <span class="kd">interface</span><span class="p">{}</span>
+<span class="p">}</span>
+
+<span class="c1">// Local per-P Pool appendix.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">poolLocalInternal</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="c1">// private,代表一个缓存的元素,而且只能由相应的一个 P 存取。因为一个 P 同时只能执行一个 goroutine,所以不会有并发的问题。
+</span><span class="c1"></span>	<span class="nx">private</span> <span class="kd">interface</span><span class="p">{}</span> <span class="c1">// Can be used only by the respective P.
+</span><span class="c1"></span>	<span class="c1">// shared,可以由任意的 P 访问,但是只有本地的 P 才能 pushHead/popHead,其它 P 可以 popTail,相当于只有一个本地的 P 作为生产者(Producer),多个 P 作为消费者(Consumer),它是使用一个 local-free 的 queue 列表实现的。
+</span><span class="c1"></span>	<span class="nx">shared</span>  <span class="nx">poolChain</span>   <span class="c1">// Local P can pushHead/popHead; any P can popTail.
+</span><span class="c1"></span><span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">poolLocal</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">poolLocalInternal</span>
+
+	<span class="c1">// Prevents false sharing on widespread platforms with
+</span><span class="c1"></span>	<span class="c1">// 128 mod (cache line size) = 0 .
+</span><span class="c1"></span>	<span class="c1">// poolLocal里面有一个pad数组用来占位用，防止在 cache line 上分配多个 poolLocalInternal从而造成false sharing
+</span><span class="c1"></span>	<span class="nx">pad</span> <span class="p">[</span><span class="mi">128</span> <span class="o">-</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">poolLocalInternal</span><span class="p">{})</span><span class="o">%</span><span class="mi">128</span><span class="p">]</span><span class="kt">byte</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="poolchain">PoolChain</h4>
+<p>poolChain是一个双端队列，里面的head和tail分别指向队列头尾；poolDequeue里面存放真正的数据，是一个单生产者、多消费者的固定大小的无锁的环状队列，headTail是环状队列的首位位置的指针，可以通过位运算解析出首尾的位置.</p>
+<p>这个双端队列的模型大概是这个样子：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210126155840.png" alt=""></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// poolChain is a dynamically-sized version of poolDequeue.
+</span><span class="c1">//
+</span><span class="c1">// This is implemented as a doubly-linked list queue of poolDequeues
+</span><span class="c1">// where each dequeue is double the size of the previous one. Once a
+</span><span class="c1">// dequeue fills up, this allocates a new one and only ever pushes to
+</span><span class="c1">// the latest dequeue. Pops happen from the other end of the list and
+</span><span class="c1">// once a dequeue is exhausted, it gets removed from the list.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">poolChain</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="c1">// head is the poolDequeue to push to. This is only accessed
+</span><span class="c1"></span>	<span class="c1">// by the producer, so doesn&#39;t need to be synchronized.
+</span><span class="c1"></span>	<span class="nx">head</span> <span class="o">*</span><span class="nx">poolChainElt</span>
+
+	<span class="c1">// tail is the poolDequeue to popTail from. This is accessed
+</span><span class="c1"></span>	<span class="c1">// by consumers, so reads and writes must be atomic.
+</span><span class="c1"></span>	<span class="nx">tail</span> <span class="o">*</span><span class="nx">poolChainElt</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">poolChainElt</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">poolDequeue</span>
+
+	<span class="c1">// next and prev link to the adjacent poolChainElts in this
+</span><span class="c1"></span>	<span class="c1">// poolChain.
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// next is written atomically by the producer and read
+</span><span class="c1"></span>	<span class="c1">// atomically by the consumer. It only transitions from nil to
+</span><span class="c1"></span>	<span class="c1">// non-nil.
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// prev is written atomically by the consumer and read
+</span><span class="c1"></span>	<span class="c1">// atomically by the producer. It only transitions from
+</span><span class="c1"></span>	<span class="c1">// non-nil to nil.
+</span><span class="c1"></span>	<span class="nx">next</span><span class="p">,</span> <span class="nx">prev</span> <span class="o">*</span><span class="nx">poolChainElt</span>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
+</span><span class="lnt">83
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">poolChain</span><span class="p">)</span> <span class="nf">pushHead</span><span class="p">(</span><span class="nx">val</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="nx">d</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">head</span>
+	<span class="k">if</span> <span class="nx">d</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// Initialize the chain.
+</span><span class="c1"></span>		<span class="kd">const</span> <span class="nx">initSize</span> <span class="p">=</span> <span class="mi">8</span> <span class="c1">// Must be a power of 2
+</span><span class="c1"></span>		<span class="nx">d</span> <span class="p">=</span> <span class="nb">new</span><span class="p">(</span><span class="nx">poolChainElt</span><span class="p">)</span>
+		<span class="nx">d</span><span class="p">.</span><span class="nx">vals</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">eface</span><span class="p">,</span> <span class="nx">initSize</span><span class="p">)</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nx">head</span> <span class="p">=</span> <span class="nx">d</span>
+		<span class="nf">storePoolChainElt</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">tail</span><span class="p">,</span> <span class="nx">d</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="k">if</span> <span class="nx">d</span><span class="p">.</span><span class="nf">pushHead</span><span class="p">(</span><span class="nx">val</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+
+	<span class="c1">// The current dequeue is full. Allocate a new one of twice
+</span><span class="c1"></span>	<span class="c1">// the size.
+</span><span class="c1"></span>	<span class="nx">newSize</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">vals</span><span class="p">)</span> <span class="o">*</span> <span class="mi">2</span>
+	<span class="k">if</span> <span class="nx">newSize</span> <span class="o">&gt;=</span> <span class="nx">dequeueLimit</span> <span class="p">{</span>
+		<span class="c1">// Can&#39;t make it any bigger.
+</span><span class="c1"></span>		<span class="nx">newSize</span> <span class="p">=</span> <span class="nx">dequeueLimit</span>
+	<span class="p">}</span>
+
+	<span class="nx">d2</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">poolChainElt</span><span class="p">{</span><span class="nx">prev</span><span class="p">:</span> <span class="nx">d</span><span class="p">}</span>
+	<span class="nx">d2</span><span class="p">.</span><span class="nx">vals</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">eface</span><span class="p">,</span> <span class="nx">newSize</span><span class="p">)</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">head</span> <span class="p">=</span> <span class="nx">d2</span>
+	<span class="nf">storePoolChainElt</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">d</span><span class="p">.</span><span class="nx">next</span><span class="p">,</span> <span class="nx">d2</span><span class="p">)</span>
+	<span class="nx">d2</span><span class="p">.</span><span class="nf">pushHead</span><span class="p">(</span><span class="nx">val</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">poolChain</span><span class="p">)</span> <span class="nf">popHead</span><span class="p">()</span> <span class="p">(</span><span class="kd">interface</span><span class="p">{},</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">d</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">head</span>
+	<span class="k">for</span> <span class="nx">d</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nf">popHead</span><span class="p">();</span> <span class="nx">ok</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">ok</span>
+		<span class="p">}</span>
+		<span class="c1">// There may still be unconsumed elements in the
+</span><span class="c1"></span>		<span class="c1">// previous dequeue, so try backing up.
+</span><span class="c1"></span>		<span class="nx">d</span> <span class="p">=</span> <span class="nf">loadPoolChainElt</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">d</span><span class="p">.</span><span class="nx">prev</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">poolChain</span><span class="p">)</span> <span class="nf">popTail</span><span class="p">()</span> <span class="p">(</span><span class="kd">interface</span><span class="p">{},</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">d</span> <span class="o">:=</span> <span class="nf">loadPoolChainElt</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">tail</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">d</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
+	<span class="p">}</span>
+
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="c1">// It&#39;s important that we load the next pointer
+</span><span class="c1"></span>		<span class="c1">// *before* popping the tail. In general, d may be
+</span><span class="c1"></span>		<span class="c1">// transiently empty, but if next is non-nil before
+</span><span class="c1"></span>		<span class="c1">// the pop and the pop fails, then d is permanently
+</span><span class="c1"></span>		<span class="c1">// empty, which is the only condition under which it&#39;s
+</span><span class="c1"></span>		<span class="c1">// safe to drop d from the chain.
+</span><span class="c1"></span>		<span class="nx">d2</span> <span class="o">:=</span> <span class="nf">loadPoolChainElt</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">d</span><span class="p">.</span><span class="nx">next</span><span class="p">)</span>
+
+		<span class="k">if</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nf">popTail</span><span class="p">();</span> <span class="nx">ok</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">ok</span>
+		<span class="p">}</span>
+
+		<span class="k">if</span> <span class="nx">d2</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="c1">// This is the only dequeue. It&#39;s empty right
+</span><span class="c1"></span>			<span class="c1">// now, but could be pushed to in the future.
+</span><span class="c1"></span>			<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
+		<span class="p">}</span>
+
+		<span class="c1">// The tail of the chain has been drained, so move on
+</span><span class="c1"></span>		<span class="c1">// to the next dequeue. Try to drop it from the chain
+</span><span class="c1"></span>		<span class="c1">// so the next pop doesn&#39;t have to look at the empty
+</span><span class="c1"></span>		<span class="c1">// dequeue again.
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapPointer</span><span class="p">((</span><span class="o">*</span><span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">tail</span><span class="p">)),</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">d</span><span class="p">),</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">d2</span><span class="p">))</span> <span class="p">{</span>
+			<span class="c1">// We won the race. Clear the prev pointer so
+</span><span class="c1"></span>			<span class="c1">// the garbage collector can collect the empty
+</span><span class="c1"></span>			<span class="c1">// dequeue and so popHead doesn&#39;t back up
+</span><span class="c1"></span>			<span class="c1">// further than necessary.
+</span><span class="c1"></span>			<span class="nf">storePoolChainElt</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">d2</span><span class="p">.</span><span class="nx">prev</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">d</span> <span class="p">=</span> <span class="nx">d2</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="pooldequeue">poolDequeue</h4>
+<p>poolDequeue 是一个无锁、固定大小的单生产端多消费端的环形队列，单一 producer 可以在头部 push 和 pop(可能和传统队列头部只能 push 的定义不同)，多 consumer 可以在尾部 pop.</p>
+<p>poolDequeue里面的环状队列大小是固定的，当环状队列满了的时候会创建一个size是原来两倍大小的环状队列。最大扩展到 dequeueLimit = (1 &laquo; 32) / 4 = (1 &laquo; 30)，之后就不会扩展了.</p>
+<p>为什么vals长度必须是2的幂 ?这是因为go的内存管理策略是将内存分为2的幂大小的链表，申请2的幂大小的内存可以有效减小分配内存的开销</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt"> 1
@@ -3632,63 +4026,618 @@
 </span><span class="lnt">58
 </span></code></pre></td>
 <td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// A Pool is a set of temporary objects that may be individually saved and
-</span><span class="c1">// retrieved.
+<pre class="chroma"><code class="language-go" data-lang="go">
+<span class="c1">// poolDequeue is a lock-free fixed-size single-producer,
+</span><span class="c1">// multi-consumer queue. The single producer can both push and pop
+</span><span class="c1">// from the head, and consumers can pop from the tail.
 </span><span class="c1">//
-</span><span class="c1">// Any item stored in the Pool may be removed automatically at any time without
-</span><span class="c1">// notification. If the Pool holds the only reference when this happens, the
-</span><span class="c1">// item might be deallocated.
-</span><span class="c1">//
-</span><span class="c1">// A Pool is safe for use by multiple goroutines simultaneously.
-</span><span class="c1">//
-</span><span class="c1">// Pool&#39;s purpose is to cache allocated but unused items for later reuse,
-</span><span class="c1">// relieving pressure on the garbage collector. That is, it makes it easy to
-</span><span class="c1">// build efficient, thread-safe free lists. However, it is not suitable for all
-</span><span class="c1">// free lists.
-</span><span class="c1">//
-</span><span class="c1">// An appropriate use of a Pool is to manage a group of temporary items
-</span><span class="c1">// silently shared among and potentially reused by concurrent independent
-</span><span class="c1">// clients of a package. Pool provides a way to amortize allocation overhead
-</span><span class="c1">// across many clients.
-</span><span class="c1">//
-</span><span class="c1">// An example of good use of a Pool is in the fmt package, which maintains a
-</span><span class="c1">// dynamically-sized store of temporary output buffers. The store scales under
-</span><span class="c1">// load (when many goroutines are actively printing) and shrinks when
-</span><span class="c1">// quiescent.
-</span><span class="c1">//
-</span><span class="c1">// On the other hand, a free list maintained as part of a short-lived object is
-</span><span class="c1">// not a suitable use for a Pool, since the overhead does not amortize well in
-</span><span class="c1">// that scenario. It is more efficient to have such objects implement their own
-</span><span class="c1">// free list.
-</span><span class="c1">//
-</span><span class="c1">// A Pool must not be copied after first use.
-</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Pool</span> <span class="kd">struct</span> <span class="p">{</span>
-	<span class="nx">noCopy</span> <span class="nx">noCopy</span>
+</span><span class="c1">// It has the added feature that it nils out unused slots to avoid
+</span><span class="c1">// unnecessary retention of objects. This is important for sync.Pool,
+</span><span class="c1">// but not typically a property considered in the literature.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">poolDequeue</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="c1">// headTail packs together a 32-bit head index and a 32-bit
+</span><span class="c1"></span>	<span class="c1">// tail index. Both are indexes into vals modulo len(vals)-1.
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// tail = index of oldest data in queue
+</span><span class="c1"></span>	<span class="c1">// head = index of next slot to fill
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// Slots in the range [tail, head) are owned by consumers.
+</span><span class="c1"></span>	<span class="c1">// A consumer continues to own a slot outside this range until
+</span><span class="c1"></span>	<span class="c1">// it nils the slot, at which point ownership passes to the
+</span><span class="c1"></span>	<span class="c1">// producer.
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// The head index is stored in the most-significant bits so
+</span><span class="c1"></span>	<span class="c1">// that we can atomically add to it and the overflow is
+</span><span class="c1"></span>	<span class="c1">// harmless.
+</span><span class="c1"></span>	<span class="nx">headTail</span> <span class="kt">uint64</span>
 
-	<span class="nx">local</span>     <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// local fixed-size per-P pool, actual type is [P]poolLocal
-</span><span class="c1"></span>	<span class="nx">localSize</span> <span class="kt">uintptr</span>        <span class="c1">// size of the local array
-</span><span class="c1"></span>
-	<span class="nx">victim</span>     <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// local from previous cycle
-</span><span class="c1"></span>	<span class="nx">victimSize</span> <span class="kt">uintptr</span>        <span class="c1">// size of victims array
-</span><span class="c1"></span>
-	<span class="c1">// New optionally specifies a function to generate
-</span><span class="c1"></span>	<span class="c1">// a value when Get would otherwise return nil.
-</span><span class="c1"></span>	<span class="c1">// It may not be changed concurrently with calls to Get.
-</span><span class="c1"></span>	<span class="nx">New</span> <span class="kd">func</span><span class="p">()</span> <span class="kd">interface</span><span class="p">{}</span>
+	<span class="c1">// vals is a ring buffer of interface{} values stored in this
+</span><span class="c1"></span>	<span class="c1">// dequeue. The size of this must be a power of 2.
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// vals[i].typ is nil if the slot is empty and non-nil
+</span><span class="c1"></span>	<span class="c1">// otherwise. A slot is still in use until *both* the tail
+</span><span class="c1"></span>	<span class="c1">// index has moved beyond it and typ has been set to nil. This
+</span><span class="c1"></span>	<span class="c1">// is set to nil atomically by the consumer and read
+</span><span class="c1"></span>	<span class="c1">// atomically by the producer.
+</span><span class="c1"></span>	<span class="nx">vals</span> <span class="p">[]</span><span class="nx">eface</span>
+<span class="p">}</span>
+<span class="c1">// 存储元素的结构体，类型指针和值指针
+</span><span class="c1">// Pool 底层用 eface 来存储单个 Object, 包括 typ 指针: Object 的类型，val 指针: Object 的值
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">eface</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">typ</span><span class="p">,</span> <span class="nx">val</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>
 <span class="p">}</span>
 
-<span class="c1">// Local per-P Pool appendix.
-</span><span class="c1"></span><span class="kd">type</span> <span class="nx">poolLocalInternal</span> <span class="kd">struct</span> <span class="p">{</span>
-	<span class="nx">private</span> <span class="kd">interface</span><span class="p">{}</span> <span class="c1">// Can be used only by the respective P.
-</span><span class="c1"></span>	<span class="nx">shared</span>  <span class="nx">poolChain</span>   <span class="c1">// Local P can pushHead/popHead; any P can popTail.
-</span><span class="c1"></span><span class="p">}</span>
 
-<span class="kd">type</span> <span class="nx">poolLocal</span> <span class="kd">struct</span> <span class="p">{</span>
-	<span class="nx">poolLocalInternal</span>
 
-	<span class="c1">// Prevents false sharing on widespread platforms with
-</span><span class="c1"></span>	<span class="c1">// 128 mod (cache line size) = 0 .
-</span><span class="c1"></span>	<span class="nx">pad</span> <span class="p">[</span><span class="mi">128</span> <span class="o">-</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">poolLocalInternal</span><span class="p">{})</span><span class="o">%</span><span class="mi">128</span><span class="p">]</span><span class="kt">byte</span>
+<span class="c1">// dequeueLimit is the maximum size of a poolDequeue.
+</span><span class="c1">//
+</span><span class="c1">// This must be at most (1&lt;&lt;dequeueBits)/2 because detecting fullness
+</span><span class="c1">// depends on wrapping around the ring buffer without wrapping around
+</span><span class="c1">// the index. We divide by 4 so this fits in an int on 32-bit.
+</span><span class="c1"></span>
+<span class="c1">// 为什么dequeueLimit是(1 &lt;&lt; 32) / 4 = 1 &lt;&lt; 30 ?
+</span><span class="c1">// dequeueLimit 必须是2的幂(上边解释过)
+</span><span class="c1">// head和tail都是32位，最大是1 &lt;&lt; 31，如果都用的话，head和tail就是无符号整型，无符号整型使用的时候会有很多上溢的错误，这类错误是不容易检测的，所以相比之下还不如用31位有符号整型，有错就报出来
+</span><span class="c1"></span><span class="kd">const</span> <span class="nx">dequeueLimit</span> <span class="p">=</span> <span class="p">(</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="nx">dequeueBits</span><span class="p">)</span> <span class="o">/</span> <span class="mi">4</span>
+
+<span class="c1">// dequeueNil is used in poolDeqeue to represent interface{}(nil).
+</span><span class="c1">// Since we use nil to represent empty slots, we need a sentinel value
+</span><span class="c1">// to represent nil.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">dequeueNil</span> <span class="o">*</span><span class="kd">struct</span><span class="p">{}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>headTail:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">[hhhhhhhh</span> <span class="n">hhhhhhhh</span> <span class="n">hhhhhhhh</span> <span class="n">hhhhhhhh</span> <span class="n">tttttttt</span> <span class="n">tttttttt</span> <span class="n">tttttttt</span> <span class="n">tttttttt]</span> 
+<span class="m">1</span><span class="n">. headTail表示下标</span>，高<span class="m">32</span>位表示头下标，低<span class="m">32</span>位表示尾下标，<span class="n">poolDequeue定义了</span>，<span class="n">head</span> <span class="n">tail的pack和unpack函数方便转化</span>，
+实际用的时候都会<span class="nf">mod </span><span class="p">(</span> <span class="nf">len</span><span class="p">(</span><span class="n">vals</span><span class="p">)</span> <span class="o">-</span> <span class="m">1</span> <span class="p">)</span> 来防止溢出
+<span class="m">2</span><span class="n">. head和tail永远只用32位表示</span>，溢出后会从<span class="m">0</span>开始，这也满足循环队列的设计
+<span class="m">3</span><span class="n">. 队列为空的条件</span>  <span class="n">tail</span> <span class="o">==</span> <span class="n">head</span>
+<span class="m">4</span><span class="nf">. 队列满的条件    </span><span class="p">(</span><span class="n">tail</span><span class="o">+</span><span class="nf">uint32</span><span class="p">(</span><span class="nf">len</span><span class="p">(</span><span class="n">d.vals</span><span class="p">)))</span><span class="o">&amp;</span><span class="p">(</span><span class="m">1</span><span class="o">&lt;&lt;</span><span class="n">dequeueBits</span><span class="m">-1</span><span class="p">)</span> <span class="o">==</span> <span class="n">head</span> <span class="nf">tail加上队列长度和head相等</span><span class="p">(</span>实际上就是队列已有的空间都有值了<span class="p">,</span>满了<span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="nx">dequeueBits</span> <span class="p">=</span> <span class="mi">32</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">d</span> <span class="o">*</span><span class="nx">poolDequeue</span><span class="p">)</span> <span class="nf">unpack</span><span class="p">(</span><span class="nx">ptrs</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">(</span><span class="nx">head</span><span class="p">,</span> <span class="nx">tail</span> <span class="kt">uint32</span><span class="p">)</span> <span class="p">{</span>
+	<span class="kd">const</span> <span class="nx">mask</span> <span class="p">=</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="nx">dequeueBits</span> <span class="o">-</span> <span class="mi">1</span>
+	<span class="nx">head</span> <span class="p">=</span> <span class="nb">uint32</span><span class="p">((</span><span class="nx">ptrs</span> <span class="o">&gt;&gt;</span> <span class="nx">dequeueBits</span><span class="p">)</span> <span class="o">&amp;</span> <span class="nx">mask</span><span class="p">)</span>
+	<span class="nx">tail</span> <span class="p">=</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">ptrs</span> <span class="o">&amp;</span> <span class="nx">mask</span><span class="p">)</span>
+	<span class="k">return</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">d</span> <span class="o">*</span><span class="nx">poolDequeue</span><span class="p">)</span> <span class="nf">pack</span><span class="p">(</span><span class="nx">head</span><span class="p">,</span> <span class="nx">tail</span> <span class="kt">uint32</span><span class="p">)</span> <span class="kt">uint64</span> <span class="p">{</span>
+	<span class="kd">const</span> <span class="nx">mask</span> <span class="p">=</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="nx">dequeueBits</span> <span class="o">-</span> <span class="mi">1</span>
+	<span class="k">return</span> <span class="p">(</span><span class="nb">uint64</span><span class="p">(</span><span class="nx">head</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="nx">dequeueBits</span><span class="p">)</span> <span class="p">|</span>
+		<span class="nb">uint64</span><span class="p">(</span><span class="nx">tail</span><span class="o">&amp;</span><span class="nx">mask</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>vals:</p>
+<ol start="2">
+<li></li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span><span class="lnt">103
+</span><span class="lnt">104
+</span><span class="lnt">105
+</span><span class="lnt">106
+</span><span class="lnt">107
+</span><span class="lnt">108
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// pushHead adds val at the head of the queue. It returns false if the
+</span><span class="c1">// queue is full. It must only be called by a single producer.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">d</span> <span class="o">*</span><span class="nx">poolDequeue</span><span class="p">)</span> <span class="nf">pushHead</span><span class="p">(</span><span class="nx">val</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="nx">ptrs</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">d</span><span class="p">.</span><span class="nx">headTail</span><span class="p">)</span>
+	<span class="nx">head</span><span class="p">,</span> <span class="nx">tail</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nf">unpack</span><span class="p">(</span><span class="nx">ptrs</span><span class="p">)</span>
+	<span class="k">if</span> <span class="p">(</span><span class="nx">tail</span><span class="o">+</span><span class="nb">uint32</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">vals</span><span class="p">)))</span><span class="o">&amp;</span><span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="nx">dequeueBits</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="o">==</span> <span class="nx">head</span> <span class="p">{</span>
+		<span class="c1">// Queue is full.
+</span><span class="c1"></span>		<span class="k">return</span> <span class="kc">false</span>
+	<span class="p">}</span>
+	<span class="nx">slot</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">d</span><span class="p">.</span><span class="nx">vals</span><span class="p">[</span><span class="nx">head</span><span class="o">&amp;</span><span class="nb">uint32</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">vals</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">)]</span>
+
+	<span class="c1">// Check if the head slot has been released by popTail.
+</span><span class="c1"></span>	<span class="nx">typ</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">slot</span><span class="p">.</span><span class="nx">typ</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">typ</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// Another goroutine is still cleaning up the tail, so
+</span><span class="c1"></span>		<span class="c1">// the queue is actually still full.
+</span><span class="c1"></span>		<span class="k">return</span> <span class="kc">false</span>
+	<span class="p">}</span>
+
+	<span class="c1">// The head slot is free, so we own it.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">val</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">val</span> <span class="p">=</span> <span class="nf">dequeueNil</span><span class="p">(</span><span class="kc">nil</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kd">interface</span><span class="p">{})(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">slot</span><span class="p">))</span> <span class="p">=</span> <span class="nx">val</span>
+
+	<span class="c1">// Increment head. This passes ownership of slot to popTail
+</span><span class="c1"></span>	<span class="c1">// and acts as a store barrier for writing the slot.
+</span><span class="c1"></span>	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">d</span><span class="p">.</span><span class="nx">headTail</span><span class="p">,</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="nx">dequeueBits</span><span class="p">)</span>
+	<span class="k">return</span> <span class="kc">true</span>
+<span class="p">}</span>
+
+<span class="c1">// popHead removes and returns the element at the head of the queue.
+</span><span class="c1">// It returns false if the queue is empty. It must only be called by a
+</span><span class="c1">// single producer.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">d</span> <span class="o">*</span><span class="nx">poolDequeue</span><span class="p">)</span> <span class="nf">popHead</span><span class="p">()</span> <span class="p">(</span><span class="kd">interface</span><span class="p">{},</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">slot</span> <span class="o">*</span><span class="nx">eface</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">ptrs</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">d</span><span class="p">.</span><span class="nx">headTail</span><span class="p">)</span>
+		<span class="nx">head</span><span class="p">,</span> <span class="nx">tail</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nf">unpack</span><span class="p">(</span><span class="nx">ptrs</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">tail</span> <span class="o">==</span> <span class="nx">head</span> <span class="p">{</span>
+			<span class="c1">// Queue is empty.
+</span><span class="c1"></span>			<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
+		<span class="p">}</span>
+
+		<span class="c1">// Confirm tail and decrement head. We do this before
+</span><span class="c1"></span>		<span class="c1">// reading the value to take back ownership of this
+</span><span class="c1"></span>		<span class="c1">// slot.
+</span><span class="c1"></span>		<span class="nx">head</span><span class="o">--</span>
+		<span class="nx">ptrs2</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nf">pack</span><span class="p">(</span><span class="nx">head</span><span class="p">,</span> <span class="nx">tail</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">d</span><span class="p">.</span><span class="nx">headTail</span><span class="p">,</span> <span class="nx">ptrs</span><span class="p">,</span> <span class="nx">ptrs2</span><span class="p">)</span> <span class="p">{</span>
+			<span class="c1">// We successfully took back slot.
+</span><span class="c1"></span>			<span class="nx">slot</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">d</span><span class="p">.</span><span class="nx">vals</span><span class="p">[</span><span class="nx">head</span><span class="o">&amp;</span><span class="nb">uint32</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">vals</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">)]</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="nx">val</span> <span class="o">:=</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kd">interface</span><span class="p">{})(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">slot</span><span class="p">))</span>
+	<span class="k">if</span> <span class="nx">val</span> <span class="o">==</span> <span class="nf">dequeueNil</span><span class="p">(</span><span class="kc">nil</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">val</span> <span class="p">=</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+	<span class="c1">// Zero the slot. Unlike popTail, this isn&#39;t racing with
+</span><span class="c1"></span>	<span class="c1">// pushHead, so we don&#39;t need to be careful here.
+</span><span class="c1"></span>	<span class="o">*</span><span class="nx">slot</span> <span class="p">=</span> <span class="nx">eface</span><span class="p">{}</span>
+	<span class="k">return</span> <span class="nx">val</span><span class="p">,</span> <span class="kc">true</span>
+<span class="p">}</span>
+
+<span class="c1">// popTail removes and returns the element at the tail of the queue.
+</span><span class="c1">// It returns false if the queue is empty. It may be called by any
+</span><span class="c1">// number of consumers.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">d</span> <span class="o">*</span><span class="nx">poolDequeue</span><span class="p">)</span> <span class="nf">popTail</span><span class="p">()</span> <span class="p">(</span><span class="kd">interface</span><span class="p">{},</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">slot</span> <span class="o">*</span><span class="nx">eface</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">ptrs</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">d</span><span class="p">.</span><span class="nx">headTail</span><span class="p">)</span>
+		<span class="nx">head</span><span class="p">,</span> <span class="nx">tail</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nf">unpack</span><span class="p">(</span><span class="nx">ptrs</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">tail</span> <span class="o">==</span> <span class="nx">head</span> <span class="p">{</span>
+			<span class="c1">// Queue is empty.
+</span><span class="c1"></span>			<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
+		<span class="p">}</span>
+
+		<span class="c1">// Confirm head and tail (for our speculative check
+</span><span class="c1"></span>		<span class="c1">// above) and increment tail. If this succeeds, then
+</span><span class="c1"></span>		<span class="c1">// we own the slot at tail.
+</span><span class="c1"></span>		<span class="nx">ptrs2</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nf">pack</span><span class="p">(</span><span class="nx">head</span><span class="p">,</span> <span class="nx">tail</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">d</span><span class="p">.</span><span class="nx">headTail</span><span class="p">,</span> <span class="nx">ptrs</span><span class="p">,</span> <span class="nx">ptrs2</span><span class="p">)</span> <span class="p">{</span>
+			<span class="c1">// Success.
+</span><span class="c1"></span>			<span class="nx">slot</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">d</span><span class="p">.</span><span class="nx">vals</span><span class="p">[</span><span class="nx">tail</span><span class="o">&amp;</span><span class="nb">uint32</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">vals</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">)]</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="c1">// We now own slot.
+</span><span class="c1"></span>	<span class="nx">val</span> <span class="o">:=</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kd">interface</span><span class="p">{})(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">slot</span><span class="p">))</span>
+	<span class="k">if</span> <span class="nx">val</span> <span class="o">==</span> <span class="nf">dequeueNil</span><span class="p">(</span><span class="kc">nil</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">val</span> <span class="p">=</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Tell pushHead that we&#39;re done with this slot. Zeroing the
+</span><span class="c1"></span>	<span class="c1">// slot is also important so we don&#39;t leave behind references
+</span><span class="c1"></span>	<span class="c1">// that could keep this object live longer than necessary.
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// We write to val first and then publish that we&#39;re done with
+</span><span class="c1"></span>	<span class="c1">// this slot by atomically writing to typ.
+</span><span class="c1"></span>	<span class="nx">slot</span><span class="p">.</span><span class="nx">val</span> <span class="p">=</span> <span class="kc">nil</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">StorePointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">slot</span><span class="p">.</span><span class="nx">typ</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+	<span class="c1">// At this point pushHead owns the slot.
+</span><span class="c1"></span>
+	<span class="k">return</span> <span class="nx">val</span><span class="p">,</span> <span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="get-方法">Get 方法</h4>
+<p>我们来看看 Get 方法的具体实现原理。</p>
+<p>首先,从本地的 private 字段中获取可用元素,因为没有锁, 获取元素的过程会非常快,如果没有获取到,就尝试从本地的 shared 获取一个,如果还没有,会使用 getSlow 方法去其它的 shared 中“偷”一个。最后,如果没有获取到,就尝试使用 New 函数创建一个新的。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Get selects an arbitrary item from the Pool, removes it from the
+</span><span class="c1">// Pool, and returns it to the caller.
+</span><span class="c1">// Get may choose to ignore the pool and treat it as empty.
+</span><span class="c1">// Callers should not assume any relation between values passed to Put and
+</span><span class="c1">// the values returned by Get.
+</span><span class="c1">//
+</span><span class="c1">// If Get would otherwise return nil and p.New is non-nil, Get returns
+</span><span class="c1">// the result of calling p.New.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Pool</span><span class="p">)</span> <span class="nf">Get</span><span class="p">()</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">race</span><span class="p">.</span><span class="nx">Enabled</span> <span class="p">{</span>
+		<span class="nx">race</span><span class="p">.</span><span class="nf">Disable</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="c1">// 把当前goroutine固定在当前的P上
+</span><span class="c1"></span>	<span class="nx">l</span><span class="p">,</span> <span class="nx">pid</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">pin</span><span class="p">()</span>
+	<span class="c1">// 优先从local的private字段取,快速
+</span><span class="c1"></span>	<span class="nx">x</span> <span class="o">:=</span> <span class="nx">l</span><span class="p">.</span><span class="nx">private</span>
+	<span class="nx">l</span><span class="p">.</span><span class="nx">private</span> <span class="p">=</span> <span class="kc">nil</span>
+	<span class="k">if</span> <span class="nx">x</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// Try to pop the head of the local shard. We prefer
+</span><span class="c1"></span>		<span class="c1">// the head over the tail for temporal locality of
+</span><span class="c1"></span>		<span class="c1">// reuse.
+</span><span class="c1"></span>		<span class="c1">// 从当前的local.shared弹出一个,注意是从head读取并移除
+</span><span class="c1"></span>		<span class="nx">x</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">l</span><span class="p">.</span><span class="nx">shared</span><span class="p">.</span><span class="nf">popHead</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">x</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="c1">// 如果没有,则去偷一个
+</span><span class="c1"></span>			<span class="nx">x</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">getSlow</span><span class="p">(</span><span class="nx">pid</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="nf">runtime_procUnpin</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">race</span><span class="p">.</span><span class="nx">Enabled</span> <span class="p">{</span>
+		<span class="nx">race</span><span class="p">.</span><span class="nf">Enable</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">x</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">race</span><span class="p">.</span><span class="nf">Acquire</span><span class="p">(</span><span class="nf">poolRaceAddr</span><span class="p">(</span><span class="nx">x</span><span class="p">))</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="c1">// 如果没有获取到,尝试使用New函数生成一个新的
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">x</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">p</span><span class="p">.</span><span class="nx">New</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">x</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">New</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">x</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这里的重点是 getSlow 方法,我们来分析下。看名字也就知道了,它的耗时可能比较长。</p>
+<p>它首先要遍历所有的 local,尝试从它们的 shared 弹出一个元素。如果还没找到一个,那么,就开始对 victim 下手了。</p>
+<p>在 vintim 中查询可用元素的逻辑还是一样的,先从对应的 victim 的 private 查找,如果查不到,就再从其它 victim 的 shared 中查找。</p>
+<p>下面的代码是 getSlow 方法的主要逻辑</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Pool</span><span class="p">)</span> <span class="nf">getSlow</span><span class="p">(</span><span class="nx">pid</span> <span class="kt">int</span><span class="p">)</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+	<span class="c1">// See the comment in pin regarding ordering of the loads.
+</span><span class="c1"></span>	<span class="nx">size</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadUintptr</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">localSize</span><span class="p">)</span> <span class="c1">// load-acquire
+</span><span class="c1"></span>	<span class="nx">locals</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">local</span>                        <span class="c1">// load-consume
+</span><span class="c1"></span>	<span class="c1">// Try to steal one element from other procs.
+</span><span class="c1"></span>	<span class="c1">// 从其它proc中尝试偷取一个元素
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">int</span><span class="p">(</span><span class="nx">size</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">l</span> <span class="o">:=</span> <span class="nf">indexLocal</span><span class="p">(</span><span class="nx">locals</span><span class="p">,</span> <span class="p">(</span><span class="nx">pid</span><span class="o">+</span><span class="nx">i</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">%</span><span class="nb">int</span><span class="p">(</span><span class="nx">size</span><span class="p">))</span>
+		<span class="k">if</span> <span class="nx">x</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">l</span><span class="p">.</span><span class="nx">shared</span><span class="p">.</span><span class="nf">popTail</span><span class="p">();</span> <span class="nx">x</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">x</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Try the victim cache. We do this after attempting to steal
+</span><span class="c1"></span>	<span class="c1">// from all primary caches because we want objects in the
+</span><span class="c1"></span>	<span class="c1">// victim cache to age out if at all possible.
+</span><span class="c1"></span>	<span class="c1">// 如果其它proc也没有可用元素,那么尝试从vintim中获取
+</span><span class="c1"></span>	<span class="nx">size</span> <span class="p">=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadUintptr</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">victimSize</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">pid</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="nx">size</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+	<span class="nx">locals</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">victim</span>
+	<span class="nx">l</span> <span class="o">:=</span> <span class="nf">indexLocal</span><span class="p">(</span><span class="nx">locals</span><span class="p">,</span> <span class="nx">pid</span><span class="p">)</span>
+	<span class="c1">// 同样的逻辑,先从vintim中的local private获取
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">x</span> <span class="o">:=</span> <span class="nx">l</span><span class="p">.</span><span class="nx">private</span><span class="p">;</span> <span class="nx">x</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">l</span><span class="p">.</span><span class="nx">private</span> <span class="p">=</span> <span class="kc">nil</span>
+		<span class="k">return</span> <span class="nx">x</span>
+	<span class="p">}</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">int</span><span class="p">(</span><span class="nx">size</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="c1">// 从vintim其它proc尝试偷取
+</span><span class="c1"></span>		<span class="nx">l</span> <span class="o">:=</span> <span class="nf">indexLocal</span><span class="p">(</span><span class="nx">locals</span><span class="p">,</span> <span class="p">(</span><span class="nx">pid</span><span class="o">+</span><span class="nx">i</span><span class="p">)</span><span class="o">%</span><span class="nb">int</span><span class="p">(</span><span class="nx">size</span><span class="p">))</span>
+		<span class="k">if</span> <span class="nx">x</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">l</span><span class="p">.</span><span class="nx">shared</span><span class="p">.</span><span class="nf">popTail</span><span class="p">();</span> <span class="nx">x</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">x</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Mark the victim cache as empty for future gets don&#39;t bother
+</span><span class="c1"></span>	<span class="c1">// with it.
+</span><span class="c1"></span>	<span class="c1">// 如果victim中都没有,则把这个victim标记为空,以后的查找可以快速跳过了
+</span><span class="c1"></span>	<span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreUintptr</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">victimSize</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><p>pin 方法会将此 goroutine 固定在当前的 P 上,避免查找元素期间被其它的 P 执行。固定的好处就是查找元素期间直接得到跟这个 P 相关的 local。有一点需要注意的是,pin 方法在执行的时候,如果跟这个 P 相关的 local 还没有创建,或者运行时 P 的数量被修改了的话,就会新创建 local。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// pin pins the current goroutine to P, disables preemption and
+</span><span class="c1">// returns poolLocal pool for the P and the P&#39;s id.
+</span><span class="c1">// Caller must call runtime_procUnpin() when done with the pool.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Pool</span><span class="p">)</span> <span class="nf">pin</span><span class="p">()</span> <span class="p">(</span><span class="o">*</span><span class="nx">poolLocal</span><span class="p">,</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">pid</span> <span class="o">:=</span> <span class="nf">runtime_procPin</span><span class="p">()</span>
+	<span class="c1">// In pinSlow we store to local and then to localSize, here we load in opposite order.
+</span><span class="c1"></span>	<span class="c1">// Since we&#39;ve disabled preemption, GC cannot happen in between.
+</span><span class="c1"></span>	<span class="c1">// Thus here we must observe local at least as large localSize.
+</span><span class="c1"></span>	<span class="c1">// We can observe a newer/larger local, it is fine (we must observe its zero-initialized-ness).
+</span><span class="c1"></span>	<span class="nx">s</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadUintptr</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">localSize</span><span class="p">)</span> <span class="c1">// load-acquire
+</span><span class="c1"></span>	<span class="nx">l</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">local</span>                          <span class="c1">// load-consume
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">pid</span><span class="p">)</span> <span class="p">&lt;</span> <span class="nx">s</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nf">indexLocal</span><span class="p">(</span><span class="nx">l</span><span class="p">,</span> <span class="nx">pid</span><span class="p">),</span> <span class="nx">pid</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">p</span><span class="p">.</span><span class="nf">pinSlow</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Pool</span><span class="p">)</span> <span class="nf">pinSlow</span><span class="p">()</span> <span class="p">(</span><span class="o">*</span><span class="nx">poolLocal</span><span class="p">,</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+	<span class="c1">// Retry under the mutex.
+</span><span class="c1"></span>	<span class="c1">// Can not lock the mutex while pinned.
+</span><span class="c1"></span>	<span class="nf">runtime_procUnpin</span><span class="p">()</span>
+	<span class="nx">allPoolsMu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="k">defer</span> <span class="nx">allPoolsMu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="nx">pid</span> <span class="o">:=</span> <span class="nf">runtime_procPin</span><span class="p">()</span>
+	<span class="c1">// poolCleanup won&#39;t be called while we are pinned.
+</span><span class="c1"></span>	<span class="nx">s</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">localSize</span>
+	<span class="nx">l</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">local</span>
+	<span class="k">if</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">pid</span><span class="p">)</span> <span class="p">&lt;</span> <span class="nx">s</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nf">indexLocal</span><span class="p">(</span><span class="nx">l</span><span class="p">,</span> <span class="nx">pid</span><span class="p">),</span> <span class="nx">pid</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">local</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">allPools</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">allPools</span><span class="p">,</span> <span class="nx">p</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="c1">// If GOMAXPROCS changes between GCs, we re-allocate the array and lose the old one.
+</span><span class="c1"></span>	<span class="nx">size</span> <span class="o">:=</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+	<span class="nx">local</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">poolLocal</span><span class="p">,</span> <span class="nx">size</span><span class="p">)</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">StorePointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">local</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">local</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span> <span class="c1">// store-release
+</span><span class="c1"></span>	<span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreUintptr</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">localSize</span><span class="p">,</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">size</span><span class="p">))</span>         <span class="c1">// store-release
+</span><span class="c1"></span>	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">local</span><span class="p">[</span><span class="nx">pid</span><span class="p">],</span> <span class="nx">pid</span>
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
