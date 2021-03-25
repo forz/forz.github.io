@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Google SRE弹性熔断算法实现 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="前言 Hystrix-Go 熔断算法的算法核心是：当请求失败比率达到一定阈值之后，熔断器开启，并休眠一段时间（由配置决定），这段休眠期过后，熔断器将处于半开状态，" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.68.1 with theme even" />
+
+
+<link rel="canonical" href="/post/google-sre%E5%BC%B9%E6%80%A7%E7%86%94%E6%96%AD%E7%AE%97%E6%B3%95%E5%AE%9E%E7%8E%B0/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Google SRE弹性熔断算法实现" />
+<meta property="og:description" content="前言 Hystrix-Go 熔断算法的算法核心是：当请求失败比率达到一定阈值之后，熔断器开启，并休眠一段时间（由配置决定），这段休眠期过后，熔断器将处于半开状态，" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/google-sre%E5%BC%B9%E6%80%A7%E7%86%94%E6%96%AD%E7%AE%97%E6%B3%95%E5%AE%9E%E7%8E%B0/" />
+<meta property="article:published_time" content="2021-03-21T10:36:35+00:00" />
+<meta property="article:modified_time" content="2021-03-21T10:36:35+00:00" />
+<meta itemprop="name" content="Google SRE弹性熔断算法实现">
+<meta itemprop="description" content="前言 Hystrix-Go 熔断算法的算法核心是：当请求失败比率达到一定阈值之后，熔断器开启，并休眠一段时间（由配置决定），这段休眠期过后，熔断器将处于半开状态，">
+<meta itemprop="datePublished" content="2021-03-21T10:36:35&#43;00:00" />
+<meta itemprop="dateModified" content="2021-03-21T10:36:35&#43;00:00" />
+<meta itemprop="wordCount" content="2174">
+
+
+
+<meta itemprop="keywords" content="Go,SRE," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Google SRE弹性熔断算法实现"/>
+<meta name="twitter:description" content="前言 Hystrix-Go 熔断算法的算法核心是：当请求失败比率达到一定阈值之后，熔断器开启，并休眠一段时间（由配置决定），这段休眠期过后，熔断器将处于半开状态，"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Google SRE弹性熔断算法实现</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-03-21 </span>
+        <div class="post-category">
+            <a href="/categories/go/"> Go </a>
+            </div>
+          <span class="more-meta"> 约 2174 字 </span>
+          <span class="more-meta"> 预计阅读 5 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#前言">前言</a></li>
+    <li><a href="#google-的做法">Google 的做法</a></li>
+    <li><a href="#防止小流量熔断">防止小流量熔断</a></li>
+    <li><a href="#代码实现">代码实现</a></li>
+    <li><a href="#总结">总结</a></li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="前言">前言</h2>
+<p>Hystrix-Go 熔断算法的算法核心是：当请求失败比率达到一定阈值之后，熔断器开启，并休眠一段时间（由配置决定），这段休眠期过后，熔断器将处于半开状态，在此状态下将试探性的放过一部分流量，如果这部分流量调用成功后，再次将熔断器关闭，否则熔断器继续保持开启并进入下一轮休眠周期。</p>
+<p>但这个熔断算法有一个问题，过于一刀切。是否可以做到在熔断器开启状态下（但是后端未 Shutdown）仍然可以放行少部分流量呢？当然，这里有个前提，需要看后端此时还能够接受多少流量。下一步我们来看看 Google 的策略实现。</p>
+<h2 id="google-的做法">Google 的做法</h2>
+<p>We implemented client-side throttling through a technique we call adaptive throttling：该算法称为（客户端）自适应限流。</p>
+<p>现实中，过载是极易发生的异常状态： 一方面，当客户端检测到最近的请求出现错误都是 “out of quota（配额不足）”，说明可能这个客户端超过了资源配额，后端任务会快速拒绝请求，返回 “配额不足” 的错误，有可能后端忙着不停发送拒绝请求，导致过载； 另一方面，当依赖的资源出现大量错误，处于对下游的保护，也需要在客户端本地进行限流操作</p>
+<p>解决的办法就是客户端自行限制请求速度，限制生成请求的数量, 超过这个数量的请求直接在本地回复失败，而不会真是发送到服务端</p>
+<p>该算法统计的指标依赖如下两种，每个客户端记录过去两分钟内的以下信息（一般代码中以滑动窗口实现）：</p>
+<ul>
+<li>
+<p>requests（客户端尝试的请求数）： The number of requests attempted by the application layer(at the client, on top of the adaptive throttling system)</p>
+</li>
+<li>
+<p>accepts 后端接受的请求数(客户端发送的请求数-后端拒绝的请求数量)： The number of requests accepted by the backend</p>
+</li>
+</ul>
+<p>该算法的通用描述如下：</p>
+<ol>
+<li>在通常情况下（无错误发生时） requests==accepts</li>
+<li>当后端出现异常情况时，accepts 的数量会逐渐小于 requests</li>
+<li>当后端持续异常时，客户端可以继续发送请求直到 requests=K×accepts，一旦超过这个值，客户端就启动自适应限流机制，新产生的请求在本地会以 p 概率（下面描述的 Client request rejection probability 定义）被拒绝</li>
+<li>当客户端主动丢弃请求时，requests 值会一直增大，在某个时间点会超过 K×accepts，使概率 p 计算出来的值大于 0，此时客户端会以此概率对请求做主动丢弃。</li>
+<li>当后端逐渐恢复时，accepts 增加，（同时 requests 值也会增加，但是由于 K 的关系，K×accepts 的放大倍数更快），使得<code>(requests−K×accepts)/(requests+1)</code>变为负数，从而概率 p==0，客户端自适应限流结束</li>
+</ol>
+<p>客户端请求拒绝的概率（Client request rejection probability）基于如下公式计算（其中 K 为倍率 - multiplier，常用的值为 2）：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210321203250.png" alt=""></p>
+<p>该公式的解释如下： 当 requests−K×accepts&gt;=0 时，概率 p==0，客户端不会主动丢弃请求；反之，则概率 p，会随着 accepts 值的变小而增加，即成功接受的请求数越少，本地丢弃请求的概率就越高。通俗点说，Client 可以发送请求直到 requests=K×accepts，一旦超过限制，按照概率进行截流。</p>
+<p>从 Google 的文档描述中，该算法在实际中使用效果极为良好，可以使整体上保持一个非常稳定的请求速率。对于后端而言，调整 K 值可以使得自适应限流算法适配不同的后端。关于 K 值的意义，原文描述如下：</p>
+<ul>
+<li>Reducing the multiplier will make adaptive throttling behave more aggressively</li>
+<li>Increasing the multiplier will make adaptive throttling behave less aggressively</li>
+</ul>
+<p>翻译上面两句话就是：</p>
+<ul>
+<li>降低 K 值会使自适应限流算法更加激进（允许客户端在算法启动时拒绝更多本地请求）</li>
+<li>增加 K 值会使自适应限流算法不再那么激进（允许服务端在算法启动时尝试接收更多的请求，与上面相反）</li>
+</ul>
+<p>通过修改算法中的K(倍值)，可以调节熔断器的敏感度，当降低该倍值会使自适应熔断算法更敏感，当增加该倍值会使得自适应熔断算法降低敏感度，举例来说，假设将调用方的请求上限从 <code>requests = 2 * acceptst</code> 调整为 <code>requests = 1.1 * accepts</code> 那么就意味着调用方每十个请求之中就有一个请求会触发熔断</p>
+<h2 id="防止小流量熔断">防止小流量熔断</h2>
+<p>为了防止小流量熔断，对该公式做了一定的修改</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210321220611.png" alt=""></p>
+<table>
+<thead>
+<tr>
+<th>params</th>
+<th>参数说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>requests</td>
+<td>总请求数量</td>
+</tr>
+<tr>
+<td>accepts</td>
+<td>正常请求数量</td>
+</tr>
+<tr>
+<td>K</td>
+<td>倍值 (Google SRE 推荐值为 2)</td>
+</tr>
+<tr>
+<td>protection</td>
+<td>保护值（防止小流量熔断 推荐值为5）</td>
+</tr>
+</tbody>
+</table>
+<h2 id="代码实现">代码实现</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">googleBreaker</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">k</span>     <span class="kt">float64</span>  <span class="c1">// 倍值 默认1.5
+</span><span class="c1"></span>	<span class="nx">stat</span>  <span class="o">*</span><span class="nx">collection</span><span class="p">.</span><span class="nx">RollingWindow</span> <span class="c1">// 滑动时间窗口，用来对请求失败和成功计数
+</span><span class="c1"></span>	<span class="nx">proba</span> <span class="o">*</span><span class="nx">mathx</span><span class="p">.</span><span class="nx">Proba</span> <span class="c1">// 动态概率
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>自适应熔断算法实现:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">googleBreaker</span><span class="p">)</span> <span class="nf">accept</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">accepts</span><span class="p">,</span> <span class="nx">total</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nf">history</span><span class="p">()</span>  <span class="c1">// 请求接受数量和请求总量
+</span><span class="c1"></span>	<span class="nx">weightedAccepts</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">k</span> <span class="o">*</span> <span class="nb">float64</span><span class="p">(</span><span class="nx">accepts</span><span class="p">)</span>
+	<span class="c1">// 计算丢弃请求概率
+</span><span class="c1"></span>	<span class="nx">dropRatio</span> <span class="o">:=</span> <span class="nx">math</span><span class="p">.</span><span class="nf">Max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">total</span><span class="o">-</span><span class="nx">protection</span><span class="p">)</span><span class="o">-</span><span class="nx">weightedAccepts</span><span class="p">)</span><span class="o">/</span><span class="nb">float64</span><span class="p">(</span><span class="nx">total</span><span class="o">+</span><span class="mi">1</span><span class="p">))</span>
+	<span class="k">if</span> <span class="nx">dropRatio</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+	<span class="c1">// 动态判断是否触发熔断
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">b</span><span class="p">.</span><span class="nx">proba</span><span class="p">.</span><span class="nf">TrueOnProba</span><span class="p">(</span><span class="nx">dropRatio</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">ErrServiceUnavailable</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>每次发起请求会调用doReq方法，在这个方法中首先通过accept效验是否触发熔断，acceptable用来判断哪些error会计入失败计数，定义如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Acceptable</span><span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="k">switch</span> <span class="nx">status</span><span class="p">.</span><span class="nf">Code</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="nx">codes</span><span class="p">.</span><span class="nx">DeadlineExceeded</span><span class="p">,</span> <span class="nx">codes</span><span class="p">.</span><span class="nx">Internal</span><span class="p">,</span> <span class="nx">codes</span><span class="p">.</span><span class="nx">Unavailable</span><span class="p">,</span> <span class="nx">codes</span><span class="p">.</span><span class="nx">DataLoss</span><span class="p">:</span> <span class="c1">// 异常请求错误
+</span><span class="c1"></span>		<span class="k">return</span> <span class="kc">false</span>
+	<span class="k">default</span><span class="p">:</span>
+		<span class="k">return</span> <span class="kc">true</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>如果请求正常则通过markSuccess把请求数量和请求接受数量都加一，如果请求不正常则只有请求数量会加一</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">googleBreaker</span><span class="p">)</span> <span class="nf">doReq</span><span class="p">(</span><span class="nx">req</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span><span class="p">,</span> <span class="nx">fallback</span> <span class="kd">func</span><span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="kt">error</span><span class="p">,</span> <span class="nx">acceptable</span> <span class="nx">Acceptable</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="c1">// 判断是否触发熔断
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nf">accept</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">fallback</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nf">fallback</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">err</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">e</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">e</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">b</span><span class="p">.</span><span class="nf">markFailure</span><span class="p">()</span>
+			<span class="nb">panic</span><span class="p">(</span><span class="nx">e</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+
+	<span class="c1">// 执行真正的调用
+</span><span class="c1"></span>	<span class="nx">err</span> <span class="o">:=</span> <span class="nf">req</span><span class="p">()</span>
+	<span class="c1">// 正常请求计数
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nf">acceptable</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">markSuccess</span><span class="p">()</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="c1">// 异常请求计数
+</span><span class="c1"></span>		<span class="nx">b</span><span class="p">.</span><span class="nf">markFailure</span><span class="p">()</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span> <span class="nx">err</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="总结">总结</h2>
+<p>调用端可以通过熔断机制进行自我保护，防止调用下游服务出现异常，或者耗时过长影响调用端的业务逻辑，很多功能完整的微服务框架都会内置熔断器。其实，不仅微服务调用之间需要熔断器，在调用依赖资源的时候，比如mysql、redis等也可以引入熔断器的机制。</p>
+<h2 id="参考">参考</h2>
+<p><a href="https://pandaychen.github.io/2020/05/10/A-GOOGLE-SRE-BREAKER/">Google SRE 弹性熔断算法实现分析</a>
+<a href="https://cloud.tencent.com/developer/news/726652">熔断原理与实现Golang版</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-03-21
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go/">Go</a>
+          <a href="/tags/sre/">SRE</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/pkg-errors%E4%BD%BF%E7%94%A8%E4%BB%8B%E7%BB%8D/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">pkg-errors使用介绍</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/%E5%A6%82%E4%BD%95%E7%BC%96%E5%86%99docker%E9%95%9C%E5%83%8F/">
+            <span class="next-text nav-default">如何编写Docker镜像</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
