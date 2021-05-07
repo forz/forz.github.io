@@ -53,7 +53,7 @@
 <meta itemprop="description" content="负载均衡的方法 构建高可用、高性能的通信服务，通常采用服务注册与发现、负载均衡和容错处理等机制实现。根据负载均衡实现所在的位置不同，通常可分为">
 <meta itemprop="datePublished" content="2021-01-22T23:13:10&#43;00:00" />
 <meta itemprop="dateModified" content="2021-01-22T23:13:10&#43;00:00" />
-<meta itemprop="wordCount" content="6161">
+<meta itemprop="wordCount" content="6374">
 
 
 
@@ -167,7 +167,7 @@
         <div class="post-category">
             <a href="/categories/grpc/"> GRPC </a>
             </div>
-          <span class="more-meta"> 约 6161 字 </span>
+          <span class="more-meta"> 约 6374 字 </span>
           <span class="more-meta"> 预计阅读 13 分钟 </span>
         
       </div>
@@ -185,17 +185,20 @@
         <li><a href="#独立-lb-进程external-load-balancing-service">独立 LB 进程（External Load Balancing Service）</a></li>
       </ul>
     </li>
-    <li><a href="#原理">原理</a></li>
-    <li><a href="#接口实现">接口实现</a></li>
-    <li><a href="#服务发现resolvergo">服务发现：resolver.go</a></li>
-    <li><a href="#服务注册registergo">服务注册：register.go</a></li>
-    <li><a href="#客户端与服务端">客户端与服务端</a></li>
-    <li><a href="#loadbalancer">LoadBalancer</a>
+    <li><a href="#基本原理">基本原理</a></li>
+    <li><a href="#服务发现">服务发现</a>
+      <ul>
+        <li><a href="#实现resolver">实现resolver</a></li>
+        <li><a href="#实现register">实现register</a></li>
+        <li><a href="#实现代码">实现代码</a></li>
+      </ul>
+    </li>
+    <li><a href="#负载均衡">负载均衡</a>
       <ul>
         <li><a href="#banlancer">Banlancer</a></li>
         <li><a href="#picker">Picker</a></li>
-        <li><a href="#roundrobin">RoundRobin</a></li>
-        <li><a href="#weightpicker">WeightPicker</a></li>
+        <li><a href="#实现roundrobin">实现RoundRobin</a></li>
+        <li><a href="#实现weightpicker">实现WeightPicker</a></li>
       </ul>
     </li>
     <li><a href="#参考">参考</a></li>
@@ -233,7 +236,7 @@
 <p>该方案是针对第二种方案的不足而提出的一种折中方案，原理和第二种方案基本类似。
 不同之处是将LB和服务发现功能从进程内移出来，变成主机上的一个独立进程。主机上的一个或者多个服务要访问目标服务时，他们都通过同一主机上的独立LB进程做服务发现和负载均衡。该方案也是一种分布式方案没有单点问题，一个LB进程挂了只影响该主机上的服务调用方，服务调用方和LB之间是进程内调用性能好，同时该方案还简化了服务调用方，不需要为不同语言开发客户库，LB的升级不需要服务调用方改代码。
 该方案主要问题：部署较复杂，环节多，出错调试排查问题不方便。</p>
-<h2 id="原理">原理</h2>
+<h2 id="基本原理">基本原理</h2>
 <p>gRPC开源组件官方并未直接提供服务注册与发现的功能实现，但其设计文档已提供实现的思路，并在不同语言的gRPC代码API中已提供了命名解析和负载均衡接口供扩展。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210122233239.png" alt=""></p>
 <p>其基本实现原理：</p>
@@ -244,7 +247,7 @@
 <li>当有rpc请求时，负载均衡策略决定那个子通道即grpc服务器将接收请求，当可用服务器为空时客户端的请求将被阻塞。</li>
 </ol>
 <p>根据gRPC官方提供的设计思路，基于进程内LB方案（即第2个案，阿里开源的服务框架 Dubbo 也是采用类似机制），结合分布式一致的组件（如Zookeeper、Consul、Etcd），可找到gRPC服务发现和负载均衡的可行解决方案。接下来以GO语言为例，简单介绍下基于Etcd3的关键代码实现：</p>
-<h2 id="接口实现">接口实现</h2>
+<h2 id="服务发现">服务发现</h2>
 <p>gRPC已提供了简单的负载均衡策略（如：Round Robin），我们只需实现它提供的Builder和Resolver接口，就能完成gRPC客户端负载均衡。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -279,7 +282,39 @@
 <li>Build方法：为给定目标创建一个新的resolver，当调用grpc.Dial()时执行。</li>
 <li>Scheme方法：返回此resolver支持的方案，Scheme定义可参考：<a href="https://github.com/grpc/grpc/blob/master/doc/naming.md">https://github.com/grpc/grpc/blob/master/doc/naming.md</a></li>
 </ul>
+<p>Build方法的第一个参数target的类型为Target定义如下，创建ClientConn调用grpc.DialContext的第二个参数target经过解析后需要符合这个结构定义，target定义格式为： scheme://authority/endpoint_name</p>
 <div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Target</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">Scheme</span>    <span class="kt">string</span> <span class="c1">// 表示要使用的名称系统
+</span><span class="c1"></span>	<span class="nx">Authority</span> <span class="kt">string</span> <span class="c1">// 表示一些特定于方案的引导信息
+</span><span class="c1"></span>	<span class="nx">Endpoint</span>  <span class="kt">string</span> <span class="c1">// 指出一个具体的名字
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Build方法返回的Resolver也是一个接口类型。定义如下</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Resolver</span> <span class="kd">interface</span> <span class="p">{</span>
+	<span class="nf">ResolveNow</span><span class="p">(</span><span class="nx">ResolveNowOptions</span><span class="p">)</span>
+	<span class="nf">Close</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
@@ -313,7 +348,7 @@
 <li>Close方法：关闭resolver</li>
 </ul>
 <p>根据以上两个接口，我们把服务发现的功能写在Build方法中，把获取到的负载均衡服务地址返回到客户端，并监视服务更新情况，以修改客户端连接。</p>
-<h2 id="服务发现resolvergo">服务发现：resolver.go</h2>
+<h3 id="实现resolver">实现resolver</h3>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt">  1
@@ -549,7 +584,7 @@
 <li>把获取的服务地址转成resolver.Address，供gRPC客户端连接。</li>
 <li>根据schema的定义规则，修改key格式。</li>
 </ol>
-<h2 id="服务注册registergo">服务注册：register.go</h2>
+<h3 id="实现register">实现register</h3>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt"> 1
@@ -726,7 +761,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h2 id="客户端与服务端">客户端与服务端</h2>
+</div><h3 id="实现代码">实现代码</h3>
 <p>客户端修改gRPC连接服务的部分代码即可：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -812,7 +847,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h2 id="loadbalancer">LoadBalancer</h2>
+</div><h2 id="负载均衡">负载均衡</h2>
 <p>官方只提供了pick_first和round_robin两种负载均衡策略，轮询法round_robin不能满足因服务器配置不同而承担不同负载量，这篇文章将介绍如何实现自定义负载均衡策略&ndash;加权随机法。</p>
 <p>加权随机法可以根据服务器的处理能力而分配不同的权重，从而实现处理能力高的服务器可承担更多的请求，处理能力低的服务器少承担请求。</p>
 <h3 id="banlancer">Banlancer</h3>
@@ -1073,7 +1108,7 @@
 <li>Picker接口：用于gRPC选择子连接去发送请求。</li>
 <li>Pick方法：子连接选择</li>
 </ul>
-<h3 id="roundrobin">RoundRobin</h3>
+<h3 id="实现roundrobin">实现RoundRobin</h3>
 <p>RR Banlancer 的实现基于 balancer/base 基础实现，核心功能主体在 balancer/base 中实现，而 RR Banlancer 基于 base.NewBalancerBuilder 实现了 balancer.Builder 接口，可以用于注册。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1183,7 +1218,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="weightpicker">WeightPicker</h3>
+</div><h3 id="实现weightpicker">实现WeightPicker</h3>
 <p>问题来了，我们需要把服务器地址的权重添加进去，但是地址resolver.Address并没有提供权重的属性。官方给的答复是：把权重存储到地址的元数据metadata中。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1424,10 +1459,10 @@
 </code></pre></td></tr></table>
 </div>
 </div><h2 id="参考">参考</h2>
-<p><a href="https://segmentfault.com/a/1190000008672912#articleHeader4">gRPC服务发现&amp;负载均衡</a>
-<a href="https://studygolang.com/articles/28742">gRPC负载均衡（客户端负载均衡）</a>
-<a href="https://www.cnblogs.com/FireworksEasyCool/p/12924701.html">gRPC负载均衡（自定义负载均衡策略）</a>
-<a href="https://www.do1618.com/archives/1461/grpc-%E4%B9%8B-loadbalancer/">gRPC 之 LoadBalancer</a></p>
+<p><a href="https://segmentfault.com/a/1190000008672912#articleHeader4">gRPC服务发现&amp;负载均衡</a></p>
+<p><a href="https://studygolang.com/articles/28742">gRPC负载均衡（客户端负载均衡）</a></p>
+<p><a href="https://www.cnblogs.com/FireworksEasyCool/p/12924701.html">gRPC负载均衡（自定义负载均衡策略）</a></p>
+<p><a href="https://www.do1618.com/archives/1461/grpc-%E4%B9%8B-loadbalancer/">gRPC 之 LoadBalancer</a></p>
 
     </div>
 
