@@ -53,7 +53,7 @@
 <meta itemprop="description" content="基本概念 ClientConn 对象是连接管理的入口，表示到服务端的一个逻辑的连接，会做名字解析、负载均衡、KeepAlive 等连接管理方面的操作，是个线程安全的">
 <meta itemprop="datePublished" content="2021-01-22T18:03:09&#43;00:00" />
 <meta itemprop="dateModified" content="2021-01-22T18:03:09&#43;00:00" />
-<meta itemprop="wordCount" content="20887">
+<meta itemprop="wordCount" content="21102">
 
 
 
@@ -167,8 +167,8 @@
         <div class="post-category">
             <a href="/categories/grpc/"> GRPC </a>
             </div>
-          <span class="more-meta"> 约 20887 字 </span>
-          <span class="more-meta"> 预计阅读 42 分钟 </span>
+          <span class="more-meta"> 约 21102 字 </span>
+          <span class="more-meta"> 预计阅读 43 分钟 </span>
         
       </div>
     </header>
@@ -4954,6 +4954,12 @@
 </span><span class="lnt">622
 </span><span class="lnt">623
 </span><span class="lnt">624
+</span><span class="lnt">625
+</span><span class="lnt">626
+</span><span class="lnt">627
+</span><span class="lnt">628
+</span><span class="lnt">629
+</span><span class="lnt">630
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// addrConn is a network connection to a given address.
@@ -5089,6 +5095,8 @@
 	<span class="p">}</span>
 <span class="p">}</span>
 <span class="c1">// resetTransport 主要内容就是一个for 循环,可以看到在这个for循环中会尝试建立链接。如果建立成功就返回一个nil。如果不成功会不断重试下去。实际上不管是开头的Dial或者Dial完了关闭服务器后都是由这段代码来建立真实的链接。这也就是如果你使用withBlock 但是不使用超时的话会不断的重试下去。中途断掉也会不断重联。当然了重连的过程中是使用了backoff算法来重连。而且默认会在grpc的配置中有个默认最大重试间隔时间。默认是120.
+</span><span class="c1">// 1. 当连接失败后会等待一段时间之后再尝试重连,时间间隔的算法依赖于backoff.Strategy接口的Backoff方法.
+</span><span class="c1">// 2. 利用context的超时控制或取消机制,直接结束.
 </span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">ac</span> <span class="o">*</span><span class="nx">addrConn</span><span class="p">)</span> <span class="nf">resetTransport</span><span class="p">()</span> <span class="p">{</span>
 	<span class="c1">//进入循环
 </span><span class="c1"></span>	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
@@ -5107,6 +5115,7 @@
 </span><span class="c1"></span>		<span class="nx">addrs</span> <span class="o">:=</span> <span class="nx">ac</span><span class="p">.</span><span class="nx">addrs</span>
 		<span class="nx">backoffFor</span> <span class="o">:=</span> <span class="nx">ac</span><span class="p">.</span><span class="nx">dopts</span><span class="p">.</span><span class="nx">bs</span><span class="p">.</span><span class="nf">Backoff</span><span class="p">(</span><span class="nx">ac</span><span class="p">.</span><span class="nx">backoffIdx</span><span class="p">)</span>
 		<span class="c1">// This will be the duration that dial gets to finish.
+</span><span class="c1"></span>		<span class="c1">// 超时时间,默认20秒.
 </span><span class="c1"></span>		<span class="nx">dialDuration</span> <span class="o">:=</span> <span class="nx">minConnectTimeout</span>
 		<span class="k">if</span> <span class="nx">ac</span><span class="p">.</span><span class="nx">dopts</span><span class="p">.</span><span class="nx">minConnectTimeout</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
 			<span class="nx">dialDuration</span> <span class="p">=</span> <span class="nx">ac</span><span class="p">.</span><span class="nx">dopts</span><span class="p">.</span><span class="nf">minConnectTimeout</span><span class="p">()</span>
@@ -5134,7 +5143,7 @@
 			<span class="c1">// After exhausting all addresses, the addrConn enters
 </span><span class="c1"></span>			<span class="c1">// TRANSIENT_FAILURE.
 </span><span class="c1"></span>			<span class="nx">ac</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-			<span class="c1">//如果属于 Shutdown 状态则直接退出；
+			<span class="c1">// 如果失败了,且状态为Shutdown直接返回.
 </span><span class="c1"></span>			<span class="k">if</span> <span class="nx">ac</span><span class="p">.</span><span class="nx">state</span> <span class="o">==</span> <span class="nx">connectivity</span><span class="p">.</span><span class="nx">Shutdown</span> <span class="p">{</span>
 				<span class="nx">ac</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
 				<span class="k">return</span>
@@ -5146,17 +5155,20 @@
 </span><span class="c1"></span>			<span class="c1">//按前面计算出的时间进行退避；
 </span><span class="c1"></span>			<span class="nx">b</span> <span class="o">:=</span> <span class="nx">ac</span><span class="p">.</span><span class="nx">resetBackoff</span>
 			<span class="nx">ac</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-
-			<span class="nx">timer</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTimer</span><span class="p">(</span><span class="nx">backoffFor</span><span class="p">)</span>
+			<span class="c1">// 根据backoff时间创建定时器.
+</span><span class="c1"></span>			<span class="nx">timer</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTimer</span><span class="p">(</span><span class="nx">backoffFor</span><span class="p">)</span>
 			<span class="k">select</span> <span class="p">{</span>
 			<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">timer</span><span class="p">.</span><span class="nx">C</span><span class="p">:</span>
-				<span class="nx">ac</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+				<span class="c1">// backoff时间到,增加backoff次数,继续循环去尝试连接.
+</span><span class="c1"></span>				<span class="nx">ac</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
 				<span class="nx">ac</span><span class="p">.</span><span class="nx">backoffIdx</span><span class="o">++</span>
 				<span class="nx">ac</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
 			<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">b</span><span class="p">:</span>
-				<span class="nx">timer</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+				<span class="c1">// 外部重置了backoff,马上重新循环去尝试连接.
+</span><span class="c1"></span>				<span class="nx">timer</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
 			<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ac</span><span class="p">.</span><span class="nx">ctx</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
-				<span class="nx">timer</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+				<span class="c1">// context取消了或超时了,直接返回.
+</span><span class="c1"></span>				<span class="nx">timer</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
 				<span class="k">return</span>
 			<span class="p">}</span>
 			<span class="k">continue</span>
