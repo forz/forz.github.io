@@ -178,15 +178,19 @@
   <div class="post-toc-content always-active">
     <nav id="TableOfContents">
   <ul>
-    <li><a href="#程序生命周期">程序生命周期</a>
+    <li><a href="#程序生命周期">程序生命周期</a></li>
+    <li><a href="#调度器初始化">调度器初始化</a>
       <ul>
-        <li><a href="#调度器初始化">调度器初始化</a></li>
-        <li><a href="#main-goroutine创建">main goroutine创建</a></li>
-        <li><a href="#g0栈和用户栈的迁移">g0栈和用户栈的迁移</a></li>
-        <li><a href="#schedule-循环">schedule 循环</a></li>
-        <li><a href="#goroutine-执行">goroutine 执行</a></li>
+        <li><a href="#调整-sp">调整 SP</a></li>
+        <li><a href="#初始化-g0-栈">初始化 g0 栈</a></li>
+        <li><a href="#主线程绑定-m0">主线程绑定 m0</a></li>
+        <li><a href="#初始化-m0">初始化 m0</a></li>
       </ul>
     </li>
+    <li><a href="#main-goroutine创建">main goroutine创建</a></li>
+    <li><a href="#g0栈和用户栈的迁移">g0栈和用户栈的迁移</a></li>
+    <li><a href="#schedule-循环">schedule 循环</a></li>
+    <li><a href="#goroutine-执行">goroutine 执行</a></li>
   </ul>
 </nav>
   </div>
@@ -558,8 +562,8 @@
 </div>
 </div><p>这段代码完成之后，整个 Go 程序就可以跑起来了。</p>
 <p>调度器初始化函数：schedinit 返回后，调度器的相关参数都已经初始化好了.</p>
-<h3 id="调度器初始化">调度器初始化</h3>
-<h4 id="调整-sp">调整 SP</h4>
+<h2 id="调度器初始化">调度器初始化</h2>
+<h3 id="调整-sp">调整 SP</h3>
 <p>第一段代码，将 SP 调整到了一个地址是 16 的倍数的位置：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -582,7 +586,7 @@
 存在两种情况，这也是第一步将 SP 下移的时候，多移了 7 个 Byte 的原因。第一张图里，与 ~15 相与的时候，SP 值减少了 1，第二张图则减少了 9。最后都是移位到了 16 字节对齐的位置。</p>
 <p>两张图的共同点是 SP 与 argc 中间多出了 16 个字节的空位。这个后面应该会用到，我们接着探索。</p>
 <p>至于为什么进行 16 个字节对齐，就比较好理解了：因为 CPU 有一组 SSE 指令，这些指令中出现的内存地址必须是 16 的倍数。</p>
-<h4 id="初始化-g0-栈">初始化 g0 栈</h4>
+<h3 id="初始化-g0-栈">初始化 g0 栈</h3>
 <p>接着往后看，开始初始化 g0 的栈了。g0 栈的作用就是为运行 runtime 代码提供一个“环境”。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -617,7 +621,7 @@
 </div><p>代码 L2 把 g0 的地址存入 DI 寄存器；L4 将 SP 下移 (64K-104)B，并将地址存入 BX 寄存器；L6 将 BX 里存储的地址赋给 g0.stackguard0；L8，L10，L12 分别 将 BX 里存储的地址赋给 g0.stackguard1， g0.stack.lo， g0.stack.hi。</p>
 <p>这部分完成之后，g0 栈空间如下图：</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201116151552.png" alt=""></p>
-<h4 id="主线程绑定-m0">主线程绑定 m0</h4>
+<h3 id="主线程绑定-m0">主线程绑定 m0</h3>
 <p>接着往下看，中间我们省略了很多检查 CPU 相关的代码，直接看主线程绑定 m0 的部分：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -762,7 +766,7 @@
 <p>目前这个指针指向g0，表示代码正运行在 g0 栈。</p>
 <p>于是，前面的图又增加了新的玩伴 m0：</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201116161105.png" alt=""></p>
-<h4 id="初始化-m0">初始化 m0</h4>
+<h3 id="初始化-m0">初始化 m0</h3>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt">1
@@ -789,7 +793,7 @@
 </div>
 </div><p>L1-L2 将 16(SP) 处的内容移动到 0(SP)，也就是栈顶，通过前面的图，16(SP) 处的内容为 argc；L3-L4 将 argv 存入 8(SP)，接下来调用 runtime·args 函数，处理命令行参数。</p>
 <p>接着，连续调用了两个 runtime 函数。osinit 函数初始化系统核心数，将全局变量 ncpu 初始化的核心数，schedinit 则是调度器的初始化。</p>
-<h3 id="main-goroutine创建">main goroutine创建</h3>
+<h2 id="main-goroutine创建">main goroutine创建</h2>
 <p>继续看代码，前面我们完成了 schedinit 函数，这是 runtime·rt0_go 函数里的一步，接着往后看：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -865,7 +869,7 @@
 <p>如果拿不到，则会在堆上创建一个新的 G，为其分配 2KB 大小的栈，并设置好新 goroutine 的 stack 成员，设置其状态为 _Gdead，并将其添加到全局变量 allgs 中。创建完成之后，我们就在堆上有了一个 2K 大小的栈。于是，我们的图再次丰富：</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201116223753.png" alt=""></p>
 <p>这样，main goroutine 就诞生了。</p>
-<h3 id="g0栈和用户栈的迁移">g0栈和用户栈的迁移</h3>
+<h2 id="g0栈和用户栈的迁移">g0栈和用户栈的迁移</h2>
 <p>g0 栈用于执行调度器的代码，执行完之后，要跳转到执行用户代码的地方，如何跳转？这中间涉及到栈和寄存器的切换。</p>
 <p>将 fn 的参数从 g0 栈上拷贝到 newg 的栈上，memmove 函数需要传入源地址、目的地址、参数大小。由于 main 函数在这里没有参数需要拷贝，因此这里相当于没做什么。</p>
 <p>接着，初始化 newg 的各种字段，而且涉及到最重要的 pc，sp 等字段：</p>
@@ -875,7 +879,7 @@
 <p>上图中，newg 新增了 sched.pc 指向 runtime.main 函数，当它被调度起来执行时，就从这里开始；新增了 sched.sp 指向了 newg 栈顶位置，同时，newg 栈顶位置的内容是一个跳转地址，指向 runtime.goexit 的第二条指令，当 goroutine 退出时，这条地址会载入 CPU 的 PC 寄存器，跳转到这里执行“扫尾”工作。</p>
 <p>newg 的状态变成可执行后（Runnable），就可以将它加入到 P 的本地运行队列里，等待调度。所以，goroutine 何时被执行，用户代码决定不了。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201117103816.png" alt=""></p>
-<h3 id="schedule-循环">schedule 循环</h3>
+<h2 id="schedule-循环">schedule 循环</h2>
 <p>在 runtime·rt0_go 函数里，执行完 runtime·newproc(SB) 后，两条 POP 指令将之前为调用它构建的参数弹出栈。只剩下一个函数了：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -917,7 +921,7 @@
 <p>那么问题就来了，在一个复杂的程序中，调度可能会进行无数次循环，也就是说会进行无数次没有返回的函数调用，大家都知道，每调用一次函数都会消耗一定的栈空间，而如果一直这样无返回的调用下去无论 g0 有多少栈空间终究是会耗尽的，那么这里是不是有问题？其实没有问题！关键点就在于，每次执行 mcall 切换到 g0 栈时都是切换到 g0.sched.sp 所指的固定位置，这之所以行得通，正是因为从 schedule 函数开始之后的一系列函数永远都不会返回，所以重用这些函数上一轮调度时所使用过的栈内存是没有问题的。</p>
 <p>我再解释一下：栈空间在调用函数时会自动“增大”，而函数返回时，会自动“减小”，这里的增大和减小是指栈顶指针 SP 的变化。上述这些函数都没有返回，说明调用者不需要用到被调用者的返回值，有点像“尾递归”。</p>
 <p>因为 g0 一直没有动过，所有它之前保存的 sp 还能继续使用。每一次调度循环都会覆盖上一次调度循环的栈数据，完美！</p>
-<h3 id="goroutine-执行">goroutine 执行</h3>
+<h2 id="goroutine-执行">goroutine 执行</h2>
 <p>我们探索 main goroutine 以及普通 goroutine 从执行到退出的整个过程。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
