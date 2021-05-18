@@ -53,7 +53,7 @@
 <meta itemprop="description" content="Mutex Go 语言的 sync.Mutex 由两个字段 state 和 sema 组成。其中 state 表示当前互斥锁的状态，而 sema 是用于控制锁状态的信号量。 1 2 3 4 type Mutex struct { state int32 sema uint32 } 状态 互斥锁的状态比较复">
 <meta itemprop="datePublished" content="2021-01-14T15:58:21&#43;00:00" />
 <meta itemprop="dateModified" content="2021-01-14T15:58:21&#43;00:00" />
-<meta itemprop="wordCount" content="42703">
+<meta itemprop="wordCount" content="43915">
 
 
 
@@ -167,8 +167,8 @@
         <div class="post-category">
             <a href="/categories/go/"> Go </a>
             </div>
-          <span class="more-meta"> 约 42703 字 </span>
-          <span class="more-meta"> 预计阅读 86 分钟 </span>
+          <span class="more-meta"> 约 43915 字 </span>
+          <span class="more-meta"> 预计阅读 88 分钟 </span>
         
       </div>
     </header>
@@ -218,7 +218,7 @@
         <li><a href="#entry">entry</a></li>
         <li><a href="#流程图">流程图</a></li>
         <li><a href="#load方法">Load方法</a></li>
-        <li><a href="#store方法">Store方法</a></li>
+        <li><a href="#store">Store</a></li>
         <li><a href="#delete方法">Delete方法</a></li>
         <li><a href="#loadorstore">LoadOrStore</a></li>
         <li><a href="#range">Range</a></li>
@@ -236,7 +236,7 @@
         <li><a href="#put">Put</a></li>
         <li><a href="#runtime_procunpin--runtime_procpin">runtime_procUnpin &amp; runtime_procPin</a></li>
         <li><a href="#poolcleanup">PoolCleanup</a></li>
-        <li><a href="#小结">小结</a></li>
+        <li><a href="#小结-1">小结</a></li>
       </ul>
     </li>
     <li><a href="#参考">参考</a></li>
@@ -2740,6 +2740,21 @@
 </span><span class="lnt">32
 </span><span class="lnt">33
 </span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// expunged is an arbitrary pointer that marks entries which have been deleted
@@ -2751,6 +2766,8 @@
 
 <span class="c1">// An entry is a slot in the map corresponding to a particular key.
 </span><span class="c1">// entry代表一个值
+</span><span class="c1">// 只是简单的创建一个 entry
+</span><span class="c1">// entry 是一个对应于 map 中特殊 key 的 slot
 </span><span class="c1"></span><span class="kd">type</span> <span class="nx">entry</span> <span class="kd">struct</span> <span class="p">{</span>
 	<span class="c1">// p points to the interface{} value stored for the entry.
 </span><span class="c1"></span>	<span class="c1">//
@@ -2770,19 +2787,32 @@
 </span><span class="c1"></span>	<span class="c1">// p != expunged. If p == expunged, an entry&#39;s associated value can be updated
 </span><span class="c1"></span>	<span class="c1">// only after first setting m.dirty[key] = e so that lookups using the dirty
 </span><span class="c1"></span>	<span class="c1">// map find the entry.
-</span><span class="c1"></span>	<span class="c1">// nil: 表示为被删除，调用Delete()可以将read map中的元素置为nil
-</span><span class="c1"></span>    <span class="c1">// expunged: 也是表示被删除，但是该键只在read而没有在dirty中，这种情况出现在将read复制到dirty中，即复制的过程会先将nil标记为expunged，然后不将其复制到dirty
-</span><span class="c1"></span>    <span class="c1">//  其他: 表示存着真正的数据
-</span><span class="c1"></span>	<span class="nx">p</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// *interface{}
+</span><span class="c1"></span>	<span class="c1">// p 指向 interface{} 类型的值，用于保存 entry
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// 如果 p == nil，则 entry 已被删除，且 m.dirty == nil
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// 如果 p == expunged, 则 entry 已经被删除，m.dirty != nil ，则 entry 不在 m.dirty 中
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// 否则，entry 仍然有效，且被记录在 m.read.m[key] ，但如果 m.dirty != nil，则在 m.dirty[key] 中
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// 一个 entry 可以被原子替换为 nil 来删除：当 m.dirty 下一次创建时，它会自动将 nil 替换为 expunged 且
+</span><span class="c1"></span>	<span class="c1">// 让 m.dirty[key] 成为未设置的状态。
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// 与一个 entry 关联的值可以被原子替换式的更新，提供的 p != expunged。如果 p == expunged，
+</span><span class="c1"></span>	<span class="c1">// 则与 entry 关联的值只能在 m.dirty[key] = e 设置后被更新，因此会使用 dirty map 来查找 entry。
+</span><span class="c1"></span>
+	<span class="nx">p</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// *interface{}
 </span><span class="c1"></span><span class="p">}</span>
-
+<span class="kd">func</span> <span class="nf">newEntry</span><span class="p">(</span><span class="nx">i</span> <span class="kd">interface</span><span class="p">{})</span> <span class="o">*</span><span class="nx">entry</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">entry</span><span class="p">{</span><span class="nx">p</span><span class="p">:</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">i</span><span class="p">)}</span>
+<span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
 </div><p>p有三种值：</p>
 <ul>
-<li>nil: 数据在read中被删除了，但是dirty中还在，所以能直接更新值(如果dirty==nill的特殊情况,下次写入新值时会复制)；</li>
-<li>expunged:数据在ditry中已经被删除了，更新值的时候要先把这个entry复制到dirty。</li>
-<li>其它： entry是一个正常的值</li>
+<li>nil: 表示为被删除，调用Delete()可以将read map中的元素置为nil</li>
+<li>expunged: 也是表示被删除，但是该键只在read而没有在dirty中，这种情况出现在将read复制到dirty中，即复制的过程会先将nil标记为expunged，然后不将其复制到dirty</li>
+<li>其他: 表示存着真正的数据</li>
 </ul>
 <h3 id="流程图">流程图</h3>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190125125938.png" alt=""></p>
@@ -2931,7 +2961,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>上面的最后三行代码就是提升m.dirty的，很简单的将m.dirty作为readOnly的m字段，原子更新m.read。提升后m.dirty、m.misses重置，并且m.read.amended为false。</p>
-<h3 id="store方法">Store方法</h3>
+<h3 id="store">Store</h3>
 <p>我们先来看 Store 方法,它是用来设置一个键值对,或者更新一个键值对的。</p>
 <p>这个方法是更新或者新增一个entry。</p>
 <p>read和dirty的相同key指向同一个value</p>
@@ -3004,9 +3034,39 @@
 </span><span class="lnt">57
 </span><span class="lnt">58
 </span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
 </span></code></pre></td>
 <td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Store sets the value for a key.
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// unexpungeLocked ensures that the entry is not marked as expunged.
+</span><span class="c1">//
+</span><span class="c1">// If the entry was previously expunged, it must be added to the dirty map
+</span><span class="c1">// before m.mu is unlocked.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">entry</span><span class="p">)</span> <span class="nf">unexpungeLocked</span><span class="p">()</span> <span class="p">(</span><span class="nx">wasExpunged</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">,</span> <span class="nx">expunged</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="c1">// Store sets the value for a key.
 </span><span class="c1">// Store 存储 key 对应的 value
 </span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">Store</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
 	<span class="c1">// 如果m.read存在这个键，并且这个entry没有被标记删除，尝试直接存储。
@@ -3014,29 +3074,40 @@
 </span><span class="c1"></span>	<span class="c1">// 获得 read map
 </span><span class="c1"></span>	<span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
 	<span class="c1">// 如果read字段包含这个项,说明是更新,cas更新项目的值即可
+</span><span class="c1"></span>	<span class="c1">// 首先发生的是更新已经存在值的情况： 更新操作直接更新 read map 中的值，如果成功则不需要进行任何操作，如果没有成功才继续处理。
 </span><span class="c1"></span>	<span class="k">if</span> <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">];</span> <span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">e</span><span class="p">.</span><span class="nf">tryStore</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">value</span><span class="p">)</span> <span class="p">{</span>
 		<span class="k">return</span>
 	<span class="p">}</span>
 	<span class="c1">// read中不存在,或者cas更新失败,就需要加锁访问dirty了
 </span><span class="c1"></span>	<span class="c1">// 如果`m.read`不存在或者已经被标记删除(设置为空标记)
 </span><span class="c1"></span>	<span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-	<span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
+	<span class="c1">// 经过刚才的一系列操作，read map 可能已经更新了
+</span><span class="c1"></span>	<span class="c1">// 因此需要再读一次
+</span><span class="c1"></span>	<span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
 	<span class="c1">// 修改一个已经存在的值
 </span><span class="c1"></span>	<span class="c1">// 读取 read map 中的值
 </span><span class="c1"></span>	<span class="c1">// 如果读到了，则尝试更新 read map 的值，如果更新成功，则直接返回，否则还要继续处理（当且仅当要更新的值被标记为删除）
 </span><span class="c1"></span>	<span class="c1">// 如果没读到，则还要继续处理（read map 中不存在）
 </span><span class="c1"></span>	<span class="c1">// 双检查,看看read是否已经存在了
 </span><span class="c1"></span>	<span class="k">if</span> <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">];</span> <span class="nx">ok</span> <span class="p">{</span>
-		<span class="c1">//read中存在该key,e为值,也就是说可以确定该key是被标记清除了
+		<span class="c1">// 这种情况下，本质上还分两种情况：
+</span><span class="c1"></span>		<span class="c1">// 1. 可能因为是一个已经删除的值（之前的 tryStore 失败）
+</span><span class="c1"></span>		<span class="c1">// 2. 可能先前仅保存在 dirty map 然后同步到了 read map（这是可能的，我们后面读 Load 时再来分析 dirty map 是如何同步到 read map 的）
+</span><span class="c1"></span>		<span class="c1">// 对于第一种而言，我们需要重新将这个已经删除的值标记为没有删除，然后将这个值同步回 dirty map（删除操作只删除 dirty map，之后再说） 对于第二种状态，我们直接更新 read map，不需要打扰 dirty map。
+</span><span class="c1"></span>		<span class="c1">//read中存在该key,e为值,也就是说可以确定该key是被标记清除了
 </span><span class="c1"></span>		<span class="c1">// unexpungeLocked确保条目标记为未清除。
+</span><span class="c1"></span>		<span class="c1">// 修改一个已经存在的值
 </span><span class="c1"></span>		<span class="k">if</span> <span class="nx">e</span><span class="p">.</span><span class="nf">unexpungeLocked</span><span class="p">()</span> <span class="p">{</span>
 			<span class="c1">// 此项目先前已经被删除了,通过将它的值设置为nil,标记为unexpunged
+</span><span class="c1"></span>			<span class="c1">// 说明 entry 先前是被标记为删除了的，现在我们又要存储它，只能向 dirty map 进行更新了
 </span><span class="c1"></span>			<span class="c1">// The entry was previously expunged, which implies that there is a
 </span><span class="c1"></span>			<span class="c1">// non-nil dirty map and this entry is not in it.
+</span><span class="c1"></span>			<span class="c1">// 更新 dirty map 的值即可
 </span><span class="c1"></span>			<span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">e</span>
 			<span class="c1">//m.dirty中不存在这个value，所以加入m.dirty,因为read是只读,不能进行操作
 </span><span class="c1"></span>		<span class="p">}</span>
 		<span class="c1">// 更新
+</span><span class="c1"></span>		<span class="c1">// 无论先前删除与否，都要更新 read map
 </span><span class="c1"></span>		<span class="nx">e</span><span class="p">.</span><span class="nf">storeLocked</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">value</span><span class="p">)</span>
 	<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">];</span> <span class="nx">ok</span> <span class="p">{</span>
 		<span class="c1">// 如果dirty中有此项
@@ -3046,20 +3117,25 @@
 	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
 		<span class="c1">// 否则就是一个新的key
 </span><span class="c1"></span>		<span class="c1">// 如果m.dirty中没有新的数据
+</span><span class="c1"></span>		<span class="c1">// 如果 dirty map 里没有 read map 没有的值（两者相同）
+</span><span class="c1"></span>		<span class="c1">// 如果 read map 和 dirty map 中存储的内容是相同的，那么我们这次存储新的数据 只会存储在 dirty map 中，因此会造成 read map 和 dirty map 的不一致。
 </span><span class="c1"></span>		<span class="k">if</span> <span class="p">!</span><span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
-
-			<span class="c1">//从m.read中复制未删除的数据
+			<span class="c1">// 首次添加一个新的值到 dirty map 中
+</span><span class="c1"></span>			<span class="c1">// 确保已被分配并标记为 read map 是不完备的(dirty map 有 read map 没有的)
+</span><span class="c1"></span>			<span class="c1">//从m.read中复制未删除的数据
 </span><span class="c1"></span>			<span class="c1">//如果dirty为nil
 </span><span class="c1"></span>			<span class="c1">// We&#39;re adding the first new key to the dirty map.
 </span><span class="c1"></span>			<span class="c1">// Make sure it is allocated and mark the read-only map as incomplete.
 </span><span class="c1"></span>			<span class="c1">// 需要创建dirty对象,并且标记read的amended为true,
 </span><span class="c1"></span>			<span class="c1">// 说明有元素它不包含而dirty包含
 </span><span class="c1"></span>			<span class="nx">m</span><span class="p">.</span><span class="nf">dirtyLocked</span><span class="p">()</span>
-			<span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">readOnly</span><span class="p">{</span><span class="nx">m</span><span class="p">:</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">,</span> <span class="nx">amended</span><span class="p">:</span> <span class="kc">true</span><span class="p">})</span>
+			<span class="c1">// 更新 amended，标记 read map 中缺少了值（标记为两者不同）
+</span><span class="c1"></span>			<span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">readOnly</span><span class="p">{</span><span class="nx">m</span><span class="p">:</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">,</span> <span class="nx">amended</span><span class="p">:</span> <span class="kc">true</span><span class="p">})</span>
 		<span class="p">}</span>
 		<span class="c1">//将新值增加到dirty对象中
 </span><span class="c1"></span>		<span class="c1">//m.dirty中没有新的数据，往m.dirty中增加第一个新键
 </span><span class="c1"></span>		<span class="c1">//将这个entry加入到m.dirty中
+</span><span class="c1"></span>		<span class="c1">// 不管 read map 和 dirty map 相同与否，正式保存新的值
 </span><span class="c1"></span>		<span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nf">newEntry</span><span class="p">(</span><span class="nx">value</span><span class="p">)</span>
 	<span class="p">}</span>
 	<span class="c1">// 解锁，有人认为锁的范围有点大，假设read map数据很大，那么执行m.dirtyLocked()会耗费花时间较多，完全可以在操作dirty map时才加锁，这样的想法是不对的，因为m.dirtyLocked()中有写入操作
@@ -3067,7 +3143,66 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><div class="highlight"><div class="chroma">
+</div><h4 id="trystore">tryStore</h4>
+<p>我们来看一下 tryStore。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// tryStore 在 entry 还没有被删除的情况下存储其值
+</span><span class="c1">//
+</span><span class="c1">// 如果 entry 被删除了，则 tryStore 返回 false 且不修改 entry
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">entry</span><span class="p">)</span> <span class="nf">tryStore</span><span class="p">(</span><span class="nx">i</span> <span class="o">*</span><span class="kd">interface</span><span class="p">{})</span> <span class="kt">bool</span> <span class="p">{</span>
+    <span class="c1">// 获取对应Key的元素，判断是否标识为删除,因为并发问题,这里也需要二次检查确认
+</span><span class="c1"></span>	<span class="c1">// 读取 entry
+</span><span class="c1"></span>    <span class="nx">p</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
+	<span class="c1">// 如果 entry 已经删除，则无法存储，返回
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="kc">false</span>
+    <span class="p">}</span>
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="c1">// cas尝试写入新元素值
+</span><span class="c1"></span>		<span class="c1">// 交换 p 和 i 的值，如果成功则立即返回
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">,</span> <span class="nx">p</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">i</span><span class="p">))</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="kc">true</span>
+        <span class="p">}</span>
+        <span class="c1">// 判断是否标识为删除
+</span><span class="c1"></span>        <span class="nx">p</span> <span class="p">=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="kc">false</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>从 tryStore 可以看出，在更新操作中只要没有发生 key 的删除情况，即值已经在 dirty map 中标记为删除， 更新操作一定只更新到 read map 中，不涉及与 dirty map 之间的数据同步。</p>
+<h4 id="dirtylocked">dirtyLocked</h4>
+<p>read map 和 dirty map 相同的情况，首先调用 dirtyLocked()。</p>
+<div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
@@ -3125,50 +3260,22 @@
 </span><span class="lnt">54
 </span><span class="lnt">55
 </span><span class="lnt">56
-</span><span class="lnt">57
-</span><span class="lnt">58
-</span><span class="lnt">59
-</span><span class="lnt">60
-</span><span class="lnt">61
-</span><span class="lnt">62
-</span><span class="lnt">63
-</span><span class="lnt">64
-</span><span class="lnt">65
-</span><span class="lnt">66
-</span><span class="lnt">67
 </span></code></pre></td>
 <td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">entry</span><span class="p">)</span> <span class="nf">tryStore</span><span class="p">(</span><span class="nx">i</span> <span class="o">*</span><span class="kd">interface</span><span class="p">{})</span> <span class="kt">bool</span> <span class="p">{</span>
-    <span class="c1">// 获取对应Key的元素，判断是否标识为删除,因为并发问题,这里也需要二次检查确认
-</span><span class="c1"></span>    <span class="nx">p</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
-    <span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span> <span class="p">{</span>
-        <span class="k">return</span> <span class="kc">false</span>
-    <span class="p">}</span>
-    <span class="k">for</span> <span class="p">{</span>
-        <span class="c1">// cas尝试写入新元素值
-</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">,</span> <span class="nx">p</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">i</span><span class="p">))</span> <span class="p">{</span>
-            <span class="k">return</span> <span class="kc">true</span>
-        <span class="p">}</span>
-        <span class="c1">// 判断是否标识为删除
-</span><span class="c1"></span>        <span class="nx">p</span> <span class="p">=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
-        <span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span> <span class="p">{</span>
-            <span class="k">return</span> <span class="kc">false</span>
-        <span class="p">}</span>
-    <span class="p">}</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="nf">newEntry</span><span class="p">(</span><span class="nx">i</span> <span class="kd">interface</span><span class="p">{})</span> <span class="o">*</span><span class="nx">entry</span> <span class="p">{</span>
-	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">entry</span><span class="p">{</span><span class="nx">p</span><span class="p">:</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">i</span><span class="p">)}</span>
-<span class="p">}</span>
+<pre class="chroma"><code class="language-go" data-lang="go">
 <span class="c1">//新加的元素需要放入到 dirty 中,如果 dirty 为 nil,那么需要从 read 字段中复制出来一个 dirty 对象
 </span><span class="c1">//从m.read中复制未删除的数据(如此做的原因在于删除的时候如果read map存在该元素且read的amended==false：直接将read中的元素置为nil。还有一种情况是read map和dirty map同时存在该元素：将read map中的元素置为nil，因为read map和dirty map 使用的均为元素地址，所以均被置为nil。)
 </span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">dirtyLocked</span><span class="p">()</span> <span class="p">{</span>
-	<span class="k">if</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span> <span class="c1">// 如果dirty字段已经存在,不需要创建了
+	<span class="c1">// 如果 dirty map 为空，则一切都很好，返回
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span> <span class="c1">// 如果dirty字段已经存在,不需要创建了
 </span><span class="c1"></span>		<span class="k">return</span>
 	<span class="p">}</span>
-	<span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
-	<span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kd">interface</span><span class="p">{}]</span><span class="o">*</span><span class="nx">entry</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">))</span>
-	<span class="k">for</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">e</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span> <span class="p">{</span>
+	<span class="c1">// 获得 read map
+</span><span class="c1"></span>	<span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
+	<span class="c1">// 创建一个与 read map 大小一样的 dirty map
+</span><span class="c1"></span>	<span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kd">interface</span><span class="p">{}]</span><span class="o">*</span><span class="nx">entry</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">))</span>
+	<span class="c1">// 依次将 read map 的值复制到 dirty map 中。
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">e</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span> <span class="p">{</span>
 		<span class="k">if</span> <span class="p">!</span><span class="nx">e</span><span class="p">.</span><span class="nf">tryExpungeLocked</span><span class="p">()</span> <span class="p">{</span>
 			<span class="c1">// 把非punged的键值对复制到dirty中
 </span><span class="c1"></span>			<span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">k</span><span class="p">]</span> <span class="p">=</span> <span class="nx">e</span>
@@ -3178,15 +3285,21 @@
 
 <span class="c1">//尝试将已经删除的标记设置为nil标记
 </span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">entry</span><span class="p">)</span> <span class="nf">tryExpungeLocked</span><span class="p">()</span> <span class="p">(</span><span class="nx">isExpunged</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">p</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
-	<span class="k">for</span> <span class="nx">p</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+	<span class="c1">// 获取 entry 的值
+</span><span class="c1"></span>	<span class="nx">p</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
+	<span class="c1">// 如果 entry 值是 nil
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">p</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
 		<span class="c1">// 将已经删除标记为nil的数据标记为expunged
+</span><span class="c1"></span>		<span class="c1">// 检查是否被标记为已经删除
 </span><span class="c1"></span>		<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">expunged</span><span class="p">)</span> <span class="p">{</span>
-			<span class="k">return</span> <span class="kc">true</span>
+			<span class="c1">// 成功交换，说明被标记为删除
+</span><span class="c1"></span>			<span class="k">return</span> <span class="kc">true</span>
 		<span class="p">}</span>
-		<span class="nx">p</span> <span class="p">=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
+		<span class="c1">// 删除操作失败，说明 expunged 是 nil，则重新读取一下
+</span><span class="c1"></span>		<span class="nx">p</span> <span class="p">=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
 	<span class="p">}</span>
-	<span class="k">return</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span>
+	<span class="c1">// 直到读到的 p不为 nil 时，则判断是否是标记为删除的对象
+</span><span class="c1"></span>	<span class="k">return</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span>
 <span class="p">}</span>
 
 <span class="c1">// expunged是一个任意指针，用于标记已删除的条目
@@ -3207,7 +3320,14 @@
 
 </code></pre></td></tr></table>
 </div>
-</div><p>可以看出,Store 既可以是新增元素,也可以是更新元素。如果运气好的话,更新的是已存在的未被删除的元素,直接更新即可,不会用到锁。如果运气不好,需要更新(重用) 删除的对象、更新还未提升的 dirty 中的对象,或者新增加元素的时候就会使用到了锁,这个时候,性能就会下降。</p>
+</div><h4 id="小结">小结</h4>
+<p>小结一下：</p>
+<ul>
+<li>存储过程遵循互不影响的原则，如果在 read map 中读到，则只更新 read map，如果在 dirty map 中读到，则只更新 dirty map。</li>
+<li>优先从 read map 中读，更新失败才读 dirty map。</li>
+<li>存储新值的时候，如果 dirty map 中没有 read map 中的值，那么直接将整个 read map 同步到 dirty map。这时原来的 dirty map 被彻底覆盖（一些值依赖 GC 进行清理）。</li>
+</ul>
+<p>可以看出,Store 既可以是新增元素,也可以是更新元素。如果运气好的话,更新的是已存在的未被删除的元素,直接更新即可,不会用到锁。如果运气不好,需要更新(重用) 删除的对象、更新还未提升的 dirty 中的对象,或者新增加元素的时候就会使用到了锁,这个时候,性能就会下降。</p>
 <p>所以从这一点来看,sync.Map 适合那些只会增长的缓存系统,可以进行更新,但是不要删除,并且不要频繁地增加新元素。</p>
 <p>你可以看到，以上操作都是先从操作m.read开始的，不满足条件再加锁，然后操作m.dirty。</p>
 <p>Store可能会在某种情况下(初始化或者m.dirty刚被提升后)从m.read中复制数据(函数dirtyLocked)，如果这个时候m.read中数据量非常大，可能会影响性能。</p>
@@ -5931,7 +6051,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>注意，即便是最后 p.local 已经被置换到 oldPools 的 p.victim，其中的缓存对象仍然有可能被偷取放回到 allPools 中，从而延缓了 victim 中缓存对象被回收的速度。</p>
-<h3 id="小结">小结</h3>
+<h3 id="小结-1">小结</h3>
 <p>至此，我们完整分析了 sync.Pool 的所有代码。总结：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
