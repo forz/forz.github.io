@@ -25,7 +25,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.68.1 with theme even" />
+<meta name="generator" content="Hugo 0.83.1 with theme even" />
 
 
 <link rel="canonical" href="/post/go%E7%9A%84%E5%90%8C%E6%AD%A5%E5%8E%9F%E8%AF%AD%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
@@ -46,17 +46,14 @@
 <meta property="og:title" content="Go的同步原语源码剖析" />
 <meta property="og:description" content="Mutex Go 语言的 sync.Mutex 由两个字段 state 和 sema 组成。其中 state 表示当前互斥锁的状态，而 sema 是用于控制锁状态的信号量。 1 2 3 4 type Mutex struct { state int32 sema uint32 } 状态 互斥锁的状态比较复" />
 <meta property="og:type" content="article" />
-<meta property="og:url" content="/post/go%E7%9A%84%E5%90%8C%E6%AD%A5%E5%8E%9F%E8%AF%AD%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
-<meta property="article:published_time" content="2021-01-14T15:58:21+00:00" />
-<meta property="article:modified_time" content="2021-01-14T15:58:21+00:00" />
+<meta property="og:url" content="/post/go%E7%9A%84%E5%90%8C%E6%AD%A5%E5%8E%9F%E8%AF%AD%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-01-14T15:58:21&#43;00:00" />
+<meta property="article:modified_time" content="2021-01-14T15:58:21&#43;00:00" />
+
 <meta itemprop="name" content="Go的同步原语源码剖析">
-<meta itemprop="description" content="Mutex Go 语言的 sync.Mutex 由两个字段 state 和 sema 组成。其中 state 表示当前互斥锁的状态，而 sema 是用于控制锁状态的信号量。 1 2 3 4 type Mutex struct { state int32 sema uint32 } 状态 互斥锁的状态比较复">
-<meta itemprop="datePublished" content="2021-01-14T15:58:21&#43;00:00" />
+<meta itemprop="description" content="Mutex Go 语言的 sync.Mutex 由两个字段 state 和 sema 组成。其中 state 表示当前互斥锁的状态，而 sema 是用于控制锁状态的信号量。 1 2 3 4 type Mutex struct { state int32 sema uint32 } 状态 互斥锁的状态比较复"><meta itemprop="datePublished" content="2021-01-14T15:58:21&#43;00:00" />
 <meta itemprop="dateModified" content="2021-01-14T15:58:21&#43;00:00" />
-<meta itemprop="wordCount" content="43915">
-
-
-
+<meta itemprop="wordCount" content="51505">
 <meta itemprop="keywords" content="Go," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的同步原语源码剖析"/>
 <meta name="twitter:description" content="Mutex Go 语言的 sync.Mutex 由两个字段 state 和 sema 组成。其中 state 表示当前互斥锁的状态，而 sema 是用于控制锁状态的信号量。 1 2 3 4 type Mutex struct { state int32 sema uint32 } 状态 互斥锁的状态比较复"/>
@@ -167,8 +164,8 @@
         <div class="post-category">
             <a href="/categories/go/"> Go </a>
             </div>
-          <span class="more-meta"> 约 43915 字 </span>
-          <span class="more-meta"> 预计阅读 88 分钟 </span>
+          <span class="more-meta"> 约 51505 字 </span>
+          <span class="more-meta"> 预计阅读 103 分钟 </span>
         
       </div>
     </header>
@@ -217,12 +214,13 @@
         <li><a href="#read和dirty">read和dirty</a></li>
         <li><a href="#entry">entry</a></li>
         <li><a href="#流程图">流程图</a></li>
-        <li><a href="#load方法">Load方法</a></li>
+        <li><a href="#load">Load</a></li>
         <li><a href="#store">Store</a></li>
-        <li><a href="#delete方法">Delete方法</a></li>
+        <li><a href="#delete">Delete</a></li>
         <li><a href="#loadorstore">LoadOrStore</a></li>
         <li><a href="#range">Range</a></li>
         <li><a href="#补全len">补全Len</a></li>
+        <li><a href="#小结-1">小结</a></li>
         <li><a href="#syncmap的适用场景">sync.Map的适用场景</a></li>
         <li><a href="#警告不要拷贝syncmap">警告:不要拷贝sync.Map</a></li>
       </ul>
@@ -236,7 +234,15 @@
         <li><a href="#put">Put</a></li>
         <li><a href="#runtime_procunpin--runtime_procpin">runtime_procUnpin &amp; runtime_procPin</a></li>
         <li><a href="#poolcleanup">PoolCleanup</a></li>
-        <li><a href="#小结-1">小结</a></li>
+        <li><a href="#小结-2">小结</a></li>
+      </ul>
+    </li>
+    <li><a href="#context">Context</a>
+      <ul>
+        <li><a href="#emptyctx">emptyCtx</a></li>
+        <li><a href="#cancelctx">cancelCtx</a></li>
+        <li><a href="#timerctx">timerCtx</a></li>
+        <li><a href="#valuectx">valueCtx</a></li>
       </ul>
     </li>
     <li><a href="#参考">参考</a></li>
@@ -2816,8 +2822,15 @@
 </ul>
 <h3 id="流程图">流程图</h3>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190125125938.png" alt=""></p>
-<h3 id="load方法">Load方法</h3>
+<h3 id="load">Load</h3>
 <p>读取时，先去read读取；如果没有，就加锁，然后去dirty读取，同时调用missLocked()，再解锁。在missLocked中，会递增misses变量，如果misses&gt;len(dirty)，那么把dirty提升为read，清空原来的dirty。</p>
+<ol>
+<li>如果 read map 中已经找到了该值，则不需要去访问 dirty map（慢）。</li>
+<li>但如果没找到，且 dirty map 与 read map 没有差异，则也不需要去访问 dirty map。</li>
+<li>如果 dirty map 和 read map 有差异，则我们需要锁住整个 Map，然后再读取一次 read map 来防止并发导致的上一次读取失误</li>
+<li>如果锁住后，确实 read map 读取不到且 dirty map 和 read map 一致，则不需要去读 dirty map 了，直接解锁返回。</li>
+<li>如果锁住后，read map 读不到，且 dirty map 与 read map 不一致，则该 key 可能在 dirty map 中，我们需要从 dirty map 中读取，并记录一次 miss（在 read map 中 miss）。</li>
+</ol>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt"> 1
@@ -2867,16 +2880,35 @@
 </span><span class="lnt">45
 </span><span class="lnt">46
 </span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Load returns the value stored in the map for a key, or nil if no
 </span><span class="c1">// value is present.
 </span><span class="c1">// The ok result indicates whether value was found in the map.
+</span><span class="c1">// Load 返回了存储在 map 中对应于 key 的值 value，如果不存在则返回 nil
+</span><span class="c1">// ok 表示了值能否在 map 中找到
 </span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">Load</span><span class="p">(</span><span class="nx">key</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">(</span><span class="nx">value</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">ok</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
 	<span class="c1">// 首先从read处理
 </span><span class="c1"></span>	<span class="c1">// 1.首先从m.read中得到只读readOnly,从它的map中查找，不需要加锁
+</span><span class="c1"></span>	<span class="c1">// 拿到只读 read map
 </span><span class="c1"></span>	<span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
-	<span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+	<span class="c1">// 从只读 map 中读 key 对应的 value
+</span><span class="c1"></span>	<span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
 	<span class="c1">// 2. 如果没找到，并且m.dirty中有新数据，需要从m.dirty查找，这个时候需要加锁
 </span><span class="c1"></span>	<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
 		<span class="c1">// 如果不存在并且dirty不为nil(有新的元素)
@@ -2886,35 +2918,46 @@
 </span><span class="c1"></span>		<span class="c1">// not worth copying the dirty map for this key.)
 </span><span class="c1"></span>		<span class="c1">// 双检查,看看read中现在是否存在此key
 </span><span class="c1"></span>		<span class="c1">// 双检查，避免加锁的时候m.dirty提升为m.read,这个时候m.read可能被替换了。
+</span><span class="c1"></span>		<span class="c1">// 锁住后，再读一次 read map
 </span><span class="c1"></span>		<span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
 		<span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="p">=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
 		<span class="c1">// 如果m.read中还是不存在，并且m.dirty中有新数据
+</span><span class="c1"></span>		<span class="c1">// 如果这时 read map 确实读不到，且 dirty map 与 read map 不一致
 </span><span class="c1"></span>		<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
 			<span class="c1">//依然不存在,并且dirty不为nil
 </span><span class="c1"></span>			<span class="c1">// 从dirty中读取
+</span><span class="c1"></span>			<span class="c1">// 则从 dirty map 中读
 </span><span class="c1"></span>			<span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
 			<span class="c1">// Regardless of whether the entry was present, record a miss: this key
 </span><span class="c1"></span>			<span class="c1">// will take the slow path until the dirty map is promoted to the read
 </span><span class="c1"></span>			<span class="c1">// map.
 </span><span class="c1"></span>			<span class="c1">// 不管m.dirty中存不存在，都将misses计数加一
 </span><span class="c1"></span>			<span class="c1">// missLocked()中满足条件后就会提升m.dirty
+</span><span class="c1"></span>			<span class="c1">// 无论 entry 是否找到，记录一次 miss：该 key 会采取 slow path 进行读取，直到
+</span><span class="c1"></span>			<span class="c1">// dirty map 被提升为 read map。
 </span><span class="c1"></span>			<span class="nx">m</span><span class="p">.</span><span class="nf">missLocked</span><span class="p">()</span>
 		<span class="p">}</span>
 		<span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
 	<span class="p">}</span>
-	<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+	<span class="c1">// 如果 read map 或者 dirty map 中找不到 key，则确实没找到，返回 nil 和 false
+</span><span class="c1"></span>	<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
 		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
 	<span class="p">}</span>
 	<span class="c1">//返回读取的对象,e既可能是从read中获得的,也可能是从dirty中获得的
+</span><span class="c1"></span>	<span class="c1">// 如果找到了，则返回读到的值
 </span><span class="c1"></span>	<span class="k">return</span> <span class="nx">e</span><span class="p">.</span><span class="nf">load</span><span class="p">()</span>
 <span class="p">}</span>
 <span class="c1">// 元素不存在或者被删除，则直接返回
 </span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">entry</span><span class="p">)</span> <span class="nf">load</span><span class="p">()</span> <span class="p">(</span><span class="nx">value</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">ok</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">p</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
-	<span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
+	<span class="c1">// 读 entry 的值
+</span><span class="c1"></span>	<span class="nx">p</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
+	<span class="c1">// 如果值为 nil 或者已经删除
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span> <span class="p">{</span>
+		<span class="c1">// 则读不到
+</span><span class="c1"></span>		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
 	<span class="p">}</span>
-	<span class="k">return</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kd">interface</span><span class="p">{})(</span><span class="nx">p</span><span class="p">),</span> <span class="kc">true</span>
+	<span class="c1">// 否则读值
+</span><span class="c1"></span>	<span class="k">return</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kd">interface</span><span class="p">{})(</span><span class="nx">p</span><span class="p">),</span> <span class="kc">true</span>
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
@@ -2932,6 +2975,8 @@
 </div><p>可以看到，如果我们查询的键值正好存在于m.read中，无须加锁，直接返回，理论上性能优异。即使不存在于m.read中，经过miss几次之后，m.dirty会被提升为m.read，又会从m.read中查找。所以对于更新／增加较少，加载存在的key很多的case,性能基本和无锁的map类似。</p>
 <p>如果幸运的话,我们从 read 中读取到了这个 key 对应的值,那么就不需要加锁了,性能会非常好。但是,如果请求的 key 不存在或者是新加的,就需要加锁从 dirty 中读取。所以,读取不存在的 key 会因为加锁而导致性能下降,读取还没有提升的新值的情况下也会因为加锁性能下降。</p>
 <p>其中,missLocked 增加 miss 的时候,如果 miss 数等于 dirty 长度,会将 dirty 提升为 read,并将 dirty 置空。</p>
+<h4 id="misslocked">missLocked</h4>
+<p>当记录 miss 时，涉及 missLocked 操作：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt"> 1
@@ -2945,22 +2990,37 @@
 </span><span class="lnt"> 9
 </span><span class="lnt">10
 </span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
 </span></code></pre></td>
 <td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">missLocked</span><span class="p">()</span> <span class="p">{</span>
-	<span class="nx">m</span><span class="p">.</span><span class="nx">misses</span><span class="o">++</span><span class="c1">// misses计数加一
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 此方法调用时，整个 map 是锁住的
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">missLocked</span><span class="p">()</span> <span class="p">{</span>
+	<span class="c1">// 增加一次 miss
+</span><span class="c1"></span>	<span class="nx">m</span><span class="p">.</span><span class="nx">misses</span><span class="o">++</span><span class="c1">// misses计数加一
+</span><span class="c1"></span>	<span class="c1">// 如果 miss 的次数小于 dirty map 的 key 数
+</span><span class="c1"></span>	<span class="c1">// 则直接返回
 </span><span class="c1"></span>	<span class="k">if</span> <span class="nx">m</span><span class="p">.</span><span class="nx">misses</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">)</span> <span class="p">{</span>
 		<span class="c1">// 如果没达到阈值(dirty字段的长度),返回
 </span><span class="c1"></span>		<span class="k">return</span>
 	<span class="p">}</span>
-	<span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">readOnly</span><span class="p">{</span><span class="nx">m</span><span class="p">:</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">})</span>
+	<span class="c1">// 否则将 dirty map 同步到 read map 去
+</span><span class="c1"></span>	<span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">readOnly</span><span class="p">{</span><span class="nx">m</span><span class="p">:</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">})</span>
 	<span class="c1">//把dirty字段的内存提升为read字段
+</span><span class="c1"></span>	<span class="c1">// 清空 dirty map
 </span><span class="c1"></span>	<span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span> <span class="p">=</span> <span class="kc">nil</span>	<span class="c1">// 清空dirty
+</span><span class="c1"></span>	<span class="c1">// miss 计数归零
 </span><span class="c1"></span>	<span class="nx">m</span><span class="p">.</span><span class="nx">misses</span> <span class="p">=</span> <span class="mi">0</span>	<span class="c1">// misses数重置为0
 </span><span class="c1"></span><span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>上面的最后三行代码就是提升m.dirty的，很简单的将m.dirty作为readOnly的m字段，原子更新m.read。提升后m.dirty、m.misses重置，并且m.read.amended为false。</p>
+</div><p>可以看出，miss 如果大于了 dirty 所存储的 key 数时，会将 dirty map 同步到 read map，并将自身清空，miss 计数归零。</p>
+<p>上面的最后三行代码就是提升m.dirty的，很简单的将m.dirty作为readOnly的m字段，原子更新m.read。提升后m.dirty、m.misses重置，并且m.read.amended为false。</p>
 <h3 id="store">Store</h3>
 <p>我们先来看 Store 方法,它是用来设置一个键值对,或者更新一个键值对的。</p>
 <p>这个方法是更新或者新增一个entry。</p>
@@ -3331,7 +3391,7 @@
 <p>所以从这一点来看,sync.Map 适合那些只会增长的缓存系统,可以进行更新,但是不要删除,并且不要频繁地增加新元素。</p>
 <p>你可以看到，以上操作都是先从操作m.read开始的，不满足条件再加锁，然后操作m.dirty。</p>
 <p>Store可能会在某种情况下(初始化或者m.dirty刚被提升后)从m.read中复制数据(函数dirtyLocked)，如果这个时候m.read中数据量非常大，可能会影响性能。</p>
-<h3 id="delete方法">Delete方法</h3>
+<h3 id="delete">Delete</h3>
 <p>sync.map 的第 3 个核心方法是 Delete 方法。在 Go 1.15 中欧长坤提供了一个 LoadAndDelete 的实现,所以 Delete 方法的核心改在了对 LoadAndDelete 中实现了。</p>
 <p>删除元素,采用延迟删除，当read map存在元素时，将元素置为nil，只有在提升dirty的时候才清理删除的数,延迟删除可以避免后续获取删除的元素时候需要加锁。当read map不存在元素时，直接删除dirty map中的元素</p>
 <p>同样，删除操作还是从m.read中开始，如果这个entry不存在于m.read中，并且m.dirty中有新数据，则加锁尝试从m.dirty中删除。注意，还是要双检查的。 从m.dirty中直接删除即可，就当它没存在过.</p>
@@ -3385,9 +3445,25 @@
 </span><span class="lnt">46
 </span><span class="lnt">47
 </span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Delete deletes the value for a key.
+</span><span class="c1">// Delete 删除 key 对应的 value
 </span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">Delete</span><span class="p">(</span><span class="nx">key</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
 	<span class="nx">m</span><span class="p">.</span><span class="nf">LoadAndDelete</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
 <span class="p">}</span>
@@ -3396,17 +3472,26 @@
 </span><span class="c1">// The loaded result reports whether the key was present.
 </span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">LoadAndDelete</span><span class="p">(</span><span class="nx">key</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">(</span><span class="nx">value</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">loaded</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
 	<span class="c1">// 1. 从read map中查找，如果存在，则置为nil
+</span><span class="c1"></span>	<span class="c1">// 获得 read map
 </span><span class="c1"></span>	<span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
-	<span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
-	<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
-		<span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="c1">// 从 read map 中读取需要删除的 key
+</span><span class="c1"></span>	<span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+	<span class="c1">// 如果 read map 中没找到，且 read map 与 dirty map 不一致
+</span><span class="c1"></span>	<span class="c1">// 说明要删除的值在 dirty map 中
+</span><span class="c1"></span>	<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
+		<span class="c1">// 在 dirty map 中需要加锁
+</span><span class="c1"></span>		<span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
 		<span class="c1">// 第二次检测
+</span><span class="c1"></span>		<span class="c1">// 再次读 read map
 </span><span class="c1"></span>		<span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
-		<span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="p">=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
-		<span class="c1">// 2. 如果read map中不存在，但dirty map中存在，则直接从dirty map删除
+		<span class="c1">// 从 read map 中取值
+</span><span class="c1"></span>		<span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="p">=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+		<span class="c1">// 没取到，read map 和 dirty map 不一致
+</span><span class="c1"></span>		<span class="c1">// 2. 如果read map中不存在，但dirty map中存在，则直接从dirty map删除
 </span><span class="c1"></span>		<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
 			<span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
 			<span class="c1">// 这一行长坤在1.15中实现的时候忘记加上了，导致在特殊的场景下有些key总是没有被回收
+</span><span class="c1"></span>			<span class="c1">// 删除 dierty map 的值
 </span><span class="c1"></span>			<span class="nb">delete</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
 			<span class="c1">// Regardless of whether the entry was present, record a miss: this key
 </span><span class="c1"></span>			<span class="c1">// will take the slow path until the dirty map is promoted to the read
@@ -3424,20 +3509,26 @@
 <span class="c1">// 但是如果是从m.read中删除，并不会直接删除，而是打标记,因为read map和dirty map 使用的均为元素地址，所以均被置为nil
 </span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">entry</span><span class="p">)</span> <span class="nb">delete</span><span class="p">()</span> <span class="p">(</span><span class="nx">value</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">ok</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
 	<span class="k">for</span> <span class="p">{</span>
-		<span class="nx">p</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
+		<span class="c1">// 读取 entry 的值
+</span><span class="c1"></span>		<span class="nx">p</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">)</span>
 		<span class="c1">// 已标记为删除
+</span><span class="c1"></span>		<span class="c1">// 如果 p 等于 nil，或者 p 已经标记删除
 </span><span class="c1"></span>		<span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nx">p</span> <span class="o">==</span> <span class="nx">expunged</span> <span class="p">{</span>
-			<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
+			<span class="c1">// 则不需要删除
+</span><span class="c1"></span>			<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
 		<span class="p">}</span>
 		<span class="c1">// 原子操作，e.p标记为nil
+</span><span class="c1"></span>		<span class="c1">// 否则，将 p 的值与 nil 进行原子换
 </span><span class="c1"></span>		<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">e</span><span class="p">.</span><span class="nx">p</span><span class="p">,</span> <span class="nx">p</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span> <span class="p">{</span>
-			<span class="k">return</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kd">interface</span><span class="p">{})(</span><span class="nx">p</span><span class="p">),</span> <span class="kc">true</span>
+			<span class="c1">// 删除成功（本质只是解除引用，实际上是留给 GC 清理）
+</span><span class="c1"></span>			<span class="k">return</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kd">interface</span><span class="p">{})(</span><span class="nx">p</span><span class="p">),</span> <span class="kc">true</span>
 		<span class="p">}</span>
 	<span class="p">}</span>
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>如果 read 中不存在,那么就需要从 dirty 中寻找这个项目。最终,如果项目存在就删除(将它的值标记为 nil)。如果项目不为 nil 或者没有被标记为 expunged,那么还可以把它的值返回。</p>
+</div><p>从实现上来看，删除操作相对简单，当需要删除一个值时，移除 read map 中的值，本质上仅仅只是解除对变量的引用。 实际的回收是由 GC 进行处理。 如果 read map 中并未找到要删除的值，才会去尝试删除 dirty map 中的值。</p>
+<p>如果 read 中不存在,那么就需要从 dirty 中寻找这个项目。最终,如果项目存在就删除(将它的值标记为 nil)。如果项目不为 nil 或者没有被标记为 expunged,那么还可以把它的值返回。</p>
 <h3 id="loadorstore">LoadOrStore</h3>
 <p>如果对应的元素存在，则返回该元素的值，如果不存在，则将元素写入到sync.Map。如果已加载值，则加载结果为true;如果已存储，则为false。</p>
 <div class="highlight"><div class="chroma">
@@ -3478,43 +3569,71 @@
 </span><span class="lnt">34
 </span><span class="lnt">35
 </span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
 </span></code></pre></td>
 <td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">LoadOrStore</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">(</span><span class="nx">actual</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">loaded</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// LoadOrStore 在 key 已经存在时，返回存在的值，否则存储当前给定的值
+</span><span class="c1">// loaded 为 true 表示 actual 读取成功，否则为 false 表示 value 存储成功
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">LoadOrStore</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">(</span><span class="nx">actual</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">loaded</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
     <span class="c1">// 不加锁的情况下读取read map
 </span><span class="c1"></span>    <span class="c1">// 第一次检测
+</span><span class="c1"></span>	<span class="c1">// 读 read map
 </span><span class="c1"></span>    <span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
-    <span class="k">if</span> <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">];</span> <span class="nx">ok</span> <span class="p">{</span>
+	<span class="c1">// 如果 read map 中已经读到
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">];</span> <span class="nx">ok</span> <span class="p">{</span>
         <span class="c1">// 如果元素存在（是否标识为删除由tryLoadOrStore执行处理），尝试获取该元素已存在的值或者将元素写入
+</span><span class="c1"></span>		<span class="c1">// 尝试存储（可能 key 是一个已删除的 key）
 </span><span class="c1"></span>        <span class="nx">actual</span><span class="p">,</span> <span class="nx">loaded</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">tryLoadOrStore</span><span class="p">(</span><span class="nx">value</span><span class="p">)</span>
-        <span class="k">if</span> <span class="nx">ok</span> <span class="p">{</span>
+		<span class="c1">// 如果存储成功，则直接返回
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">ok</span> <span class="p">{</span>
             <span class="k">return</span> <span class="nx">actual</span><span class="p">,</span> <span class="nx">loaded</span>
         <span class="p">}</span>
     <span class="p">}</span>
-
-    <span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="c1">// 否则，涉及 dirty map，加锁
+</span><span class="c1"></span>    <span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
     <span class="c1">// 第二次检测
 </span><span class="c1"></span>    <span class="c1">// 以下逻辑参看Store
+</span><span class="c1"></span>	<span class="c1">// 再读一次 read map
 </span><span class="c1"></span>    <span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
     <span class="k">if</span> <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">];</span> <span class="nx">ok</span> <span class="p">{</span>
-        <span class="k">if</span> <span class="nx">e</span><span class="p">.</span><span class="nf">unexpungeLocked</span><span class="p">()</span> <span class="p">{</span>
-            <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">e</span>
+		<span class="c1">// 如果 read map 中已经读到，则看该值是否被删除
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">e</span><span class="p">.</span><span class="nf">unexpungeLocked</span><span class="p">()</span> <span class="p">{</span>
+			<span class="c1">// 没有被删除，则通过 dirty map 存
+</span><span class="c1"></span>            <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">e</span>
         <span class="p">}</span>
         <span class="nx">actual</span><span class="p">,</span> <span class="nx">loaded</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">tryLoadOrStore</span><span class="p">(</span><span class="nx">value</span><span class="p">)</span>
     <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">];</span> <span class="nx">ok</span> <span class="p">{</span>
-        <span class="nx">actual</span><span class="p">,</span> <span class="nx">loaded</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">tryLoadOrStore</span><span class="p">(</span><span class="nx">value</span><span class="p">)</span>
+		<span class="c1">// 如果 read map 没找到, dirty map 找到了
+</span><span class="c1"></span>		<span class="c1">// 尝试 laod or store，并记录 miss
+</span><span class="c1"></span>        <span class="nx">actual</span><span class="p">,</span> <span class="nx">loaded</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">tryLoadOrStore</span><span class="p">(</span><span class="nx">value</span><span class="p">)</span>
         <span class="nx">m</span><span class="p">.</span><span class="nf">missLocked</span><span class="p">()</span>
     <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
-        <span class="k">if</span> <span class="p">!</span><span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
+		<span class="c1">// 否则就是存一个新的值
+</span><span class="c1"></span>		<span class="c1">// 如果 read map 和 dirty map 相同，则开始标记不同
+</span><span class="c1"></span>        <span class="k">if</span> <span class="p">!</span><span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
             <span class="nx">m</span><span class="p">.</span><span class="nf">dirtyLocked</span><span class="p">()</span>
             <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">readOnly</span><span class="p">{</span><span class="nx">m</span><span class="p">:</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span><span class="p">,</span> <span class="nx">amended</span><span class="p">:</span> <span class="kc">true</span><span class="p">})</span>
         <span class="p">}</span>
-        <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nf">newEntry</span><span class="p">(</span><span class="nx">value</span><span class="p">)</span>
+		<span class="c1">// 存到 dirty map 中去
+</span><span class="c1"></span>        <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nf">newEntry</span><span class="p">(</span><span class="nx">value</span><span class="p">)</span>
         <span class="nx">actual</span><span class="p">,</span> <span class="nx">loaded</span> <span class="p">=</span> <span class="nx">value</span><span class="p">,</span> <span class="kc">false</span>
     <span class="p">}</span>
     <span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-
-    <span class="k">return</span> <span class="nx">actual</span><span class="p">,</span> <span class="nx">loaded</span>
+	<span class="c1">// 返回存取状态
+</span><span class="c1"></span>    <span class="k">return</span> <span class="nx">actual</span><span class="p">,</span> <span class="nx">loaded</span>
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
@@ -3612,16 +3731,32 @@
 </span><span class="lnt">28
 </span><span class="lnt">29
 </span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
 </span></code></pre></td>
 <td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">Range</span><span class="p">(</span><span class="nx">f</span> <span class="kd">func</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Range 为每个 key 顺序的调用 f。如果 f 返回 false，则 range 会停止迭代。
+</span><span class="c1">//
+</span><span class="c1">// Range 的时间复杂度可能会是 O(N) 即便是 f 返回 false。
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">Range</span><span class="p">(</span><span class="nx">f</span> <span class="kd">func</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
     <span class="c1">// 第一检测
+</span><span class="c1"></span>	<span class="c1">// 读取 read map
 </span><span class="c1"></span>    <span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
     <span class="c1">// read.amended=true,说明dirty map包含所有有效的元素（含新加，不含被删除的），使用dirty map
+</span><span class="c1"></span>	<span class="c1">// 如果 read map 和 dirty map 不一致，则需要进一步操作
 </span><span class="c1"></span>    <span class="k">if</span> <span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
         <span class="c1">// 第二检测
 </span><span class="c1"></span>        <span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-        <span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
+		<span class="c1">// 再读一次，如果还是不一致，则将 dirty map 提升为 read map
+</span><span class="c1"></span>        <span class="nx">read</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">read</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">readOnly</span><span class="p">)</span>
         <span class="k">if</span> <span class="nx">read</span><span class="p">.</span><span class="nx">amended</span> <span class="p">{</span>
             <span class="c1">// 使用dirty map并且升级为read map
 </span><span class="c1"></span>            <span class="nx">read</span> <span class="p">=</span> <span class="nx">readOnly</span><span class="p">{</span><span class="nx">m</span><span class="p">:</span> <span class="nx">m</span><span class="p">.</span><span class="nx">dirty</span><span class="p">}</span>
@@ -3632,13 +3767,17 @@
         <span class="nx">m</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
     <span class="p">}</span>
     <span class="c1">// 一贯原则，使用read map作为读
+</span><span class="c1"></span>	<span class="c1">// 在 read 变量中读（可能是 read map ，也可能是 dirty map 同步过来的 map）
 </span><span class="c1"></span>    <span class="k">for</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">e</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">read</span><span class="p">.</span><span class="nx">m</span> <span class="p">{</span>
-        <span class="nx">v</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">load</span><span class="p">()</span>
-        <span class="c1">// 被删除的不计入
+		<span class="c1">// 读 readOnly，load 会检查该值是否被标记为删除
+</span><span class="c1"></span>        <span class="nx">v</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">load</span><span class="p">()</span>
+		<span class="c1">// 如果已经删除，则跳过
+</span><span class="c1"></span>        <span class="c1">// 被删除的不计入
 </span><span class="c1"></span>        <span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
             <span class="k">continue</span>
         <span class="p">}</span>
         <span class="c1">// 函数返回false，终止
+</span><span class="c1"></span>		<span class="c1">// 如果 f 返回 false，则停止迭代
 </span><span class="c1"></span>        <span class="k">if</span> <span class="p">!</span><span class="nf">f</span><span class="p">(</span><span class="nx">k</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span> <span class="p">{</span>
             <span class="k">break</span>
         <span class="p">}</span>
@@ -3646,7 +3785,8 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>Range方法调用前可能会做一个m.dirty的提升，不过提升m.dirty不是一个耗时的操作。</p>
+</div><p>既然要 Range 整个 map，则需要考虑 dirty map 与 read map 不一致的问题，如果不一致，则直接将 dirty map 同步到 read map 中。</p>
+<p>Range方法调用前可能会做一个m.dirty的提升，不过提升m.dirty不是一个耗时的操作。</p>
 <h3 id="补全len">补全Len</h3>
 <p>sync.Map没有提供获取元素个数的Len()方法，不过可以通过Range()实现。</p>
 <div class="highlight"><div class="chroma">
@@ -3695,7 +3835,15 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="syncmap的适用场景">sync.Map的适用场景</h3>
+</div><h3 id="小结-1">小结</h3>
+<p>我们来回顾一下 sync.Map 中 read map 和 dirty map 的同步过程：</p>
+<ol>
+<li>当 Store 一个新值会发生：read map –&gt; dirty map</li>
+<li>dirty map –&gt; read map：当 read map 进行 Load 失败 len(dirty map) 次之后发生</li>
+</ol>
+<p>因此，无论是存储还是读取，read map 中的值一定能在 dirty map 中找到。无论两者如何同步，sync.Map 通过 entry 指针操作， 保证数据永远只有一份，一旦 read map 中的值修改，dirty map 中保存的指针就能直接读到修改后的值。</p>
+<p>当存储新值时，一定发生在 dirty map 中。当读取旧值时，如果 read map 读到则直接返回，如果没有读到，则尝试加锁去 dirty map 中取。 这也就是官方宣称的 sync.Map 适用于一次写入多次读取的情景。</p>
+<h3 id="syncmap的适用场景">sync.Map的适用场景</h3>
 <p>sync.Map 为了保证并发安全有一些性能损失，因此在非并发情况下，使用 map 相比使用 sync.Map 会有更好的性能。</p>
 <p>总结一下，sync.Map像是一个不够完善的容器，比起已有的map主要存在以下不足：</p>
 <ol>
@@ -6051,7 +6199,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>注意，即便是最后 p.local 已经被置换到 oldPools 的 p.victim，其中的缓存对象仍然有可能被偷取放回到 allPools 中，从而延缓了 victim 中缓存对象被回收的速度。</p>
-<h3 id="小结-1">小结</h3>
+<h3 id="小结-2">小结</h3>
 <p>至此，我们完整分析了 sync.Pool 的所有代码。总结：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -6091,16 +6239,881 @@
 <li>显著降低了 GC 发生前清理当前周期中产生的大量缓存对象的影响：因为回收被推迟到了下个 GC 周期；</li>
 <li>显著降低了 GC 发生后 New 对象的成本：因为密集的缓存对象读写可能从上个周期中未清理的对象中偷取。</li>
 </ol>
+<h2 id="context">Context</h2>
+<p>上下文 context.Context Go 语言中用来设置截止日期、同步信号，传递请求相关值的结构体。上下文与 Goroutine 有比较密切的关系，是 Go 语言中独特的设计，在其他编程语言中我们很少见到类似的概念。</p>
+<p>context.Context 是 Go 语言在 1.7 版本中引入标准库的接口1，该接口定义了四个需要实现的方法，其中包括：</p>
+<ol>
+<li>Deadline — 如果本 Context 被设置了时限，则该函数返回 ok=true 和对应的到期时间点。否则，返回 ok=false 和 nil。</li>
+<li>Done — 返回一个 Channel，这个 Channel 会在当前工作完成或者上下文被取消后关闭，多次调用 Done 方法会返回同一个 Channel；多次调用 Done 方法会返回同一个 Channel；</li>
+<li>Err — 在上述 channel 被 close 前会返回 nil，在被 close 后会返回该 Context 被关闭的信息，error 类型，只有两种，被取消或者超时：
+<ol>
+<li>如果 context.Context 被取消，会返回 Canceled 错误；</li>
+<li>如果 context.Context 超时，会返回 DeadlineExceeded 错误；</li>
+</ol>
+</li>
+<li>Value — 返回绑定在该 Context 链上的给定的 Key 的值，如果没有，则返回 nil。注意，不要用于在函数中传参，其本意在于共享一些横跨整个 Context 生命周期范围的值。Key 可以是任何可比较的类型。为了防止 Key 冲突，最好将 Key 的类型定义为非导出类型，然后为其定义访问器。</li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Context</span> <span class="kd">interface</span> <span class="p">{</span>
+	<span class="nf">Deadline</span><span class="p">()</span> <span class="p">(</span><span class="nx">deadline</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">,</span> <span class="nx">ok</span> <span class="kt">bool</span><span class="p">)</span>
+	<span class="nf">Done</span><span class="p">()</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{}</span>
+	<span class="nf">Err</span><span class="p">()</span> <span class="kt">error</span>
+	<span class="nf">Value</span><span class="p">(</span><span class="nx">key</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>context 包中提供的 context.Background、context.TODO、context.WithDeadline 和 context.WithValue 函数会返回实现该接口的私有结构体，我们会在后面详细介绍它们的工作原理。</p>
+<p>Value举例:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">user</span>
+
+<span class="kn">import</span> <span class="s">&#34;context&#34;</span>
+
+<span class="c1">// User 是要存于 Context 中的 Value 类型.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">User</span> <span class="kd">struct</span> <span class="p">{</span><span class="o">...</span><span class="p">}</span>
+
+<span class="c1">// key 定义为了非导出类型，以避免和其他 package 中的 key 冲突
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">key</span> <span class="kt">int</span>
+
+<span class="c1">// userKey 是 Context 中用来关联 user.User 的 key，是非导出变量
+</span><span class="c1">// 客户端需要用 user.NewContext 和 user.FromContext 构建包含
+</span><span class="c1">// user 的 Context 和从 Context 中提取相应 user
+</span><span class="c1"></span><span class="kd">var</span> <span class="nx">userKey</span> <span class="nx">key</span>
+
+<span class="c1">// NewContext 返回一个带有用户值 u 的 Context.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewContext</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">u</span> <span class="o">*</span><span class="nx">User</span><span class="p">)</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="nx">context</span><span class="p">.</span><span class="nf">WithValue</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">userKey</span><span class="p">,</span> <span class="nx">u</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">// FromContext 从 Context 中提取 user，如果有的话.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">FromContext</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">User</span><span class="p">,</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+  <span class="nx">u</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">ctx</span><span class="p">.</span><span class="nf">Value</span><span class="p">(</span><span class="nx">userKey</span><span class="p">).(</span><span class="o">*</span><span class="nx">User</span><span class="p">)</span>
+  <span class="k">return</span> <span class="nx">u</span><span class="p">,</span> <span class="nx">ok</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="emptyctx">emptyCtx</h3>
+<p>emptyCtx经常被用作在跟节点或者说是最上层的context，因为context是可以嵌套的。在上面的Withvalue的例子中已经看到，先用emptyCtx创建一个context，然后再使用withValue把之前创建的context传入。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">emptyCtx</span> <span class="kt">int</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="o">*</span><span class="nx">emptyCtx</span><span class="p">)</span> <span class="nf">Deadline</span><span class="p">()</span> <span class="p">(</span><span class="nx">deadline</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">,</span> <span class="nx">ok</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">return</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="o">*</span><span class="nx">emptyCtx</span><span class="p">)</span> <span class="nf">Done</span><span class="p">()</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{}</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="o">*</span><span class="nx">emptyCtx</span><span class="p">)</span> <span class="nf">Err</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="o">*</span><span class="nx">emptyCtx</span><span class="p">)</span> <span class="nf">Value</span><span class="p">(</span><span class="nx">key</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>为了减轻gc压力，emptyCtx其实是一个int，并且通过空方法实现了 context.Context 接口中的所有方法，它没有任何功能。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210519124926.png" alt=""></p>
+<p>context 包中最常用的方法还是 context.Background、context.TODO，这两个方法都会返回预先初始化好的私有变量 background 和 todo，它们会在同一个 Go 程序中被复用：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="p">(</span>
+	<span class="nx">background</span> <span class="p">=</span> <span class="nb">new</span><span class="p">(</span><span class="nx">emptyCtx</span><span class="p">)</span>
+	<span class="nx">todo</span>       <span class="p">=</span> <span class="nb">new</span><span class="p">(</span><span class="nx">emptyCtx</span><span class="p">)</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">Background</span><span class="p">()</span> <span class="nx">Context</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">background</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">TODO</span><span class="p">()</span> <span class="nx">Context</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">todo</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这两个私有变量都是通过 new(emptyCtx) 语句初始化的，它们是指向私有结构体 context.emptyCtx 的指针，</p>
+<p>从源代码来看，context.Background 和 context.TODO 也只是互为别名，没有太大的差别，只是在使用和语义上稍有不同：</p>
+<ul>
+<li>context.Background 是上下文的默认值，所有其他的上下文都应该从它衍生出来；</li>
+<li>context.TODO 应该仅在不确定应该使用哪种上下文时使用；</li>
+</ul>
+<p>在多数情况下，如果当前函数没有上下文作为入参，我们都会使用 context.Background 作为起始的上下文向下传递。</p>
+<p>所以千万不要用nil作为context，并且从易于理解的角度出发，未考虑清楚是否传递、如何传递context时用TODO，其他情况都用Background()，如请求入口初始化context</p>
+<h3 id="cancelctx">cancelCtx</h3>
+<p>cancelCtx是context实现里最重要的一环，context的取消几乎都是使用了这个对象。WithDeadline WithTimeout其实最终都是调用的cancel的cancel函数来实现的。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// A cancelCtx can be canceled. When canceled, it also cancels any children
+</span><span class="c1">// that implement canceler.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">cancelCtx</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">Context</span>
+
+	<span class="nx">mu</span>       <span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>            <span class="c1">// protects following fields
+</span><span class="c1"></span>	<span class="nx">done</span>     <span class="kd">chan</span> <span class="kd">struct</span><span class="p">{}</span>         <span class="c1">// created lazily, closed by first cancel call
+</span><span class="c1"></span>	<span class="nx">children</span> <span class="kd">map</span><span class="p">[</span><span class="nx">canceler</span><span class="p">]</span><span class="kd">struct</span><span class="p">{}</span> <span class="c1">// set to nil by the first cancel call
+</span><span class="c1"></span>	<span class="nx">err</span>      <span class="kt">error</span>                 <span class="c1">// set to non-nil by the first cancel call
+</span><span class="c1"></span><span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">cancelCtx</span><span class="p">)</span> <span class="nf">Value</span><span class="p">(</span><span class="nx">key</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+	<span class="c1">// 用了一个特殊的 key：cancelCtxKey，遇到该 key 时，cancelCtx 会返回自身。
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">key</span> <span class="o">==</span> <span class="o">&amp;</span><span class="nx">cancelCtxKey</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">c</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">c</span><span class="p">.</span><span class="nx">Context</span><span class="p">.</span><span class="nf">Value</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="c1">// c.done 是“懒汉式”创建，只有调用了 Done() 方法的时候才会被创建。再次说明，函数返回的是一个只读的 channel，而且没有地方向这个 channel 里面写数据。所以，直接调用读这个 channel，协程会被 block 住。一般通过搭配 select 来使用。一旦关闭，就会立即读出零值。
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">cancelCtx</span><span class="p">)</span> <span class="nf">Done</span><span class="p">()</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{}</span> <span class="p">{</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">done</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nx">done</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+	<span class="p">}</span>
+	<span class="nx">d</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">done</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="k">return</span> <span class="nx">d</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">cancelCtx</span><span class="p">)</span> <span class="nf">Err</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">err</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="k">return</span> <span class="nx">err</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这里的mu是context并发安全的关键、done是通知的关键、children存储结构是内部最常用传导context的方式。</p>
+<h4 id="canceler">canceler</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// A canceler is a context type that can be canceled directly. The
+</span><span class="c1">// implementations are *cancelCtx and *timerCtx.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">canceler</span> <span class="kd">interface</span> <span class="p">{</span>
+	<span class="nf">cancel</span><span class="p">(</span><span class="nx">removeFromParent</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span>
+	<span class="nf">Done</span><span class="p">()</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>实现了上面定义的两个方法的 Context，就表明该 Context 是可取消的。源码中有两个类型实现了 canceler 接口：<code>*cancelCtx</code> 和 <code>*timerCtx</code>。注意是加了 * 号的，是这两个结构体的指针实现了 canceler 接口。</p>
+<p>Context 接口设计成这个样子的原因：</p>
+<ul>
+<li>“取消”操作应该是建议性，而非强制性
+caller 不应该去关心、干涉 callee 的情况，决定如何以及何时 return 是 callee 的责任。caller 只需发送“取消”信息，callee 根据收到的信息来做进一步的决策，因此接口并没有定义 cancel 方法。</li>
+<li>“取消”操作应该可传递
+“取消”某个函数时，和它相关联的其他函数也应该“取消”。因此，Done() 方法返回一个只读的 channel，所有相关函数监听此 channel。一旦 channel 关闭，通过 channel 的“广播机制”，所有监听者都能收到。</li>
+</ul>
+<h4 id="cancel">cancel</h4>
+<p>总体来看，cancel() 方法的功能就是关闭 channel：c.done；递归地取消它的所有子节点；从父节点从删除自己。达到的效果是通过关闭 channel，将取消信号传递给了它的所有子节点。goroutine 接收到取消信号的方式就是 select 语句中的读 c.done 被选中。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">cancelCtx</span><span class="p">)</span> <span class="nf">cancel</span><span class="p">(</span><span class="nx">removeFromParent</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// 已经被其他 goroutine 取消
+</span><span class="c1"></span>		<span class="nx">c</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="c1">// 记下错误，并关闭 done
+</span><span class="c1"></span>	<span class="nx">c</span><span class="p">.</span><span class="nx">err</span> <span class="p">=</span> <span class="nx">err</span>
+	<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">done</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nx">done</span> <span class="p">=</span> <span class="nx">closedchan</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="nb">close</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">done</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="c1">// 遍历它的所有子节点
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">child</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">c</span><span class="p">.</span><span class="nx">children</span> <span class="p">{</span>
+		<span class="c1">// 递归地取消所有子节点
+</span><span class="c1"></span>		<span class="nx">child</span><span class="p">.</span><span class="nf">cancel</span><span class="p">(</span><span class="kc">false</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="c1">// 将子节点置空
+</span><span class="c1"></span>	<span class="nx">c</span><span class="p">.</span><span class="nx">children</span> <span class="p">=</span> <span class="kc">nil</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+	<span class="k">if</span> <span class="nx">removeFromParent</span> <span class="p">{</span>
+		<span class="c1">// 从父节点中移除自己
+</span><span class="c1"></span>		<span class="nf">removeChild</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">c</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="propagatecancel">propagateCancel</h4>
+<p>context.propagateCancel 会构建父子上下文之间的关联，当父上下文被取消时，子上下文也会被取消：</p>
+<p>context.propagateCancel 的作用是在 parent 和 child 之间同步取消和结束的信号，保证在 parent 被取消时，child 也会收到对应的信号，不会出现状态不一致的情况。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// propagateCancel arranges for child to be canceled when parent is.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">propagateCancel</span><span class="p">(</span><span class="nx">parent</span> <span class="nx">Context</span><span class="p">,</span> <span class="nx">child</span> <span class="nx">canceler</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">done</span> <span class="o">:=</span> <span class="nx">parent</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+	<span class="c1">// 如果parent.Done是nil，则不做任何处理，因为parent context永远不会取消，比如TODO()、Background()、WithValue等
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">done</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// 父上下文不会触发取消信号
+</span><span class="c1"></span>		<span class="k">return</span> <span class="c1">// parent is never canceled
+</span><span class="c1"></span>	<span class="p">}</span>
+	<span class="c1">// 当 child 的继承链包含可以取消的上下文时，会判断 parent 是否已经触发了取消信号；
+</span><span class="c1"></span>	<span class="k">select</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">done</span><span class="p">:</span>
+		<span class="c1">// 如果已经被取消，child 会立刻被取消；
+</span><span class="c1"></span>		<span class="c1">// parent is already canceled
+</span><span class="c1"></span>		<span class="nx">child</span><span class="p">.</span><span class="nf">cancel</span><span class="p">(</span><span class="kc">false</span><span class="p">,</span> <span class="nx">parent</span><span class="p">.</span><span class="nf">Err</span><span class="p">())</span>
+		<span class="c1">// 父上下文已经被取消
+</span><span class="c1"></span>		<span class="k">return</span>
+	<span class="k">default</span><span class="p">:</span>
+	<span class="p">}</span>
+	<span class="c1">// 如果没有被取消，child 会被加入 parent 的 children 列表中，等待 parent 释放取消信号；
+</span><span class="c1"></span>	<span class="c1">// context包内部可以直接识别、处理的类型
+</span><span class="c1"></span>	<span class="c1">// parentCancelCtx根据parent context的类型，返回bool型ok
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">p</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nf">parentCancelCtx</span><span class="p">(</span><span class="nx">parent</span><span class="p">);</span> <span class="nx">ok</span> <span class="p">{</span>
+		<span class="c1">// ok为真时需要建立parent对应的children，并保存parent-&gt;child映射关系
+</span><span class="c1"></span>		<span class="nx">p</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="c1">// parent has already been canceled
+</span><span class="c1"></span>			<span class="c1">// 父节点已经被取消了，本节点（子节点）也要取消
+</span><span class="c1"></span>			<span class="nx">child</span><span class="p">.</span><span class="nf">cancel</span><span class="p">(</span><span class="kc">false</span><span class="p">,</span> <span class="nx">p</span><span class="p">.</span><span class="nx">err</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">children</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nx">p</span><span class="p">.</span><span class="nx">children</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="nx">canceler</span><span class="p">]</span><span class="kd">struct</span><span class="p">{})</span>
+			<span class="p">}</span>
+			<span class="c1">// 父节点未取消
+</span><span class="c1"></span>			<span class="c1">// &#34;挂到&#34;父节点上
+</span><span class="c1"></span>			<span class="nx">p</span><span class="p">.</span><span class="nx">children</span><span class="p">[</span><span class="nx">child</span><span class="p">]</span> <span class="p">=</span> <span class="kd">struct</span><span class="p">{}{}</span>
+		<span class="p">}</span>
+		<span class="nx">p</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">goroutines</span><span class="p">,</span> <span class="o">+</span><span class="mi">1</span><span class="p">)</span>
+		<span class="c1">// 当父上下文是开发者自定义的类型、实现了 context.Context 接口并在 Done() 方法中返回了非空的管道时；
+</span><span class="c1"></span>		<span class="c1">// 运行一个新的 Goroutine 同时监听 parent.Done() 和 child.Done() 两个 Channel；
+</span><span class="c1"></span>		<span class="c1">// 这里children的key是canceler接口，并不能处理所有的外部类型，所以会有else,对于其他外部类型，不建立直接的传递关系。
+</span><span class="c1"></span>		<span class="c1">// 如果没有找到可取消的父 context。新启动一个协程监控父节点或子节点取消信号
+</span><span class="c1"></span>		<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+			<span class="k">select</span> <span class="p">{</span>
+			<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">parent</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
+			<span class="c1">// 在 parent.Done() 关闭时调用 child.cancel 取消子上下文；
+</span><span class="c1"></span>				<span class="nx">child</span><span class="p">.</span><span class="nf">cancel</span><span class="p">(</span><span class="kc">false</span><span class="p">,</span> <span class="nx">parent</span><span class="p">.</span><span class="nf">Err</span><span class="p">())</span>
+			<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">child</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
+			<span class="p">}</span>
+		<span class="p">}()</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这个方法的作用就是向上寻找可以“挂靠”的“可取消”的 context，并且“挂靠”上去。这样，调用上层 cancel 方法的时候，就可以层层传递，将那些挂靠的子 context 同时“取消”。</p>
+<p>这里着重解释下为什么会有 else 描述的情况发生。else 是指当前节点 context 没有向上找到可以取消的父节点，那么就要再启动一个协程监控父节点或者子节点的取消动作。</p>
+<p>这里就有疑问了，既然没找到可以取消的父节点，那 case &lt;-parent.Done() 这个 case 就永远不会发生，所以可以忽略这个 case；而 case &lt;-child.Done() 这个 case 又啥事不干。那这个 else 不就多余了吗？</p>
+<p>其实不然。我们来看 parentCancelCtx 的代码：</p>
+<p>parentCancelCtx定义如下:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// &amp;cancelCtxKey is the key that a cancelCtx returns itself for.
+</span><span class="c1"></span><span class="kd">var</span> <span class="nx">cancelCtxKey</span> <span class="kt">int</span>
+
+<span class="c1">// parentCancelCtx returns the underlying *cancelCtx for parent.
+</span><span class="c1">// It does this by looking up parent.Value(&amp;cancelCtxKey) to find
+</span><span class="c1">// the innermost enclosing *cancelCtx and then checking whether
+</span><span class="c1">// parent.Done() matches that *cancelCtx. (If not, the *cancelCtx
+</span><span class="c1">// has been wrapped in a custom implementation providing a
+</span><span class="c1">// different done channel, in which case we should not bypass it.)
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">parentCancelCtx</span><span class="p">(</span><span class="nx">parent</span> <span class="nx">Context</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">cancelCtx</span><span class="p">,</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">done</span> <span class="o">:=</span> <span class="nx">parent</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">done</span> <span class="o">==</span> <span class="nx">closedchan</span> <span class="o">||</span> <span class="nx">done</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
+	<span class="p">}</span>
+	<span class="nx">p</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">parent</span><span class="p">.</span><span class="nf">Value</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">cancelCtxKey</span><span class="p">).(</span><span class="o">*</span><span class="nx">cancelCtx</span><span class="p">)</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
+	<span class="p">}</span>
+	<span class="nx">p</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="nx">ok</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">done</span> <span class="o">==</span> <span class="nx">done</span>
+	<span class="nx">p</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">p</span><span class="p">,</span> <span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="withcancel">WithCancel</h4>
+<p>当 WithCancel 函数返回的 CancelFunc 被调用或者是父节点的 done channel 被关闭（父节点的 CancelFunc 被调用），此 context（子节点） 的 done channel 也会被关闭。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">WithCancel</span><span class="p">(</span><span class="nx">parent</span> <span class="nx">Context</span><span class="p">)</span> <span class="p">(</span><span class="nx">ctx</span> <span class="nx">Context</span><span class="p">,</span> <span class="nx">cancel</span> <span class="nx">CancelFunc</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">c</span> <span class="o">:=</span> <span class="nf">newCancelCtx</span><span class="p">(</span><span class="nx">parent</span><span class="p">)</span>
+	<span class="nf">propagateCancel</span><span class="p">(</span><span class="nx">parent</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">c</span><span class="p">)</span>
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">c</span><span class="p">,</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span> <span class="nx">c</span><span class="p">.</span><span class="nf">cancel</span><span class="p">(</span><span class="kc">true</span><span class="p">,</span> <span class="nx">Canceled</span><span class="p">)</span> <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>cancelCtx.cancel 是非导出函数，不能在 context 包外调用，因此持有 Context 的内层过程不能自己取消自己，须由返回的 CancelFunc （简单的包裹了 cancelCtx.cancel ）来取消，其句柄一般为外层过程所持有。</p>
+<p>注意传给 WithCancel 方法的参数，前者是 true，也就是说取消的时候，需要将自己从父节点里删除。第二个参数则是一个固定的取消错误类型：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">Canceled</span> <span class="p">=</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="s">&#34;context canceled&#34;</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>还注意到一点，调用子节点 cancel 方法的时候，传入的第一个参数 removeFromParent 是 false。</p>
+<p>两个问题需要回答：</p>
+<ol>
+<li>什么时候会传 true？</li>
+<li>为什么有时传 true，有时传 false？</li>
+</ol>
+<p>当 removeFromParent 为 true 时，会将当前节点的 context 从父节点 context 中删除：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">removeChild</span><span class="p">(</span><span class="nx">parent</span> <span class="nx">Context</span><span class="p">,</span> <span class="nx">child</span> <span class="nx">canceler</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">p</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nf">parentCancelCtx</span><span class="p">(</span><span class="nx">parent</span><span class="p">)</span>
+    <span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">children</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nb">delete</span><span class="p">(</span><span class="nx">p</span><span class="p">.</span><span class="nx">children</span><span class="p">,</span> <span class="nx">child</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>最关键的一行：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nb">delete</span><span class="p">(</span><span class="nx">p</span><span class="p">.</span><span class="nx">children</span><span class="p">,</span> <span class="nx">child</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>什么时候会传 true 呢？答案是调用 WithCancel() 方法的时候，也就是新创建一个可取消的 context 节点时，返回的 cancelFunc 函数会传入 true。这样做的结果是：当调用返回的 cancelFunc 时，会将这个 context 从它的父节点里“除名”，因为父节点可能有很多子节点，你自己取消了，所以我要和你断绝关系，对其他人没影响。</p>
+<p>在取消函数内部，我知道，我所有的子节点都会因为我的：<code>c.children = nil</code> 而化为灰烬。我自然就没有必要再多做这一步，最后我所有的子节点都会和我断绝关系，没必要一个个做。另外，如果遍历子节点的时候，调用 child.cancel 函数传了 true，还会造成同时遍历和删除一个 map 的境地，会有问题的。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210519231733.png" alt=""></p>
+<p>如上左图，代表一棵 context 树。当调用左图中标红 context 的 cancel 方法后，该 context 从它的父 context 中去除掉了：实线箭头变成了虚线。且虚线圈框出来的 context 都被取消了，圈内的 context 间的父子关系都荡然无存了。</p>
+<h4 id="newcancelctx">newCancelCtx</h4>
+<p>context.newCancelCtx 将传入的上下文包装成私有结构体 context.cancelCtx；</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// newCancelCtx returns an initialized cancelCtx.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">newCancelCtx</span><span class="p">(</span><span class="nx">parent</span> <span class="nx">Context</span><span class="p">)</span> <span class="nx">cancelCtx</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">cancelCtx</span><span class="p">{</span><span class="nx">Context</span><span class="p">:</span> <span class="nx">parent</span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="timerctx">timerCtx</h3>
+<p>timerCtx内部包含了cancelCtx，然后通过定时器，实现了到时取消的功能，定义如下:</p>
+<p>context.timerCtx 内部不仅通过嵌入 context.cancelCtx 结构体继承了相关的变量和方法，还通过持有的定时器 timer 和截止时间 deadline 实现了定时取消的功能：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">timerCtx</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">cancelCtx</span>
+	<span class="nx">timer</span> <span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Timer</span> <span class="c1">// Under cancelCtx.mu.
+</span><span class="c1"></span>
+	<span class="nx">deadline</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">timerCtx</span><span class="p">)</span> <span class="nf">Deadline</span><span class="p">()</span> <span class="p">(</span><span class="nx">deadline</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">,</span> <span class="nx">ok</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">c</span><span class="p">.</span><span class="nx">deadline</span><span class="p">,</span> <span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>除了 context.WithCancel 之外，context 包中的另外两个函数 context.WithDeadline 和 context.WithTimeout 也都能创建可以被取消的计时器上下文 context.timerCtx：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">WithTimeout</span><span class="p">(</span><span class="nx">parent</span> <span class="nx">Context</span><span class="p">,</span> <span class="nx">timeout</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">)</span> <span class="p">(</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">CancelFunc</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nf">WithDeadline</span><span class="p">(</span><span class="nx">parent</span><span class="p">,</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">().</span><span class="nf">Add</span><span class="p">(</span><span class="nx">timeout</span><span class="p">))</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="withdeadline">WithDeadline</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">WithDeadline</span><span class="p">(</span><span class="nx">parent</span> <span class="nx">Context</span><span class="p">,</span> <span class="nx">d</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">)</span> <span class="p">(</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">CancelFunc</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">cur</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">parent</span><span class="p">.</span><span class="nf">Deadline</span><span class="p">();</span> <span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">cur</span><span class="p">.</span><span class="nf">Before</span><span class="p">(</span><span class="nx">d</span><span class="p">)</span> <span class="p">{</span>
+		<span class="c1">// 如果父节点 context 的 deadline 早于指定时间。直接构建一个可取消的 context。
+</span><span class="c1"></span>        <span class="c1">// 原因是一旦父节点超时，自动调用 cancel 函数，子节点也会随之取消。
+</span><span class="c1"></span>        <span class="c1">// 所以不用单独处理子节点的计时器时间到了之后，自动调用 cancel 函数
+</span><span class="c1"></span>		<span class="k">return</span> <span class="nf">WithCancel</span><span class="p">(</span><span class="nx">parent</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="c1">// 构建 timerCtx
+</span><span class="c1"></span>	<span class="nx">c</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">timerCtx</span><span class="p">{</span>
+		<span class="nx">cancelCtx</span><span class="p">:</span> <span class="nf">newCancelCtx</span><span class="p">(</span><span class="nx">parent</span><span class="p">),</span>
+		<span class="nx">deadline</span><span class="p">:</span>  <span class="nx">d</span><span class="p">,</span>
+	<span class="p">}</span>
+	<span class="c1">// 挂靠到父节点上
+</span><span class="c1"></span>	<span class="nf">propagateCancel</span><span class="p">(</span><span class="nx">parent</span><span class="p">,</span> <span class="nx">c</span><span class="p">)</span>
+	<span class="c1">// 计算当前距离 deadline 的时间
+</span><span class="c1"></span>	<span class="nx">dur</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Until</span><span class="p">(</span><span class="nx">d</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">dur</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="c1">// 直接取消
+</span><span class="c1"></span>		<span class="nx">c</span><span class="p">.</span><span class="nf">cancel</span><span class="p">(</span><span class="kc">true</span><span class="p">,</span> <span class="nx">DeadlineExceeded</span><span class="p">)</span> <span class="c1">// 已经过了截止日期
+</span><span class="c1"></span>		<span class="k">return</span> <span class="nx">c</span><span class="p">,</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span> <span class="nx">c</span><span class="p">.</span><span class="nf">cancel</span><span class="p">(</span><span class="kc">false</span><span class="p">,</span> <span class="nx">Canceled</span><span class="p">)</span> <span class="p">}</span>
+	<span class="p">}</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// d 时间后，timer 会自动调用 cancel 函数。自动取消
+</span><span class="c1"></span>		<span class="nx">c</span><span class="p">.</span><span class="nx">timer</span> <span class="p">=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">AfterFunc</span><span class="p">(</span><span class="nx">dur</span><span class="p">,</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+			<span class="nx">c</span><span class="p">.</span><span class="nf">cancel</span><span class="p">(</span><span class="kc">true</span><span class="p">,</span> <span class="nx">DeadlineExceeded</span><span class="p">)</span>
+		<span class="p">})</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">c</span><span class="p">,</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span> <span class="nx">c</span><span class="p">.</span><span class="nf">cancel</span><span class="p">(</span><span class="kc">true</span><span class="p">,</span> <span class="nx">Canceled</span><span class="p">)</span> <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>context.WithDeadline 在创建 context.timerCtx 的过程中判断了父上下文的截止日期与当前日期，并通过 time.AfterFunc 创建定时器，当时间超过了截止日期后会调用 context.timerCtx.cancel 同步取消信号。</p>
+<p>也就是说仍然要把子节点挂靠到父节点，一旦父节点取消了，会把取消信号向下传递到子节点，子节点随之取消。</p>
+<p>有一个特殊情况是，如果要创建的这个子节点的 deadline 比父节点要晚，也就是说如果父节点是时间到自动取消，那么一定会取消这个子节点，导致子节点的 deadline 根本不起作用，因为子节点在 deadline 到来之前就已经被父节点取消了。</p>
+<p>这个函数的最核心的一句是：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">c</span><span class="p">.</span><span class="nx">timer</span> <span class="p">=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">AfterFunc</span><span class="p">(</span><span class="nx">d</span><span class="p">,</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">c</span><span class="p">.</span><span class="nf">cancel</span><span class="p">(</span><span class="kc">true</span><span class="p">,</span> <span class="nx">DeadlineExceeded</span><span class="p">)</span>
+<span class="p">})</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>c.timer 会在 d 时间间隔后，自动调用 cancel 函数，并且传入的错误就是 DeadlineExceeded：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">DeadlineExceeded</span> <span class="kt">error</span> <span class="p">=</span> <span class="nx">deadlineExceededError</span><span class="p">{}</span>
+
+<span class="kd">type</span> <span class="nx">deadlineExceededError</span> <span class="kd">struct</span><span class="p">{}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">deadlineExceededError</span><span class="p">)</span> <span class="nf">Error</span><span class="p">()</span> <span class="kt">string</span>   <span class="p">{</span> <span class="k">return</span> <span class="s">&#34;context deadline exceeded&#34;</span> <span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>也就是超时错误。</p>
+<h4 id="cancel-1">cancel</h4>
+<p>context.timerCtx.cancel 方法不仅调用了 context.cancelCtx.cancel，还会停止持有的定时器减少不必要的资源浪费。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">timerCtx</span><span class="p">)</span> <span class="nf">cancel</span><span class="p">(</span><span class="nx">removeFromParent</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">cancelCtx</span><span class="p">.</span><span class="nf">cancel</span><span class="p">(</span><span class="kc">false</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">removeFromParent</span> <span class="p">{</span>
+		<span class="nf">removeChild</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">cancelCtx</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">c</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">timer</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nx">timer</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nx">timer</span> <span class="p">=</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="valuectx">valueCtx</h3>
+<p>valueCtx只用来传值，当然也可以传递，所有context都可以传递，定义如下</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// A valueCtx carries a key-value pair. It implements Value for that key and
+</span><span class="c1">// delegates all other calls to the embedded Context.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">valueCtx</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">Context</span>
+	<span class="nx">key</span><span class="p">,</span> <span class="nx">val</span> <span class="kd">interface</span><span class="p">{}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>context.valueCtx 结构体会将除了 Value 之外的 Err、Deadline 等方法代理到父上下文中，它只会响应 context.valueCtx.Value 方法，该方法的实现也很简单：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">valueCtx</span><span class="p">)</span> <span class="nf">Value</span><span class="p">(</span><span class="nx">key</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">key</span> <span class="o">==</span> <span class="nx">key</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">c</span><span class="p">.</span><span class="nx">val</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">c</span><span class="p">.</span><span class="nx">Context</span><span class="p">.</span><span class="nf">Value</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>它会顺着链路一直往上找，比较当前节点的 key 是否是要找的 key，如果是，则直接返回 value。否则，一直顺着 context 往前，最终找到根节点（一般是 emptyCtx），直接返回一个 nil。所以用 Value 方法的时候要判断结果是否为 nil。</p>
+<p>因为查找方向是往上走的，所以，父节点没法获取子节点存储的值，子节点却可以获取父节点的值。</p>
+<p>在最后我们需要了解如何使用上下文传值，context 包中的 context.WithValue 能从父上下文中创建一个子上下文，传值的子上下文使用 context.valueCtx 类型：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">WithValue</span><span class="p">(</span><span class="nx">parent</span> <span class="nx">Context</span><span class="p">,</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">val</span> <span class="kd">interface</span><span class="p">{})</span> <span class="nx">Context</span> <span class="p">{</span>
+	<span class="c1">// key必须为非空
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">key</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="s">&#34;nil key&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="c1">// 对 key 的要求是可比较，因为之后需要通过 key 取出 context 中的值，可比较是必须的。
+</span><span class="c1"></span>	<span class="k">if</span> <span class="p">!</span><span class="nx">reflectlite</span><span class="p">.</span><span class="nf">TypeOf</span><span class="p">(</span><span class="nx">key</span><span class="p">).</span><span class="nf">Comparable</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="s">&#34;key is not comparable&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">valueCtx</span><span class="p">{</span><span class="nx">parent</span><span class="p">,</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">val</span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>valueCtx的key、val都是接口类型，在调用WithValue的时候，内部会首先通过反射确定key是否可比较类型(同map中的key)，然后赋值key</p>
+<p>WithValue 创建 context 节点的过程实际上就是创建链表节点的过程。两个节点的 key 值是可以相等的，但它们是两个不同的 context 节点。查找的时候，会向上查找到最后一个挂载的 context 节点，也就是离得比较近的一个父节点 context。所以，整体上而言，用 WithValue 构造的其实是一个低效率的链表。</p>
 <h2 id="参考">参考</h2>
-<p><a href="https://colobu.com/2017/07/11/dive-into-sync-Map">https://colobu.com/2017/07/11/dive-into-sync-Map</a>
-<a href="https://segmentfault.com/a/1190000015242373">https://segmentfault.com/a/1190000015242373</a>
-<a href="https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/">https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/</a>
-<a href="http://www.qiuxiaobing.cn/%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80/2018/03/09/go-sync-map.html">http://www.qiuxiaobing.cn/%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80/2018/03/09/go-sync-map.html</a>
-<a href="http://www.gogodjzhu.com/index.php/code/basic/397/">http://www.gogodjzhu.com/index.php/code/basic/397/</a>
-<a href="http://russellluo.com/2017/06/go-sync-map-diagram.html">http://russellluo.com/2017/06/go-sync-map-diagram.html</a></p>
+<p><a href="https://colobu.com/2017/07/11/dive-into-sync-Map">https://colobu.com/2017/07/11/dive-into-sync-Map</a></p>
+<p><a href="https://segmentfault.com/a/1190000015242373">https://segmentfault.com/a/1190000015242373</a></p>
+<p><a href="https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/">https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/</a></p>
+<p><a href="http://www.qiuxiaobing.cn/%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80/2018/03/09/go-sync-map.html">http://www.qiuxiaobing.cn/%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80/2018/03/09/go-sync-map.html</a></p>
+<p><a href="http://www.gogodjzhu.com/index.php/code/basic/397/">http://www.gogodjzhu.com/index.php/code/basic/397/</a></p>
+<p><a href="http://russellluo.com/2017/06/go-sync-map-diagram.html">http://russellluo.com/2017/06/go-sync-map-diagram.html</a></p>
 <p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/cond/">5.4 条件变量</a></p>
 <p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/waitgroup/">5.5 同步组</a></p>
 <p><a href="https://blog.csdn.net/sinat_41790904/article/details/115416237">Go 标准库源码分析 - sync 包的Pool</a></p>
+<p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/map/">5.7 并发安全散列表</a></p>
+<p><a href="https://draveness.me/golang/docs/part3-runtime/ch06-concurrency/golang-context/">6.1 上下文 Context</a></p>
+<p><a href="https://juejin.cn/post/6844903741842259975">go context剖析之源码分析</a></p>
 
     </div>
 
