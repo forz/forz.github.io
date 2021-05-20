@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>字节缓冲池:bytebufferpool - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="sync.Pool的坑 内存泄漏 取出来的 bytes.Buffer 在使用的时候，我们可以往这个元素中增加大量的 byte 数据，这会导致底层的 byte slice 的容量可能会变得很大。这个时候" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.83.1 with theme even" />
+
+
+<link rel="canonical" href="/post/%E5%AD%97%E8%8A%82%E7%BC%93%E5%86%B2%E6%B1%A0bytebufferpool/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="字节缓冲池:bytebufferpool" />
+<meta property="og:description" content="sync.Pool的坑 内存泄漏 取出来的 bytes.Buffer 在使用的时候，我们可以往这个元素中增加大量的 byte 数据，这会导致底层的 byte slice 的容量可能会变得很大。这个时候" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/%E5%AD%97%E8%8A%82%E7%BC%93%E5%86%B2%E6%B1%A0bytebufferpool/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-05-20T16:16:29&#43;00:00" />
+<meta property="article:modified_time" content="2021-05-20T16:16:29&#43;00:00" />
+
+<meta itemprop="name" content="字节缓冲池:bytebufferpool">
+<meta itemprop="description" content="sync.Pool的坑 内存泄漏 取出来的 bytes.Buffer 在使用的时候，我们可以往这个元素中增加大量的 byte 数据，这会导致底层的 byte slice 的容量可能会变得很大。这个时候"><meta itemprop="datePublished" content="2021-05-20T16:16:29&#43;00:00" />
+<meta itemprop="dateModified" content="2021-05-20T16:16:29&#43;00:00" />
+<meta itemprop="wordCount" content="3966">
+<meta itemprop="keywords" content="bytebufferpool," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="字节缓冲池:bytebufferpool"/>
+<meta name="twitter:description" content="sync.Pool的坑 内存泄漏 取出来的 bytes.Buffer 在使用的时候，我们可以往这个元素中增加大量的 byte 数据，这会导致底层的 byte slice 的容量可能会变得很大。这个时候"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">字节缓冲池:bytebufferpool</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-05-20 </span>
+        <div class="post-category">
+            <a href="/categories/go/"> Go </a>
+            </div>
+          <span class="more-meta"> 约 3966 字 </span>
+          <span class="more-meta"> 预计阅读 8 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#syncpool的坑">sync.Pool的坑</a>
+      <ul>
+        <li><a href="#内存泄漏">内存泄漏</a></li>
+        <li><a href="#内存浪费">内存浪费</a></li>
+      </ul>
+    </li>
+    <li><a href="#bytebufferpool">bytebufferpool</a></li>
+    <li><a href="#快速使用">快速使用</a></li>
+    <li><a href="#源码分析">源码分析</a>
+      <ul>
+        <li><a href="#结构体">结构体</a></li>
+        <li><a href="#get">Get</a></li>
+        <li><a href="#put">Put</a></li>
+      </ul>
+    </li>
+    <li><a href="#总结">总结</a></li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="syncpool的坑">sync.Pool的坑</h2>
+<h3 id="内存泄漏">内存泄漏</h3>
+<p>取出来的 bytes.Buffer 在使用的时候，我们可以往这个元素中增加大量的 byte 数据，这会导致底层的 byte slice 的容量可能会变得很大。这个时候，即使 Reset 再放回到池子中，这些 byte slice 的容量不会改变，所占的空间依然很大。而且，因为 Pool 回收的机制，这些大的 Buffer 可能不被回收，而是会一直占用很大的空间，这属于内存泄漏的问题</p>
+<p>在使用 sync.Pool 回收 buffer 的时候，一定要检查回收的对象的大小。如果 buffer 太大，就不要回收了，否则就太浪费了;</p>
+<h3 id="内存浪费">内存浪费</h3>
+<p>除了内存泄漏以外，还有一种浪费的情况，就是池子中的 buffer 都比较大，但在实际使用的时候，很多时候只需要一个小的 buffer，这也是一种浪费现象;</p>
+<p>要做到物尽其用，尽可能不浪费的话，我们可以将 buffer 池分成几层。首先，小于 512 byte 的元素的 buffer 占一个池子；其次，小于 1K byte 大小的元素占一个池子；再次，小于 4K byte 大小的元素占一个池子。这样分成几个池子以后，就可以根据需要，到所需大小的池子中获取 buffer 了;</p>
+<h2 id="bytebufferpool">bytebufferpool</h2>
+<p>在这类对象中，比较特殊的一类是字节缓冲（底层一般是字节切片）。在做字符串拼接时，为了拼接的高效，我们通常将中间结果存放在一个字节缓冲。在拼接完成之后，再从字节缓冲中生成结果字符串。在收发网络包时，也需要将不完整的包暂时存放在字节缓冲中。</p>
+<p>Go 标准库中的类型bytes.Buffer封装字节切片，提供一些使用接口。我们知道切片的容量是有限的，容量不足时需要进行扩容。而频繁的扩容容易造成性能抖动。</p>
+<h2 id="快速使用">快速使用</h2>
+<p>本文代码使用 Go Modules。</p>
+<p>创建目录并初始化：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">mkdir</span> <span class="n">bytebufferpool</span> <span class="o">&amp;&amp;</span> <span class="n">cd</span> <span class="n">bytebufferpool</span>
+<span class="n">go</span> <span class="n">mod</span> <span class="n">init</span> <span class="n">github.com</span><span class="o">/</span><span class="n">darjun</span><span class="o">/</span><span class="n">go</span><span class="o">-</span><span class="n">daily</span><span class="o">-</span><span class="n">lib</span><span class="o">/</span><span class="n">bytebufferpool</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>安装bytebufferpool库：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">go</span> <span class="n">get</span> <span class="o">-</span><span class="n">u</span> <span class="n">github.com</span><span class="o">/</span><span class="n">PuerkitoBio</span><span class="o">/</span><span class="n">bytebufferpool</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>典型的使用方式先通过bytebufferpool提供的Get()方法获取一个bytebufferpool.Buffer对象，然后调用这个对象的方法写入数据，使用完成之后再调用bytebufferpool.Put()将对象放回对象池中。例：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+  <span class="s">&#34;fmt&#34;</span>
+
+  <span class="s">&#34;github.com/valyala/bytebufferpool&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">b</span> <span class="o">:=</span> <span class="nx">bytebufferpool</span><span class="p">.</span><span class="nf">Get</span><span class="p">()</span>
+  <span class="nx">b</span><span class="p">.</span><span class="nf">WriteString</span><span class="p">(</span><span class="s">&#34;hello&#34;</span><span class="p">)</span>
+  <span class="nx">b</span><span class="p">.</span><span class="nf">WriteByte</span><span class="p">(</span><span class="sc">&#39;,&#39;</span><span class="p">)</span>
+  <span class="nx">b</span><span class="p">.</span><span class="nf">WriteString</span><span class="p">(</span><span class="s">&#34; world!&#34;</span><span class="p">)</span>
+
+  <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nf">String</span><span class="p">())</span>
+
+  <span class="nx">bytebufferpool</span><span class="p">.</span><span class="nf">Put</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>直接调用bytebufferpool包的Get()和Put()方法，底层操作的是包中默认的对象池：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// bytebufferpool/pool.go
+</span><span class="c1"></span><span class="kd">var</span> <span class="nx">defaultPool</span> <span class="nx">Pool</span>
+
+<span class="kd">func</span> <span class="nf">Get</span><span class="p">()</span> <span class="o">*</span><span class="nx">ByteBuffer</span> <span class="p">{</span> <span class="k">return</span> <span class="nx">defaultPool</span><span class="p">.</span><span class="nf">Get</span><span class="p">()</span> <span class="p">}</span>
+<span class="kd">func</span> <span class="nf">Put</span><span class="p">(</span><span class="nx">b</span><span class="o">*</span><span class="nx">ByteBuffer</span><span class="p">)</span> <span class="p">{</span> <span class="nx">defaultPool</span><span class="p">.</span><span class="nf">Put</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span> <span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们当然可以根据实际需要创建新的对象池，将相同用处的对象放在一起（比如我们可以创建一个对象池用于辅助接收网络包，一个用于辅助拼接字符串）：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">joinPool</span> <span class="o">:=</span> <span class="nb">new</span><span class="p">(</span><span class="nx">bytebufferpool</span><span class="p">.</span><span class="nx">Pool</span><span class="p">)</span>
+  <span class="nx">b</span> <span class="o">:=</span> <span class="nx">joinPool</span><span class="p">.</span><span class="nf">Get</span><span class="p">()</span>
+  <span class="nx">b</span><span class="p">.</span><span class="nf">WriteString</span><span class="p">(</span><span class="s">&#34;hello&#34;</span><span class="p">)</span>
+  <span class="nx">b</span><span class="p">.</span><span class="nf">WriteByte</span><span class="p">(</span><span class="sc">&#39;,&#39;</span><span class="p">)</span>
+  <span class="nx">b</span><span class="p">.</span><span class="nf">WriteString</span><span class="p">(</span><span class="s">&#34; world!&#34;</span><span class="p">)</span>
+
+  <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nf">String</span><span class="p">())</span>
+
+  <span class="nx">joinPool</span><span class="p">.</span><span class="nf">Put</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>bytebufferpool没有提供具体的创建函数，不过可以使用new创建。</p>
+<h2 id="源码分析">源码分析</h2>
+<h3 id="结构体">结构体</h3>
+<p>在将对象放回池中时，会根据当前切片的容量进行相应的处理。bytebufferpool将大小分为 20 个区间：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="o">|</span> <span class="o">&lt;</span> <span class="m">2</span><span class="n">^6</span> <span class="o">|</span> <span class="m">2</span><span class="n">^6</span> <span class="o">~</span> <span class="m">2</span><span class="n">^7</span><span class="m">-1</span> <span class="o">|</span> <span class="kc">...</span> <span class="o">|</span> <span class="o">&gt;</span> <span class="m">2</span><span class="n">^25</span> <span class="o">|</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>如果容量小于 2^6，则属于第一个区间。如果处于 2^6 和 2^7-1 之间，则落在第二个区间。依次类推。执行足够多的放回次数后，bytebufferpool会重新校准，计算处于哪个区间容量的对象最多。将defaultSize设置为该区间的上限容量，第一个区间的上限容量为 2^6，第二区间为 2^7，最后一个区间为 2^26。后续通过Get()请求对象时，若池中无空闲对象，创建一个新对象时，直接将容量设置为defaultSize。这样基本可以避免在使用过程中的切片扩容，从而提升性能。下面结合代码来理解：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="p">(</span>
+    <span class="c1">// 定位数据索引位置，使用位操作性能比较高效
+</span><span class="c1"></span>    <span class="c1">// 容量最小值取 2^6 = 64，因为这就是 64 位计算机上 CPU 缓存行的大小。这个大小的数据可以一次性被加载到 CPU 缓存行中，再小就无意义了
+</span><span class="c1"></span>    <span class="nx">minBitSize</span> <span class="p">=</span> <span class="mi">6</span> <span class="c1">// 2**6=64 is a CPU cache line size
+</span><span class="c1"></span>    <span class="c1">// 数组索引个数 0~19
+</span><span class="c1"></span>    <span class="nx">steps</span>      <span class="p">=</span> <span class="mi">20</span>
+    <span class="c1">// 最小缓存对象 和 最大缓存对象大小
+</span><span class="c1"></span>    <span class="nx">minSize</span> <span class="p">=</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="nx">minBitSize</span>
+    <span class="nx">maxSize</span> <span class="p">=</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="p">(</span><span class="nx">minBitSize</span> <span class="o">+</span> <span class="nx">steps</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="c1">// 校准阈值, 这里指的调用次数
+</span><span class="c1"></span>    <span class="nx">calibrateCallsThreshold</span> <span class="p">=</span> <span class="mi">42000</span>
+    <span class="c1">// 百分比，校准数据基数
+</span><span class="c1"></span>    <span class="nx">maxPercentile</span>           <span class="p">=</span> <span class="mf">0.95</span>
+<span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Pool represents byte buffer pool.
+</span><span class="c1">//
+</span><span class="c1">// Distinct pools may be used for distinct types of byte buffers.
+</span><span class="c1">// Properly determined byte buffer types with their own pools may help reducing
+</span><span class="c1">// memory waste.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Pool</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">calls</span>       <span class="p">[</span><span class="nx">steps</span><span class="p">]</span><span class="kt">uint64</span>
+    <span class="nx">calibrating</span> <span class="kt">uint64</span>
+    <span class="nx">defaultSize</span> <span class="kt">uint64</span>
+    <span class="nx">maxSize</span>     <span class="kt">uint64</span>
+    <span class="nx">pool</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Pool</span>
+<span class="p">}</span>
+<span class="kd">var</span> <span class="nx">defaultPool</span> <span class="nx">Pool</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们可以看到，bytebufferpool内部使用了标准库中的对象sync.Pool。</p>
+<p>这里的steps就是上面所说的区间，一共 20 份。calls数组记录放回对象容量落在各个区间的次数。</p>
+<p>字段解释</p>
+<ul>
+<li>calls 缓存对象大小调用次数统计，steps 就是我们上面定义的常量。主要用来统计每类缓存大小的调用次数。steps 具体的值会使用一个index() 函数通过位操作的方式计算出来它在这个数组的索引位置；</li>
+<li>calibrating 校标标记。0 表示未校准，1表示正在校准。校准完成需要从1恢复到0;</li>
+<li>defaultSize 缓存对象默认大小。我们知道当从 pool 中获取缓存对象时，如果池中没有对象可取，会通过调用 一个 New() 函数创建一个新对象返回，这时新创建的对象大小为 defaultSize。当然这里没有使用New() 函数,而是直接创建了一个 指定默认大小的 ByteBuffer；</li>
+<li>maxSize 允许放入pool池中的最大对象大小，只有<code>&lt;</code>maxSize 的对象才允许放放池中
+这里的变量 defaultPool 是一个全局的 Pool 对象。</li>
+</ul>
+<h3 id="get">Get</h3>
+<p>对于取对象很简单</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Get returns new byte buffer with zero length.
+</span><span class="c1">//
+</span><span class="c1">// The byte buffer may be returned to the pool via Put after the use
+</span><span class="c1">// in order to minimize GC overhead.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Pool</span><span class="p">)</span> <span class="nf">Get</span><span class="p">()</span> <span class="o">*</span><span class="nx">ByteBuffer</span> <span class="p">{</span>
+    <span class="c1">// 直接从 p.pool 中调用原始方法 Get() 读取，如果结果 != nil，则说明当前池中读取到了数据（当pool未设置New 方法的时候会返回nil）,则直接返回对象 *ByteBuffer 即可；
+</span><span class="c1"></span>    <span class="nx">v</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nf">Get</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">v</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nx">v</span><span class="p">.(</span><span class="o">*</span><span class="nx">ByteBuffer</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="c1">// 如果结果等于 nil ，则说明池中已无对象可用且未定义New方法，这时直接创建一个 p.defaultSize 大小的 *ByteBuffer 对象并返回
+</span><span class="c1"></span>    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">ByteBuffer</span><span class="p">{</span>
+        <span class="nx">B</span><span class="p">:</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">defaultSize</span><span class="p">)),</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="put">Put</h3>
+<p>调用Pool.Put()将对象放回时，首先计算切片容量落在哪个区间，增加calls数组中相应元素的值：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// bytebufferpool/pool.go
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Pool</span><span class="p">)</span> <span class="nf">Put</span><span class="p">(</span><span class="nx">b</span><span class="o">*</span><span class="nx">ByteBuffer</span><span class="p">)</span> <span class="p">{</span>
+  <span class="c1">// 对象在数据中的位置
+</span><span class="c1"></span>  <span class="c1">// 调用 index() 函数，根据对象长度计算其在 p.calls 数组中的索引位置;
+</span><span class="c1"></span>  <span class="nx">idx</span> <span class="o">:=</span> <span class="nf">index</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">B</span><span class="p">))</span>
+  <span class="c1">// 校准条件
+</span><span class="c1"></span>  <span class="c1">// 将当前数组索引位置存放的值原子操作+1，（即更新相同位置对象的调用次数，注意：更新操作并没有放在Get）,如果 次数&gt;calibrateCallsThreshold（42000） ，则进行校准操作;
+</span><span class="c1"></span>  <span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">AddUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">calls</span><span class="p">[</span><span class="nx">idx</span><span class="p">],</span> <span class="mi">1</span><span class="p">)</span> <span class="p">&gt;</span> <span class="nx">calibrateCallsThreshold</span> <span class="p">{</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nf">calibrate</span><span class="p">()</span>
+  <span class="p">}</span>
+  <span class="c1">// 是否需要放入pool池中，还是直接丢弃交给GC
+</span><span class="c1"></span>  <span class="nx">maxSize</span> <span class="o">:=</span> <span class="nb">int</span><span class="p">(</span><span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">maxSize</span><span class="p">))</span>
+  <span class="c1">// 如果要放回的对象容量大于 maxSize，则不放回
+</span><span class="c1"></span>  <span class="c1">// 原子读取当前允许放入pool池中的对象大小。如果等于0或小于 maxSize ，则先 b.Reset() 重置对象,再将其放入pool池中; 否则将交由GC 来操作；
+</span><span class="c1"></span>  <span class="k">if</span> <span class="nx">maxSize</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">||</span> <span class="nb">cap</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="nx">maxSize</span> <span class="p">{</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nf">Reset</span><span class="p">()</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nf">Put</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>上面在放入池中的时候，为什么这里还要判断大小才能放回pool池中呢？</p>
+<p>主要原因是因为这里用的是一个 切片 数据类型，虽然在放入前执行了b.Reset，但这只是将切片里的内容进行了清除，但这个切片对象仍然是处于引用状态，并没有真正释放内存。如果一个对象从pool 取出来以后，经过一系列操作后，导致这个切片非常非常的大，这时再将其放入pool池中，此切片会一直占用着很大一块的内部，导致内存泄漏。</p>
+<p>如果calls数组该元素超过指定值calibrateCallsThreshold=42000（说明距离上次校准，放回对象到该区间的次数已经达到阈值了，42000 应该就是个经验数字），则调用Pool.calibrate()执行校准操作：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// bytebufferpool/pool.go
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Pool</span><span class="p">)</span> <span class="nf">calibrate</span><span class="p">()</span> <span class="p">{</span>
+  <span class="c1">// 避免并发放回对象触发 `calibrate`
+</span><span class="c1"></span>  <span class="c1">// 先判断当前是否处于正在校准状态，如果是则直接终止，否则继续执行。
+</span><span class="c1"></span>  <span class="k">if</span> <span class="p">!</span><span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">calibrating</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">return</span>
+  <span class="p">}</span>
+
+  <span class="c1">// step 1.统计并排序
+</span><span class="c1"></span>  <span class="c1">// calls数组记录了放回对象到对应区间的次数。按照这个次数从大到小排序。注意：minSize &lt;&lt; i表示区间i的上限容量。
+</span><span class="c1"></span>  <span class="c1">// 先声明一个长度为20(steps) 的 callSize 切片类型变量 callSizes ，然后将 p.calls 中统计的调用次数依次放入对象 callSize.calls 中，同时根据其索引位置计算对应存放对象的大小(minSize&lt;&lt;i)，汇总所有的调用次数到变量 callsSum。
+</span><span class="c1"></span>  <span class="nx">a</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="nx">callSizes</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">steps</span><span class="p">)</span>
+  <span class="kd">var</span> <span class="nx">callsSum</span> <span class="kt">uint64</span>
+  <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="nb">uint64</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">steps</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+    <span class="nx">calls</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">SwapUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">calls</span><span class="p">[</span><span class="nx">i</span><span class="p">],</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="nx">callsSum</span> <span class="o">+=</span> <span class="nx">calls</span>
+    <span class="nx">a</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">a</span><span class="p">,</span> <span class="nx">callSize</span><span class="p">{</span>
+      <span class="nx">calls</span><span class="p">:</span> <span class="nx">calls</span><span class="p">,</span>
+      <span class="nx">size</span><span class="p">:</span>  <span class="nx">minSize</span> <span class="o">&lt;&lt;</span> <span class="nx">i</span><span class="p">,</span>
+    <span class="p">})</span>
+  <span class="p">}</span>
+  <span class="c1">// 其次sort.Sort(a) 根据对象访问次数 callSize.calls 从高到低排序。
+</span><span class="c1"></span>  <span class="nx">sort</span><span class="p">.</span><span class="nf">Sort</span><span class="p">(</span><span class="nx">a</span><span class="p">)</span>
+
+  <span class="c1">// step 2.计算 defaultSize 和 maxSize
+</span><span class="c1"></span>  <span class="c1">// defaultSize很好理解，取排序后的第一个size即可。maxSize值记录放回次数超过 95% 的多个对象容量的最大值。它的作用是防止将使用较少的大容量对象放回对象池，从而占用太多内存。这里就可以理解Pool.Put()方法后半部分的逻辑了：
+</span><span class="c1"></span>  <span class="c1">// 取出调用次数最高的对象大小，赋值给 defaultSize,作为下次创建对象时初始大小；同时从调用次数最高的95%的访问量中获取最大对象的大小，并保存到 maxSize， 作为下次存放pool池中的判断条件。
+</span><span class="c1"></span>  <span class="nx">defaultSize</span> <span class="o">:=</span> <span class="nx">a</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nx">size</span>
+  <span class="nx">maxSize</span> <span class="o">:=</span> <span class="nx">defaultSize</span>
+
+  <span class="nx">maxSum</span> <span class="o">:=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">callsSum</span><span class="p">)</span> <span class="o">*</span> <span class="nx">maxPercentile</span><span class="p">)</span>
+  <span class="nx">callsSum</span> <span class="p">=</span> <span class="mi">0</span>
+  <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">steps</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">callsSum</span> <span class="p">&gt;</span> <span class="nx">maxSum</span> <span class="p">{</span>
+      <span class="k">break</span>
+    <span class="p">}</span>
+    <span class="nx">callsSum</span> <span class="o">+=</span> <span class="nx">a</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">calls</span>
+    <span class="nx">size</span> <span class="o">:=</span> <span class="nx">a</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">size</span>
+    <span class="k">if</span> <span class="nx">size</span> <span class="p">&gt;</span> <span class="nx">maxSize</span> <span class="p">{</span>
+      <span class="nx">maxSize</span> <span class="p">=</span> <span class="nx">size</span>
+    <span class="p">}</span>
+  <span class="p">}</span>
+
+  <span class="c1">// step 3.保存对应值
+</span><span class="c1"></span>  <span class="c1">// 后续通过Pool.Get()获取对象时，若池中无空闲对象，新创建的对象默认容量为defaultSize。这样的容量能满足绝大多数情况下的使用，避免使用过程中的切片扩容。
+</span><span class="c1"></span>  <span class="c1">// 最后就是更新全局变量值，恢复校准状态为0。
+</span><span class="c1"></span>  <span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">defaultSize</span><span class="p">,</span> <span class="nx">defaultSize</span><span class="p">)</span>
+  <span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">maxSize</span><span class="p">,</span> <span class="nx">maxSize</span><span class="p">)</span>
+
+  <span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">calibrating</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>当然这个库缺点也很明显，由于大部分使用的容量都小于defaultSize，会有部分内存浪费。</p>
+<h2 id="总结">总结</h2>
+<ul>
+<li>从pool池中读取的对象为 ByteBuffer，它有自己的一系列方法，并实现了io.Reader 和 io.Writer 接口；</li>
+<li>从 pool 中读取的对象初始化有可能大小为0（Put时对象已经重置），也有可能为 defaultSize（新创建指定）；</li>
+<li>每从 pool 中读取次数超出 42000 时，将进行一次校准操作。此时会根据对象的使用频繁情况和大小来决定下次创建新对象的初始化大小与对象是否需要放入 pool 池中；</li>
+<li>获取对象在数据中的索引位置是根据对象的长度，即len()函数，而存放对象时，则根据对象的容量，即cap() 函数；</li>
+</ul>
+<p>在我们日常开发中，如果要使用 sync.Pool 池的话，一定要考虑到对象的大小的情况，千万不要不计一切的都把对象都放入池中，当大对象过多时，很容易生成内存泄漏。</p>
+<h2 id="参考">参考</h2>
+<p><a href="https://segmentfault.com/a/1190000039969499">Go 每日一库之 bytebufferpool</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-05-20
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/bytebufferpool/">bytebufferpool</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/context%E4%BD%BF%E7%94%A8%E5%AE%9E%E8%B7%B5/">
+            <span class="next-text nav-default">context使用实践</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
