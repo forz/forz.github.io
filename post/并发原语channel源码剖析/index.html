@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>并发原语Channel源码剖析 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="channel 数据结构 Go 语言的 Channel 在运行时使用 runtime.hchan 结构体表示。我们在 Go 语言中创建新的 Channel 时，实际上创建的都是如下所示的结构： 1 2 3 4 5 6 7 8 9 10 11 12 13 14 type hchan struct" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.83.1 with theme even" />
+
+
+<link rel="canonical" href="/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADchannel%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="并发原语Channel源码剖析" />
+<meta property="og:description" content="channel 数据结构 Go 语言的 Channel 在运行时使用 runtime.hchan 结构体表示。我们在 Go 语言中创建新的 Channel 时，实际上创建的都是如下所示的结构： 1 2 3 4 5 6 7 8 9 10 11 12 13 14 type hchan struct" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADchannel%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-01-14T15:58:21&#43;00:00" />
+<meta property="article:modified_time" content="2021-01-14T15:58:21&#43;00:00" />
+
+<meta itemprop="name" content="并发原语Channel源码剖析">
+<meta itemprop="description" content="channel 数据结构 Go 语言的 Channel 在运行时使用 runtime.hchan 结构体表示。我们在 Go 语言中创建新的 Channel 时，实际上创建的都是如下所示的结构： 1 2 3 4 5 6 7 8 9 10 11 12 13 14 type hchan struct"><meta itemprop="datePublished" content="2021-01-14T15:58:21&#43;00:00" />
+<meta itemprop="dateModified" content="2021-01-14T15:58:21&#43;00:00" />
+<meta itemprop="wordCount" content="4953">
+<meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="并发原语Channel源码剖析"/>
+<meta name="twitter:description" content="channel 数据结构 Go 语言的 Channel 在运行时使用 runtime.hchan 结构体表示。我们在 Go 语言中创建新的 Channel 时，实际上创建的都是如下所示的结构： 1 2 3 4 5 6 7 8 9 10 11 12 13 14 type hchan struct"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">并发原语Channel源码剖析</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-01-14 </span>
+        <div class="post-category">
+            <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
+            </div>
+          <span class="more-meta"> 约 4953 字 </span>
+          <span class="more-meta"> 预计阅读 10 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#channel">channel</a>
+      <ul>
+        <li><a href="#数据结构">数据结构</a></li>
+        <li><a href="#创建管道">创建管道</a></li>
+        <li><a href="#发送数据">发送数据</a></li>
+      </ul>
+    </li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="channel">channel</h2>
+<h3 id="数据结构">数据结构</h3>
+<p>Go 语言的 Channel 在运行时使用 runtime.hchan 结构体表示。我们在 Go 语言中创建新的 Channel 时，实际上创建的都是如下所示的结构：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">hchan</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">qcount</span>   <span class="kt">uint</span>
+	<span class="nx">dataqsiz</span> <span class="kt">uint</span>
+	<span class="nx">buf</span>      <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>
+	<span class="nx">elemsize</span> <span class="kt">uint16</span>
+	<span class="nx">closed</span>   <span class="kt">uint32</span>
+	<span class="nx">elemtype</span> <span class="o">*</span><span class="nx">_type</span>
+	<span class="nx">sendx</span>    <span class="kt">uint</span>
+	<span class="nx">recvx</span>    <span class="kt">uint</span>
+	<span class="nx">recvq</span>    <span class="nx">waitq</span>
+	<span class="nx">sendq</span>    <span class="nx">waitq</span>
+
+	<span class="nx">lock</span> <span class="nx">mutex</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>runtime.hchan 结构体中的五个字段 qcount、dataqsiz、buf、sendx、recv 构建底层的循环队列：</p>
+<ul>
+<li>qcount — Channel 中的元素个数；</li>
+<li>dataqsiz — Channel 中的循环队列的长度；</li>
+<li>buf — Channel 的缓冲区数据指针；</li>
+<li>sendx — Channel 的发送操作处理到的位置；</li>
+<li>recvx — Channel 的接收操作处理到的位置；</li>
+</ul>
+<p>除此之外，elemsize 和 elemtype 分别表示当前 Channel 能够收发的元素类型和大小；sendq 和 recvq 存储了当前 Channel 由于缓冲区空间不足而阻塞的 Goroutine 列表，这些等待队列使用双向链表 runtime.waitq 表示，链表中所有的元素都是 runtime.sudog 结构：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">waitq</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">first</span> <span class="o">*</span><span class="nx">sudog</span>
+	<span class="nx">last</span>  <span class="o">*</span><span class="nx">sudog</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>runtime.sudog 表示一个在等待列表中的 Goroutine，该结构中存储了两个分别指向前后 runtime.sudog 的指针以构成链表。</p>
+<h3 id="创建管道">创建管道</h3>
+<p>Go 语言中所有 Channel 的创建都会使用 make 关键字。编译器会将 make(chan int, 10) 表达式转换成 OMAKE 类型的节点，并在类型检查阶段将 OMAKE 类型的节点转换成 OMAKECHAN 类型：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">typecheck1</span><span class="p">(</span><span class="nx">n</span> <span class="o">*</span><span class="nx">Node</span><span class="p">,</span> <span class="nx">top</span> <span class="kt">int</span><span class="p">)</span> <span class="p">(</span><span class="nx">res</span><span class="o">*</span><span class="nx">Node</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">switch</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Op</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="nx">OMAKE</span><span class="p">:</span>
+		<span class="o">...</span>
+		<span class="k">switch</span> <span class="nx">t</span><span class="p">.</span><span class="nx">Etype</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="nx">TCHAN</span><span class="p">:</span>
+			<span class="nx">l</span> <span class="p">=</span> <span class="kc">nil</span>
+			<span class="k">if</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">args</span><span class="p">)</span> <span class="p">{</span> <span class="c1">// 带缓冲区的异步 Channel
+</span><span class="c1"></span>				<span class="o">...</span>
+				<span class="nx">n</span><span class="p">.</span><span class="nx">Left</span> <span class="p">=</span> <span class="nx">l</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span> <span class="c1">// 不带缓冲区的同步 Channel
+</span><span class="c1"></span>				<span class="nx">n</span><span class="p">.</span><span class="nx">Left</span> <span class="p">=</span> <span class="nf">nodintconst</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="nx">n</span><span class="p">.</span><span class="nx">Op</span> <span class="p">=</span> <span class="nx">OMAKECHAN</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这一阶段会对传入 make 关键字的缓冲区大小进行检查，如果我们不向 make 传递表示缓冲区大小的参数，那么就会设置一个默认值 0，也就是当前的 Channel 不存在缓冲区。</p>
+<p>OMAKECHAN 类型的节点最终都会在 SSA 中间代码生成阶段之前被转换成调用 runtime.makechan 或者 runtime.makechan64 的函数：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">walkexpr</span><span class="p">(</span><span class="nx">n</span> <span class="o">*</span><span class="nx">Node</span><span class="p">,</span> <span class="nx">init</span><span class="o">*</span><span class="nx">Nodes</span><span class="p">)</span> <span class="o">*</span><span class="nx">Node</span> <span class="p">{</span>
+	<span class="k">switch</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Op</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="nx">OMAKECHAN</span><span class="p">:</span>
+		<span class="nx">size</span> <span class="o">:=</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Left</span>
+		<span class="nx">fnname</span> <span class="o">:=</span> <span class="s">&#34;makechan64&#34;</span>
+		<span class="nx">argtype</span> <span class="o">:=</span> <span class="nx">types</span><span class="p">.</span><span class="nx">Types</span><span class="p">[</span><span class="nx">TINT64</span><span class="p">]</span>
+
+		<span class="k">if</span> <span class="nx">size</span><span class="p">.</span><span class="nx">Type</span><span class="p">.</span><span class="nf">IsKind</span><span class="p">(</span><span class="nx">TIDEAL</span><span class="p">)</span> <span class="o">||</span> <span class="nx">maxintval</span><span class="p">[</span><span class="nx">size</span><span class="p">.</span><span class="nx">Type</span><span class="p">.</span><span class="nx">Etype</span><span class="p">].</span><span class="nf">Cmp</span><span class="p">(</span><span class="nx">maxintval</span><span class="p">[</span><span class="nx">TUINT</span><span class="p">])</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">fnname</span> <span class="p">=</span> <span class="s">&#34;makechan&#34;</span>
+			<span class="nx">argtype</span> <span class="p">=</span> <span class="nx">types</span><span class="p">.</span><span class="nx">Types</span><span class="p">[</span><span class="nx">TINT</span><span class="p">]</span>
+		<span class="p">}</span>
+		<span class="nx">n</span> <span class="p">=</span> <span class="nf">mkcall1</span><span class="p">(</span><span class="nf">chanfn</span><span class="p">(</span><span class="nx">fnname</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Type</span><span class="p">),</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Type</span><span class="p">,</span> <span class="nx">init</span><span class="p">,</span> <span class="nf">typename</span><span class="p">(</span><span class="nx">n</span><span class="p">.</span><span class="nx">Type</span><span class="p">),</span> <span class="nf">conv</span><span class="p">(</span><span class="nx">size</span><span class="p">,</span> <span class="nx">argtype</span><span class="p">))</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>runtime.makechan 和 runtime.makechan64 会根据传入的参数类型和缓冲区大小创建一个新的 Channel 结构，其中后者用于处理缓冲区大小大于 2 的 32 次方的情况，因为这在 Channel 中并不常见，所以我们重点关注 runtime.makechan：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">makechan</span><span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">chantype</span><span class="p">,</span> <span class="nx">size</span> <span class="kt">int</span><span class="p">)</span> <span class="o">*</span><span class="nx">hchan</span> <span class="p">{</span>
+	<span class="nx">elem</span> <span class="o">:=</span> <span class="nx">t</span><span class="p">.</span><span class="nx">elem</span>
+
+	<span class="c1">// compiler checks this but be safe.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">elem</span><span class="p">.</span><span class="nx">size</span> <span class="o">&gt;=</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">16</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;makechan: invalid channel element type&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">hchanSize</span><span class="o">%</span><span class="nx">maxAlign</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">elem</span><span class="p">.</span><span class="nx">align</span> <span class="p">&gt;</span> <span class="nx">maxAlign</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;makechan: bad alignment&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="nx">mem</span><span class="p">,</span> <span class="nx">overflow</span> <span class="o">:=</span> <span class="nx">math</span><span class="p">.</span><span class="nf">MulUintptr</span><span class="p">(</span><span class="nx">elem</span><span class="p">.</span><span class="nx">size</span><span class="p">,</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">size</span><span class="p">))</span>
+	<span class="k">if</span> <span class="nx">overflow</span> <span class="o">||</span> <span class="nx">mem</span> <span class="p">&gt;</span> <span class="nx">maxAlloc</span><span class="o">-</span><span class="nx">hchanSize</span> <span class="o">||</span> <span class="nx">size</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nf">plainError</span><span class="p">(</span><span class="s">&#34;makechan: size out of range&#34;</span><span class="p">))</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Hchan does not contain pointers interesting for GC when elements stored in buf do not contain pointers.
+</span><span class="c1"></span>	<span class="c1">// buf points into the same allocation, elemtype is persistent.
+</span><span class="c1"></span>	<span class="c1">// SudoG&#39;s are referenced from their owning thread so they can&#39;t be collected.
+</span><span class="c1"></span>	<span class="c1">// TODO(dvyukov,rlh): Rethink when collector can move allocated objects.
+</span><span class="c1"></span>	<span class="kd">var</span> <span class="nx">c</span> <span class="o">*</span><span class="nx">hchan</span>
+	<span class="k">switch</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="nx">mem</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+		<span class="c1">// Queue or element size is zero.
+</span><span class="c1"></span>		<span class="nx">c</span> <span class="p">=</span> <span class="p">(</span><span class="o">*</span><span class="nx">hchan</span><span class="p">)(</span><span class="nf">mallocgc</span><span class="p">(</span><span class="nx">hchanSize</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">true</span><span class="p">))</span>
+		<span class="c1">// Race detector uses this location for synchronization.
+</span><span class="c1"></span>		<span class="nx">c</span><span class="p">.</span><span class="nx">buf</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">raceaddr</span><span class="p">()</span>
+	<span class="k">case</span> <span class="nx">elem</span><span class="p">.</span><span class="nx">ptrdata</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+		<span class="c1">// Elements do not contain pointers.
+</span><span class="c1"></span>		<span class="c1">// Allocate hchan and buf in one call.
+</span><span class="c1"></span>		<span class="nx">c</span> <span class="p">=</span> <span class="p">(</span><span class="o">*</span><span class="nx">hchan</span><span class="p">)(</span><span class="nf">mallocgc</span><span class="p">(</span><span class="nx">hchanSize</span><span class="o">+</span><span class="nx">mem</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">true</span><span class="p">))</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nx">buf</span> <span class="p">=</span> <span class="nf">add</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">c</span><span class="p">),</span> <span class="nx">hchanSize</span><span class="p">)</span>
+	<span class="k">default</span><span class="p">:</span>
+		<span class="c1">// Elements contain pointers.
+</span><span class="c1"></span>		<span class="nx">c</span> <span class="p">=</span> <span class="nb">new</span><span class="p">(</span><span class="nx">hchan</span><span class="p">)</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nx">buf</span> <span class="p">=</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">mem</span><span class="p">,</span> <span class="nx">elem</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="nx">c</span><span class="p">.</span><span class="nx">elemsize</span> <span class="p">=</span> <span class="nb">uint16</span><span class="p">(</span><span class="nx">elem</span><span class="p">.</span><span class="nx">size</span><span class="p">)</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">elemtype</span> <span class="p">=</span> <span class="nx">elem</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">dataqsiz</span> <span class="p">=</span> <span class="nb">uint</span><span class="p">(</span><span class="nx">size</span><span class="p">)</span>
+	<span class="nf">lockInit</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">lockRankHchan</span><span class="p">)</span>
+
+	<span class="k">if</span> <span class="nx">debugChan</span> <span class="p">{</span>
+		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;makechan: chan=&#34;</span><span class="p">,</span> <span class="nx">c</span><span class="p">,</span> <span class="s">&#34;; elemsize=&#34;</span><span class="p">,</span> <span class="nx">elem</span><span class="p">.</span><span class="nx">size</span><span class="p">,</span> <span class="s">&#34;; dataqsiz=&#34;</span><span class="p">,</span> <span class="nx">size</span><span class="p">,</span> <span class="s">&#34;\n&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">c</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>上述代码根据 Channel 中收发元素的类型和缓冲区的大小初始化 runtime.hchan 和缓冲区：</p>
+<ul>
+<li>如果当前 Channel 中不存在缓冲区，那么就只会为 runtime.hchan 分配一段内存空间；</li>
+<li>如果当前 Channel 中存储的类型不是指针类型，会为当前的 Channel 和底层的数组分配一块连续的内存空间；</li>
+<li>在默认情况下会单独为 runtime.hchan 和缓冲区分配内存；</li>
+</ul>
+<p>在函数的最后会统一更新 runtime.hchan 的 elemsize、elemtype 和 dataqsiz 几个字段。</p>
+<h3 id="发送数据">发送数据</h3>
+<p>当我们想要向 Channel 发送数据时，就需要使用 ch &lt;- i 语句，编译器会将它解析成 OSEND 节点并在 cmd/compile/internal/gc.walkexpr 中转换成 runtime.chansend1：</p>
+<p>func walkexpr(n <em>Node, init</em>Nodes) *Node {
+switch n.Op {
+case OSEND:
+n1 := n.Right
+n1 = assignconv(n1, n.Left.Type.Elem(), &ldquo;chan send&rdquo;)
+n1 = walkexpr(n1, init)
+n1 = nod(OADDR, n1, nil)
+n = mkcall1(chanfn(&ldquo;chansend1&rdquo;, 2, n.Left.Type), nil, init, n.Left, n1)
+}
+}
+Go
+runtime.chansend1 只是调用了 runtime.chansend 并传入 Channel 和需要发送的数据。runtime.chansend 是向 Channel 中发送数据时一定会调用的函数，该函数包含了发送数据的全部逻辑，如果我们在调用时将 block 参数设置成 true，那么表示当前发送操作是阻塞的：</p>
+<p>func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
+lock(&amp;c.lock)</p>
+<pre><code>if c.closed != 0 {
+	unlock(&amp;c.lock)
+	panic(plainError(&quot;send on closed channel&quot;))
+}
+</code></pre>
+<p>Go
+在发送数据的逻辑执行之前会先为当前 Channel 加锁，防止多个线程并发修改数据。如果 Channel 已经关闭，那么向该 Channel 发送数据时会报 “send on closed channel” 错误并中止程序。</p>
+<p>因为 runtime.chansend 函数的实现比较复杂，所以我们这里将该函数的执行过程分成以下的三个部分：</p>
+<p>当存在等待的接收者时，通过 runtime.send 直接将数据发送给阻塞的接收者；
+当缓冲区存在空余空间时，将发送的数据写入 Channel 的缓冲区；
+当不存在缓冲区或者缓冲区已满时，等待其他 Goroutine 从 Channel 接收数据；
+直接发送 #
+如果目标 Channel 没有被关闭并且已经有处于读等待的 Goroutine，那么 runtime.chansend 会从接收队列 recvq 中取出最先陷入等待的 Goroutine 并直接向它发送数据：</p>
+<pre><code>if sg := c.recvq.dequeue(); sg != nil {
+	send(c, sg, ep, func() { unlock(&amp;c.lock) }, 3)
+	return true
+}
+</code></pre>
+<p>Go
+下图展示了 Channel 中存在等待数据的 Goroutine 时，向 Channel 发送数据的过程：</p>
+<p>channel-direct-send</p>
+<p>图 6-20 直接发送数据的过程</p>
+<p>发送数据时会调用 runtime.send，该函数的执行可以分成两个部分：</p>
+<p>调用 runtime.sendDirect 将发送的数据直接拷贝到 x = &lt;-c 表达式中变量 x 所在的内存地址上；
+调用 runtime.goready 将等待接收数据的 Goroutine 标记成可运行状态 Grunnable 并把该 Goroutine 放到发送方所在的处理器的 runnext 上等待执行，该处理器在下一次调度时会立刻唤醒数据的接收方；
+func send(c <em>hchan, sg</em>sudog, ep unsafe.Pointer, unlockf func(), skip int) {
+if sg.elem != nil {
+sendDirect(c.elemtype, sg, ep)
+sg.elem = nil
+}
+gp := sg.g
+unlockf()
+gp.param = unsafe.Pointer(sg)
+goready(gp, skip+1)
+}
+Go
+需要注意的是，发送数据的过程只是将接收方的 Goroutine 放到了处理器的 runnext 中，程序没有立刻执行该 Goroutine。</p>
+<p>缓冲区 #
+如果创建的 Channel 包含缓冲区并且 Channel 中的数据没有装满，会执行下面这段代码：</p>
+<p>func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
+&hellip;
+if c.qcount &lt; c.dataqsiz {
+qp := chanbuf(c, c.sendx)
+typedmemmove(c.elemtype, qp, ep)
+c.sendx++
+if c.sendx == c.dataqsiz {
+c.sendx = 0
+}
+c.qcount++
+unlock(&amp;c.lock)
+return true
+}
+&hellip;
+}
+Go
+在这里我们首先会使用 runtime.chanbuf 计算出下一个可以存储数据的位置，然后通过 runtime.typedmemmove 将发送的数据拷贝到缓冲区中并增加 sendx 索引和 qcount 计数器。</p>
+<p>channel-buffer-send</p>
+<p>图 6-21 向缓冲区写入数据</p>
+<p>如果当前 Channel 的缓冲区未满，向 Channel 发送的数据会存储在 Channel 的 sendx 索引所在的位置并将 sendx 索引加一。因为这里的 buf 是一个循环数组，所以当 sendx 等于 dataqsiz 时会重新回到数组开始的位置。</p>
+<p>阻塞发送 #
+当 Channel 没有接收者能够处理数据时，向 Channel 发送数据会被下游阻塞，当然使用 select 关键字可以向 Channel 非阻塞地发送消息。向 Channel 阻塞地发送数据会执行下面的代码，我们可以简单梳理一下这段代码的逻辑：</p>
+<p>func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
+&hellip;
+if !block {
+unlock(&amp;c.lock)
+return false
+}</p>
+<pre><code>gp := getg()
+mysg := acquireSudog()
+mysg.elem = ep
+mysg.g = gp
+mysg.c = c
+gp.waiting = mysg
+c.sendq.enqueue(mysg)
+goparkunlock(&amp;c.lock, waitReasonChanSend, traceEvGoBlockSend, 3)
+
+gp.waiting = nil
+gp.param = nil
+mysg.c = nil
+releaseSudog(mysg)
+return true
+</code></pre>
+<p>}
+Go
+调用 runtime.getg 获取发送数据使用的 Goroutine；
+执行 runtime.acquireSudog 获取 runtime.sudog 结构并设置这一次阻塞发送的相关信息，例如发送的 Channel、是否在 select 中和待发送数据的内存地址等；
+将刚刚创建并初始化的 runtime.sudog 加入发送等待队列，并设置到当前 Goroutine 的 waiting 上，表示 Goroutine 正在等待该 sudog 准备就绪；
+调用 runtime.goparkunlock 将当前的 Goroutine 陷入沉睡等待唤醒；
+被调度器唤醒后会执行一些收尾工作，将一些属性置零并且释放 runtime.sudog 结构体；
+函数在最后会返回 true 表示这次我们已经成功向 Channel 发送了数据。</p>
+<p>小结 #
+我们在这里可以简单梳理和总结一下使用 ch &lt;- i 表达式向 Channel 发送数据时遇到的几种情况：</p>
+<p>如果当前 Channel 的 recvq 上存在已经被阻塞的 Goroutine，那么会直接将数据发送给当前 Goroutine 并将其设置成下一个运行的 Goroutine；
+如果 Channel 存在缓冲区并且其中还有空闲的容量，我们会直接将数据存储到缓冲区 sendx 所在的位置上；
+如果不满足上面的两种情况，会创建一个 runtime.sudog 结构并将其加入 Channel 的 sendq 队列中，当前 Goroutine 也会陷入阻塞等待其他的协程从 Channel 接收数据；
+发送数据的过程中包含几个会触发 Goroutine 调度的时机：</p>
+<p>发送数据时发现 Channel 上存在等待接收数据的 Goroutine，立刻设置处理器的 runnext 属性，但是并不会立刻触发调度；
+发送数据时并没有找到接收方并且缓冲区已经满了，这时会将自己加入 Channel 的 sendq 队列并调用 runtime.goparkunlock 触发 Goroutine 的调度让出处理器的使用权；
+6.4.5 接收数据 #
+我们接下来继续介绍 Channel 操作的另一方：接收数据。Go 语言中可以使用两种不同的方式去接收 Channel 中的数据：</p>
+<p>i &lt;- ch
+i, ok &lt;- ch
+Go
+这两种不同的方法经过编译器的处理都会变成 ORECV 类型的节点，后者会在类型检查阶段被转换成 OAS2RECV 类型。数据的接收操作遵循以下的路线图：</p>
+<p>channel-receive-node</p>
+<p>图 6-22 Channel 接收操作的路线图</p>
+<p>虽然不同的接收方式会被转换成 runtime.chanrecv1 和 runtime.chanrecv2 两种不同函数的调用，但是这两个函数最终还是会调用 runtime.chanrecv。</p>
+<p>当我们从一个空 Channel 接收数据时会直接调用 runtime.gopark 让出处理器的使用权。</p>
+<p>func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool) {
+if c == nil {
+if !block {
+return
+}
+gopark(nil, nil, waitReasonChanReceiveNilChan, traceEvGoStop, 2)
+throw(&ldquo;unreachable&rdquo;)
+}</p>
+<pre><code>lock(&amp;c.lock)
+
+if c.closed != 0 &amp;&amp; c.qcount == 0 {
+	unlock(&amp;c.lock)
+	if ep != nil {
+        typedmemclr(c.elemtype, ep)
+	}
+	return true, false
+}
+</code></pre>
+<p>Go
+如果当前 Channel 已经被关闭并且缓冲区中不存在任何数据，那么会清除 ep 指针中的数据并立刻返回。</p>
+<p>除了上述两种特殊情况，使用 runtime.chanrecv 从 Channel 接收数据时还包含以下三种不同情况：</p>
+<p>当存在等待的发送者时，通过 runtime.recv 从阻塞的发送者或者缓冲区中获取数据；
+当缓冲区存在数据时，从 Channel 的缓冲区中接收数据；
+当缓冲区中不存在数据时，等待其他 Goroutine 向 Channel 发送数据；
+直接接收 #
+当 Channel 的 sendq 队列中包含处于等待状态的 Goroutine 时，该函数会取出队列头等待的 Goroutine，处理的逻辑和发送时相差无几，只是发送数据时调用的是 runtime.send 函数，而接收数据时使用 runtime.recv：</p>
+<pre><code>if sg := c.sendq.dequeue(); sg != nil {
+	recv(c, sg, ep, func() { unlock(&amp;c.lock) }, 3)
+	return true, true
+}
+</code></pre>
+<p>Go
+runtime.recv 的实现比较复杂：</p>
+<p>func recv(c <em>hchan, sg</em>sudog, ep unsafe.Pointer, unlockf func(), skip int) {
+if c.dataqsiz == 0 {
+if ep != nil {
+recvDirect(c.elemtype, sg, ep)
+}
+} else {
+qp := chanbuf(c, c.recvx)
+if ep != nil {
+typedmemmove(c.elemtype, ep, qp)
+}
+typedmemmove(c.elemtype, qp, sg.elem)
+c.recvx++
+c.sendx = c.recvx // c.sendx = (c.sendx+1) % c.dataqsiz
+}
+gp := sg.g
+gp.param = unsafe.Pointer(sg)
+goready(gp, skip+1)
+}
+Go
+该函数会根据缓冲区的大小分别处理不同的情况：</p>
+<p>如果 Channel 不存在缓冲区；
+调用 runtime.recvDirect 将 Channel 发送队列中 Goroutine 存储的 elem 数据拷贝到目标内存地址中；
+如果 Channel 存在缓冲区；
+将队列中的数据拷贝到接收方的内存地址；
+将发送队列头的数据拷贝到缓冲区中，释放一个阻塞的发送方；
+无论发生哪种情况，运行时都会调用 runtime.goready 将当前处理器的 runnext 设置成发送数据的 Goroutine，在调度器下一次调度时将阻塞的发送方唤醒。</p>
+<p>channel-receive-from-sendq</p>
+<p>图 6-23 从发送队列中获取数据</p>
+<p>上图展示了 Channel 在缓冲区已经没有空间并且发送队列中存在等待的 Goroutine 时，运行 &lt;-ch 的执行过程。发送队列头的 runtime.sudog 中的元素会替换接收索引 recvx 所在位置的元素，原有的元素会被拷贝到接收数据的变量对应的内存空间上。</p>
+<p>缓冲区 #
+当 Channel 的缓冲区中已经包含数据时，从 Channel 中接收数据会直接从缓冲区中 recvx 的索引位置中取出数据进行处理：</p>
+<p>func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool) {
+&hellip;
+if c.qcount &gt; 0 {
+qp := chanbuf(c, c.recvx)
+if ep != nil {
+typedmemmove(c.elemtype, ep, qp)
+}
+typedmemclr(c.elemtype, qp)
+c.recvx++
+if c.recvx == c.dataqsiz {
+c.recvx = 0
+}
+c.qcount&ndash;
+return true, true
+}
+&hellip;
+}
+Go
+如果接收数据的内存地址不为空，那么会使用 runtime.typedmemmove 将缓冲区中的数据拷贝到内存中、清除队列中的数据并完成收尾工作。</p>
+<p>channel-buffer-receive</p>
+<p>图 6-24 从缓冲区中接接收数据</p>
+<p>收尾工作包括递增 recvx，一旦发现索引超过了 Channel 的容量时，会将它归零重置循环队列的索引；除此之外，该函数还会减少 qcount 计数器并释放持有 Channel 的锁。</p>
+<p>阻塞接收 #
+当 Channel 的发送队列中不存在等待的 Goroutine 并且缓冲区中也不存在任何数据时，从管道中接收数据的操作会变成阻塞的，然而不是所有的接收操作都是阻塞的，与 select 语句结合使用时就可能会使用到非阻塞的接收操作：</p>
+<p>func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool) {
+&hellip;
+if !block {
+unlock(&amp;c.lock)
+return false, false
+}</p>
+<pre><code>gp := getg()
+mysg := acquireSudog()
+mysg.elem = ep
+gp.waiting = mysg
+mysg.g = gp
+mysg.c = c
+c.recvq.enqueue(mysg)
+goparkunlock(&amp;c.lock, waitReasonChanReceive, traceEvGoBlockRecv, 3)
+
+gp.waiting = nil
+closed := gp.param == nil
+gp.param = nil
+releaseSudog(mysg)
+return true, !closed
+</code></pre>
+<p>}
+Go
+在正常的接收场景中，我们会使用 runtime.sudog 将当前 Goroutine 包装成一个处于等待状态的 Goroutine 并将其加入到接收队列中。</p>
+<p>完成入队之后，上述代码还会调用 runtime.goparkunlock 立刻触发 Goroutine 的调度，让出处理器的使用权并等待调度器的调度。</p>
+<p>小结 #
+我们梳理一下从 Channel 中接收数据时可能会发生的五种情况：</p>
+<p>如果 Channel 为空，那么会直接调用 runtime.gopark 挂起当前 Goroutine；
+如果 Channel 已经关闭并且缓冲区没有任何数据，runtime.chanrecv 会直接返回；
+如果 Channel 的 sendq 队列中存在挂起的 Goroutine，会将 recvx 索引所在的数据拷贝到接收变量所在的内存空间上并将 sendq 队列中 Goroutine 的数据拷贝到缓冲区；
+如果 Channel 的缓冲区中包含数据，那么直接读取 recvx 索引对应的数据；
+在默认情况下会挂起当前的 Goroutine，将 runtime.sudog 结构加入 recvq 队列并陷入休眠等待调度器的唤醒；
+我们总结一下从 Channel 接收数据时，会触发 Goroutine 调度的两个时机：</p>
+<p>当 Channel 为空时；
+当缓冲区中不存在数据并且也不存在数据的发送者时；
+6.4.6 关闭管道 #
+编译器会将用于关闭管道的 close 关键字转换成 OCLOSE 节点以及 runtime.closechan 函数。</p>
+<p>当 Channel 是一个空指针或者已经被关闭时，Go 语言运行时都会直接崩溃并抛出异常：</p>
+<p>func closechan(c *hchan) {
+if c == nil {
+panic(plainError(&ldquo;close of nil channel&rdquo;))
+}</p>
+<pre><code>lock(&amp;c.lock)
+if c.closed != 0 {
+	unlock(&amp;c.lock)
+	panic(plainError(&quot;close of closed channel&quot;))
+}
+</code></pre>
+<p>Go
+处理完了这些异常的情况之后就可以开始执行关闭 Channel 的逻辑了，下面这段代码的主要工作就是将 recvq 和 sendq 两个队列中的数据加入到 Goroutine 列表 gList 中，与此同时该函数会清除所有 runtime.sudog 上未被处理的元素：</p>
+<pre><code>c.closed = 1
+
+var glist gList
+for {
+	sg := c.recvq.dequeue()
+	if sg == nil {
+        break
+	}
+	if sg.elem != nil {
+        typedmemclr(c.elemtype, sg.elem)
+        sg.elem = nil
+	}
+	gp := sg.g
+	gp.param = nil
+	glist.push(gp)
+}
+
+for {
+	sg := c.sendq.dequeue()
+	...
+}
+for !glist.empty() {
+	gp := glist.pop()
+	gp.schedlink = 0
+	goready(gp, 3)
+}
+</code></pre>
+<p>}
+Go
+该函数在最后会为所有被阻塞的 Goroutine 调用 runtime.goready 触发调度。</p>
+<p>6.4.7 小结 #
+Channel 是 Go 语言能够提供强大并发能力的原因之一，我们在这一节中分析了 Channel 的设计原理、数据结构以及发送数据、接收数据和关闭 Channel 这些基本操作，相信能够帮助大家更好地理解 Channel 的工作原理。</p>
+<h2 id="参考">参考</h2>
+<p><a href="https://colobu.com/2017/07/11/dive-into-sync-Map">https://colobu.com/2017/07/11/dive-into-sync-Map</a></p>
+<p><a href="https://segmentfault.com/a/1190000015242373">https://segmentfault.com/a/1190000015242373</a></p>
+<p><a href="https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/">https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/</a></p>
+<p><a href="http://www.qiuxiaobing.cn/%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80/2018/03/09/go-sync-map.html">http://www.qiuxiaobing.cn/%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80/2018/03/09/go-sync-map.html</a></p>
+<p><a href="http://www.gogodjzhu.com/index.php/code/basic/397/">http://www.gogodjzhu.com/index.php/code/basic/397/</a></p>
+<p><a href="http://russellluo.com/2017/06/go-sync-map-diagram.html">http://russellluo.com/2017/06/go-sync-map-diagram.html</a></p>
+<p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/cond/">5.4 条件变量</a></p>
+<p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/waitgroup/">5.5 同步组</a></p>
+<p><a href="https://blog.csdn.net/sinat_41790904/article/details/115416237">Go 标准库源码分析 - sync 包的Pool</a></p>
+<p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/map/">5.7 并发安全散列表</a></p>
+<p><a href="https://draveness.me/golang/docs/part3-runtime/ch06-concurrency/golang-context/">6.1 上下文 Context</a></p>
+<p><a href="https://juejin.cn/post/6844903741842259975">go context剖析之源码分析</a></p>
+<p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/atomic/">5.3 原子操作</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-01-14
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/go%E5%AE%9E%E7%8E%B0%E5%88%86%E7%89%87%E9%94%81/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Go实现分片锁</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/%E4%BD%BF%E7%94%A8commitizen%E8%A7%84%E8%8C%83git%E6%8F%90%E4%BA%A4%E8%AF%B4%E6%98%8E/">
+            <span class="next-text nav-default">使用commitizen规范Git提交说明</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

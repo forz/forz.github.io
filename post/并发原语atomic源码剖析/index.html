@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>并发原语atomic源码剖析 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="atomic 原理 在现在的系统中,write 的地址基本上都是对齐的(aligned)。 比如,32 位的操作系统、CPU 以及编译器,write 的地址总是 4 的" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.83.1 with theme even" />
+
+
+<link rel="canonical" href="/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADatomic%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="并发原语atomic源码剖析" />
+<meta property="og:description" content="atomic 原理 在现在的系统中,write 的地址基本上都是对齐的(aligned)。 比如,32 位的操作系统、CPU 以及编译器,write 的地址总是 4 的" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADatomic%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-05-21T14:39:43&#43;00:00" />
+<meta property="article:modified_time" content="2021-05-21T14:39:43&#43;00:00" />
+
+<meta itemprop="name" content="并发原语atomic源码剖析">
+<meta itemprop="description" content="atomic 原理 在现在的系统中,write 的地址基本上都是对齐的(aligned)。 比如,32 位的操作系统、CPU 以及编译器,write 的地址总是 4 的"><meta itemprop="datePublished" content="2021-05-21T14:39:43&#43;00:00" />
+<meta itemprop="dateModified" content="2021-05-21T14:39:43&#43;00:00" />
+<meta itemprop="wordCount" content="2441">
+<meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="并发原语atomic源码剖析"/>
+<meta name="twitter:description" content="atomic 原理 在现在的系统中,write 的地址基本上都是对齐的(aligned)。 比如,32 位的操作系统、CPU 以及编译器,write 的地址总是 4 的"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">并发原语atomic源码剖析</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-05-21 </span>
+        <div class="post-category">
+            <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
+            </div>
+          <span class="more-meta"> 约 2441 字 </span>
+          <span class="more-meta"> 预计阅读 5 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#atomic">atomic</a>
+      <ul>
+        <li><a href="#原理">原理</a></li>
+        <li><a href="#原子操作">原子操作</a></li>
+        <li><a href="#原子值">原子值</a></li>
+      </ul>
+    </li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="atomic">atomic</h2>
+<h3 id="原理">原理</h3>
+<p>在现在的系统中,write 的地址基本上都是对齐的(aligned)。 比如,32 位的操作系统、CPU 以及编译器,write 的地址总是 4 的倍数,64 位的系统总是 8 的倍数(还记得 WaitGroup 针对 64 位系统和 32 位系统对 state1 的字段不同的处理吗)。对齐地址的写,不会导致其他人看到只写了一半的数据,因为它通过一个指令就可以实现对地址的操作。如果地址不是对齐的话,那么,处理器就需要分成两个指令去处理,如果执行了一个指令,其它人就会看到更新了一半的错误的数据,这被称做撕裂写(torn write) 。所以,你可以认为赋值操作是一个原子操作,这个“原子操作”可以认为是保证数据的完整性。</p>
+<p>但是,对于现代的多处理多核的系统来说,由于 cache、指令重排,可见性等问题,我们对原子操作的意义有了更多的追求。在多核系统中,一个核对地址的值的更改,在更新到主内存中之前,是在多级缓存中存放的。这时,多个核看到的数据可能是不一样的,其它的核可能还没有看到更新的数据,还在使用旧的数据。</p>
+<p>多处理器多核心系统为了处理这类问题,使用了一种叫做内存屏障(memory fence 或 memory barrier)的方式。一个写内存屏障会告诉处理器,必须要等到它管道中的未完成的操作(特别是写操作)都被刷新到内存中,再进行操作。此操作还会让相关的处理器的 CPU 缓存失效,以便让它们从主存中拉取最新的值。</p>
+<p>atomic 包提供的方法会提供内存屏障的功能,所以,atomic 不仅仅可以保证赋值的数据完整性,还能保证数据的可见性,一旦一个核更新了该地址的值,其它处理器总是能读取到它的最新值。但是,需要注意的是,因为需要处理器之间保证数据的一致性,atomic 的操作也是会降低性能的。</p>
+<h3 id="原子操作">原子操作</h3>
+<p>原子操作依赖硬件指令的支持，但同时还需要运行时调度器的配合。我们以 atomic.CompareAndSwapPointer 为例，介绍 sync/atomic 包提供的同步模式。</p>
+<p>CompareAndSwapPointer 它在包中只有函数定义，没有函数体：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">CompareAndSwapPointer</span><span class="p">(</span><span class="nx">addr</span> <span class="o">*</span><span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">,</span> <span class="nx">old</span><span class="p">,</span> <span class="nx">new</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">)</span> <span class="p">(</span><span class="nx">swapped</span> <span class="kt">bool</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>其本身由运行时实现。</p>
+<p>我们简单看过了两个属于公共包的方法 atomic.Value 和 atomic.CompareAndSwapPointer， 我们来看一下运行时实现：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">//go:linkname sync_atomic_CompareAndSwapUintptr sync/atomic.CompareAndSwapUintptr
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">sync_atomic_CompareAndSwapUintptr</span><span class="p">(</span><span class="nx">ptr</span> <span class="o">*</span><span class="kt">uintptr</span><span class="p">,</span> <span class="nx">old</span><span class="p">,</span> <span class="nx">new</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="kt">bool</span>
+
+<span class="c1">//go:linkname sync_atomic_CompareAndSwapPointer sync/atomic.CompareAndSwapPointer
+</span><span class="c1">//go:nosplit
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">sync_atomic_CompareAndSwapPointer</span><span class="p">(</span><span class="nx">ptr</span> <span class="o">*</span><span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">,</span> <span class="nx">old</span><span class="p">,</span> <span class="nx">new</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">writeBarrier</span><span class="p">.</span><span class="nx">enabled</span> <span class="p">{</span>
+		<span class="nf">atomicwb</span><span class="p">(</span><span class="nx">ptr</span><span class="p">,</span> <span class="nx">new</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nf">sync_atomic_CompareAndSwapUintptr</span><span class="p">((</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nf">noescape</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">ptr</span><span class="p">))),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">old</span><span class="p">),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">new</span><span class="p">))</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>可以看到 sync_atomic_CompareAndSwapUintptr 函数在运行时中也是没有方法本体的， 说明其实现由编译器完成。那么我们来看一下编译器究竟干了什么：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;sync/atomic&#34;</span>
+	<span class="s">&#34;unsafe&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">p</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>
+	<span class="nx">newP</span> <span class="o">:=</span> <span class="mi">42</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">newP</span><span class="p">))</span>
+
+	<span class="nx">v</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="kt">int</span><span class="p">)(</span><span class="nx">p</span><span class="p">)</span>
+	<span class="nb">println</span><span class="p">(</span><span class="o">*</span><span class="nx">v</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>编译结果：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">TEXT</span> <span class="n">sync</span><span class="o">/</span><span class="nf">atomic.CompareAndSwapUintptr</span><span class="p">(</span><span class="n">SB</span><span class="p">)</span> <span class="o">/</span><span class="n">usr</span><span class="o">/</span><span class="n">local</span><span class="o">/</span><span class="n">Cellar</span><span class="o">/</span><span class="n">go</span><span class="o">/</span><span class="m">1.11</span><span class="o">/</span><span class="n">libexec</span><span class="o">/</span><span class="n">src</span><span class="o">/</span><span class="n">sync</span><span class="o">/</span><span class="n">atomic</span><span class="o">/</span><span class="n">asm.s</span>
+  <span class="n">asm.s</span><span class="o">:</span><span class="m">31</span>		<span class="mh">0x1001070</span>		<span class="n">e91b0b0000</span>		<span class="n">JMP</span> <span class="n">runtime</span><span class="o">/</span><span class="n">internal</span><span class="o">/</span><span class="nf">atomic.Casuintptr</span><span class="p">(</span><span class="n">SB</span><span class="p">)</span>
+  <span class="o">:</span><span class="m">-1</span>			<span class="mh">0x1001075</span>		<span class="n">cc</span>			<span class="n">INT</span> <span class="o">$</span><span class="mh">0x3</span>
+  <span class="p">(</span><span class="kc">...</span><span class="p">)</span>
+
+<span class="n">TEXT</span> <span class="n">runtime</span><span class="o">/</span><span class="n">internal</span><span class="o">/</span><span class="nf">atomic.Casuintptr</span><span class="p">(</span><span class="n">SB</span><span class="p">)</span> <span class="o">/</span><span class="n">usr</span><span class="o">/</span><span class="n">local</span><span class="o">/</span><span class="n">Cellar</span><span class="o">/</span><span class="n">go</span><span class="o">/</span><span class="m">1.11</span><span class="o">/</span><span class="n">libexec</span><span class="o">/</span><span class="n">src</span><span class="o">/</span><span class="n">runtime</span><span class="o">/</span><span class="n">internal</span><span class="o">/</span><span class="n">atomic</span><span class="o">/</span><span class="n">asm_amd64.s</span>
+  <span class="n">asm_amd64.s</span><span class="o">:</span><span class="m">44</span>	<span class="mh">0x1001b90</span>		<span class="n">e9dbffffff</span>		<span class="n">JMP</span> <span class="n">runtime</span><span class="o">/</span><span class="n">internal</span><span class="o">/</span><span class="nf">atomic.Cas64</span><span class="p">(</span><span class="n">SB</span><span class="p">)</span>
+  <span class="o">:</span><span class="m">-1</span>			<span class="mh">0x1001b95</span>		<span class="n">cc</span>			<span class="n">INT</span> <span class="o">$</span><span class="mh">0x3</span>
+  <span class="p">(</span><span class="kc">...</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>可以看到 atomic.CompareAndSwapUintptr 本质上转到了 runtime/internal/atomic.Cas64，我们来看一下它的实现：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="o">//</span> <span class="n">bool</span>	<span class="n">runtime</span>∕<span class="n">internal</span>∕<span class="n">atomic</span>·<span class="nf">Cas64</span><span class="p">(</span><span class="n">uint64</span> <span class="o">*</span><span class="n">val</span><span class="p">,</span> <span class="n">uint64</span> <span class="n">old</span><span class="p">,</span> <span class="n">uint64</span> <span class="n">new</span><span class="p">)</span>
+<span class="o">//</span> <span class="n">Atomically</span><span class="o">:</span>
+<span class="o">//</span>	<span class="nf">if</span><span class="p">(</span><span class="o">*</span><span class="n">val</span> <span class="o">==</span> <span class="o">*</span><span class="n">old</span><span class="p">){</span>
+<span class="o">//</span>		<span class="o">*</span><span class="n">val</span> <span class="o">=</span> <span class="n">new</span><span class="p">;</span>
+<span class="o">//</span>		<span class="n">return</span> <span class="m">1</span><span class="p">;</span>
+<span class="o">//</span>	<span class="p">}</span> <span class="n">else</span> <span class="p">{</span>
+<span class="o">//</span>		<span class="n">return</span> <span class="m">0</span><span class="p">;</span>
+<span class="o">//</span>	<span class="p">}</span>
+<span class="n">TEXT</span> <span class="n">runtime</span>∕<span class="n">internal</span>∕<span class="n">atomic</span>·<span class="nf">Cas64</span><span class="p">(</span><span class="n">SB</span><span class="p">),</span> <span class="n">NOSPLIT</span><span class="p">,</span> <span class="o">$</span><span class="m">0-25</span>
+	<span class="n">MOVQ</span>	<span class="n">ptr</span><span class="m">+0</span><span class="p">(</span><span class="n">FP</span><span class="p">),</span> <span class="n">BX</span>
+	<span class="n">MOVQ</span>	<span class="n">old</span><span class="m">+8</span><span class="p">(</span><span class="n">FP</span><span class="p">),</span> <span class="n">AX</span>
+	<span class="n">MOVQ</span>	<span class="n">new</span><span class="m">+16</span><span class="p">(</span><span class="n">FP</span><span class="p">),</span> <span class="n">CX</span>
+	<span class="n">LOCK</span>
+	<span class="n">CMPXCHGQ</span>	<span class="n">CX</span><span class="p">,</span> <span class="m">0</span><span class="p">(</span><span class="n">BX</span><span class="p">)</span>
+	<span class="n">SETEQ</span>	<span class="n">ret</span><span class="m">+24</span><span class="p">(</span><span class="n">FP</span><span class="p">)</span>
+	<span class="n">RET</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>可以看到，实现的本质是使用 CPU 的 LOCK<code>+CMPXCHGQ</code> 指令：首先将 ptr 的值放入 BX，将假设的旧值放入 AX， 要比较的新值放入 CX。然后 LOCK CMPXCHGQ 与累加器 AX 比较并交换 CX 和 BX。</p>
+<p>因此原子操作本质上均为使用 CPU 指令进行实现（理所当然）。由于原子操作的方式比较单一，很容易举一反三， 其他操作不再穷举。</p>
+<h3 id="原子值">原子值</h3>
+<p>原子值需要运行时的支持，在原子值进行修改时，Goroutine 不应该被抢占，因此需要锁定 MP 之间的绑定关系：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">//go:linkname sync_runtime_procPin sync.runtime_procPin
+</span><span class="c1">//go:nosplit
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">sync_runtime_procPin</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nf">procPin</span><span class="p">()</span>
+<span class="p">}</span>
+<span class="c1">//go:nosplit
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">procPin</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
+	<span class="nx">_g_</span><span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+<span class="nx">mp</span> <span class="o">:=</span><span class="nx">_g_</span><span class="p">.</span><span class="nx">m</span>
+
+	<span class="nx">mp</span><span class="p">.</span><span class="nx">locks</span><span class="o">++</span>
+	<span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="nx">mp</span><span class="p">.</span><span class="nx">p</span><span class="p">.</span><span class="nf">ptr</span><span class="p">().</span><span class="nx">id</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="c1">//go:linkname sync_atomic_runtime_procUnpin sync/atomic.runtime_procUnpin
+</span><span class="c1">//go:nosplit
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">sync_atomic_runtime_procUnpin</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nf">procUnpin</span><span class="p">()</span>
+<span class="p">}</span>
+<span class="c1">//go:nosplit
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">procUnpin</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">_g_</span><span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+	<span class="nx">_g_</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">locks</span><span class="o">--</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>原子值 atomic.Value 提供了一种具备原子存取的结构。其自身的结构非常简单， 只包含一个存放数据的 interface{}：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Value</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">v</span> <span class="kd">interface</span><span class="p">{}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>它仅仅只是对要存储的值进行了一层封装。要对这个值进行原子的读取，依赖 Load 方法：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// LoadPointer atomically loads *addr.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">LoadPointer</span><span class="p">(</span><span class="nx">addr</span> <span class="o">*</span><span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">)</span> <span class="p">(</span><span class="nx">val</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">)</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">v</span> <span class="o">*</span><span class="nx">Value</span><span class="p">)</span> <span class="nf">Load</span><span class="p">()</span> <span class="p">(</span><span class="nx">x</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="c1">// 获得 interface 结构的指针
+</span><span class="c1"></span>	<span class="c1">// 在 go 中，interface 的内存布局有类型指针和数据指针两部分表示
+</span><span class="c1"></span>	<span class="nx">vp</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">ifaceWords</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">v</span><span class="p">))</span>
+	<span class="c1">// 获得存储值的类型指针
+</span><span class="c1"></span>	<span class="nx">typ</span> <span class="o">:=</span> <span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">vp</span><span class="p">.</span><span class="nx">typ</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">typ</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">typ</span><span class="p">)</span> <span class="o">==</span> <span class="p">^</span><span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+	<span class="c1">// 获得存储值的实际数据
+</span><span class="c1"></span>	<span class="nx">data</span> <span class="o">:=</span> <span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">vp</span><span class="p">.</span><span class="nx">data</span><span class="p">)</span>
+
+	<span class="c1">// 将复制得到的 typ 和 data 给到 x
+</span><span class="c1"></span>	<span class="nx">xp</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">ifaceWords</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">x</span><span class="p">))</span>
+	<span class="nx">xp</span><span class="p">.</span><span class="nx">typ</span> <span class="p">=</span> <span class="nx">typ</span>
+	<span class="nx">xp</span><span class="p">.</span><span class="nx">data</span> <span class="p">=</span> <span class="nx">data</span>
+	<span class="k">return</span>
+<span class="p">}</span>
+<span class="c1">// ifaceWords 定义了 interface{} 的内部表示。
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">ifaceWords</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">typ</span>  <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>
+	<span class="nx">data</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>从这个 Load 方法实际上使用了 Go 运行时类型系统中的 interface{} 这一类型本质上由 两段内容组成，一个是类型 typ 区域，另一个是实际数据 data 区域。 这个 Load 方法的实现，本质上就是将内部存储的类型和数据都复制一份并返回。</p>
+<p>再来看 Store。存储的思路与读取其实是类似的，但由于类型系统的两段式表示（typ 和 data） 的存在，存储操作比读取操作的实现要更加小心，要考虑当两个不同的 Goroutine 对两段值进行写入时， 如何才能避免写竞争：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// StorePointer atomically stores val into *addr.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">StorePointer</span><span class="p">(</span><span class="nx">addr</span> <span class="o">*</span><span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">,</span> <span class="nx">val</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">)</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">v</span> <span class="o">*</span><span class="nx">Value</span><span class="p">)</span> <span class="nf">Store</span><span class="p">(</span><span class="nx">x</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">x</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="s">&#34;sync/atomic: store of nil value into Value&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="c1">// Value 存储值的指针和要存储的 x 的指针
+</span><span class="c1"></span>	<span class="nx">vp</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">ifaceWords</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">v</span><span class="p">))</span>
+	<span class="nx">xp</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">ifaceWords</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">x</span><span class="p">))</span>
+
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">typ</span> <span class="o">:=</span> <span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">vp</span><span class="p">.</span><span class="nx">typ</span><span class="p">)</span>
+
+		<span class="c1">// v 还未被写入过任何数据
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">typ</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="c1">// 禁止抢占当前 Goroutine 来确保存储顺利完成
+</span><span class="c1"></span>			<span class="nf">runtime_procPin</span><span class="p">()</span>
+			<span class="c1">// 先存一个标志位，宣告正在有人操作此值
+</span><span class="c1"></span>			<span class="k">if</span> <span class="p">!</span><span class="nf">CompareAndSwapPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">vp</span><span class="p">.</span><span class="nx">typ</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(^</span><span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">)))</span> <span class="p">{</span>
+				<span class="c1">// 如果没有成功，取消不可抢占，下次再试
+</span><span class="c1"></span>				<span class="nf">runtime_procUnpin</span><span class="p">()</span>
+				<span class="k">continue</span>
+			<span class="p">}</span>
+
+			<span class="c1">// 如果标志位设置成功，说明其他人都不会向 interface{} 中写入数据
+</span><span class="c1"></span>			<span class="nf">StorePointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">vp</span><span class="p">.</span><span class="nx">data</span><span class="p">,</span> <span class="nx">xp</span><span class="p">.</span><span class="nx">data</span><span class="p">)</span>
+			<span class="nf">StorePointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">vp</span><span class="p">.</span><span class="nx">typ</span><span class="p">,</span> <span class="nx">xp</span><span class="p">.</span><span class="nx">typ</span><span class="p">)</span>
+			<span class="c1">// 存储成功，再标志位可抢占，直接返回
+</span><span class="c1"></span>			<span class="nf">runtime_procUnpin</span><span class="p">()</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+
+		<span class="c1">// 有其他 Goroutine 正在对 v 进行写操作
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">typ</span><span class="p">)</span> <span class="o">==</span> <span class="p">^</span><span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+			<span class="k">continue</span>
+		<span class="p">}</span>
+
+		<span class="c1">// 如果本次存入的类型与前次存储的类型不同
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">typ</span> <span class="o">!=</span> <span class="nx">xp</span><span class="p">.</span><span class="nx">typ</span> <span class="p">{</span>
+			<span class="nb">panic</span><span class="p">(</span><span class="s">&#34;sync/atomic: store of inconsistently typed value into Value&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
+
+		<span class="c1">// 类型已经写入，直接保存数据
+</span><span class="c1"></span>		<span class="nf">StorePointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">vp</span><span class="p">.</span><span class="nx">data</span><span class="p">,</span> <span class="nx">xp</span><span class="p">.</span><span class="nx">data</span><span class="p">)</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>可以看到 atomic.Value 的存取通过 unsafe.Pointer(^uintptr(0)) 作为第一次存取的标志位， 当 atomic.Value 第一次写入数据时，会将当前 Goroutine 设置为不可抢占， 并将要存储类型进行标记，再存入实际的数据与类型。当存储完毕后，即可解除不可抢占，返回。</p>
+<p>在不可抢占期间，且有并发的 Goroutine 再此存储时，如果标记没有被类型替换掉， 则说明第一次存储还未完成，形成 CompareAndSwap 循环进行等待。</p>
+<h2 id="参考">参考</h2>
+<p><a href="https://colobu.com/2017/07/11/dive-into-sync-Map">https://colobu.com/2017/07/11/dive-into-sync-Map</a></p>
+<p><a href="https://segmentfault.com/a/1190000015242373">https://segmentfault.com/a/1190000015242373</a></p>
+<p><a href="https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/">https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/</a></p>
+<p><a href="http://www.qiuxiaobing.cn/%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80/2018/03/09/go-sync-map.html">http://www.qiuxiaobing.cn/%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80/2018/03/09/go-sync-map.html</a></p>
+<p><a href="http://www.gogodjzhu.com/index.php/code/basic/397/">http://www.gogodjzhu.com/index.php/code/basic/397/</a></p>
+<p><a href="http://russellluo.com/2017/06/go-sync-map-diagram.html">http://russellluo.com/2017/06/go-sync-map-diagram.html</a></p>
+<p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/cond/">5.4 条件变量</a></p>
+<p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/waitgroup/">5.5 同步组</a></p>
+<p><a href="https://blog.csdn.net/sinat_41790904/article/details/115416237">Go 标准库源码分析 - sync 包的Pool</a></p>
+<p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/map/">5.7 并发安全散列表</a></p>
+<p><a href="https://draveness.me/golang/docs/part3-runtime/ch06-concurrency/golang-context/">6.1 上下文 Context</a></p>
+<p><a href="https://juejin.cn/post/6844903741842259975">go context剖析之源码分析</a></p>
+<p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/atomic/">5.3 原子操作</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-05-21
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADcontext%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <span class="next-text nav-default">并发原语context源码剖析</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
