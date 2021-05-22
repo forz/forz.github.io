@@ -53,7 +53,7 @@
 <meta itemprop="name" content="并发原语Channel源码剖析">
 <meta itemprop="description" content="channel 数据结构 Go 语言的 Channel 在运行时使用 runtime.hchan 结构体表示。我们在 Go 语言中创建新的 Channel 时，实际上创建的都是如下所示的结构： 1 2 3 4 5 6 7 8 9 10 11 12 13 14 type hchan struct"><meta itemprop="datePublished" content="2021-01-14T15:58:21&#43;00:00" />
 <meta itemprop="dateModified" content="2021-01-14T15:58:21&#43;00:00" />
-<meta itemprop="wordCount" content="4953">
+<meta itemprop="wordCount" content="4988">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="并发原语Channel源码剖析"/>
 <meta name="twitter:description" content="channel 数据结构 Go 语言的 Channel 在运行时使用 runtime.hchan 结构体表示。我们在 Go 语言中创建新的 Channel 时，实际上创建的都是如下所示的结构： 1 2 3 4 5 6 7 8 9 10 11 12 13 14 type hchan struct"/>
@@ -164,7 +164,7 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 4953 字 </span>
+          <span class="more-meta"> 约 4988 字 </span>
           <span class="more-meta"> 预计阅读 10 分钟 </span>
         
       </div>
@@ -439,57 +439,112 @@
 <p>在函数的最后会统一更新 runtime.hchan 的 elemsize、elemtype 和 dataqsiz 几个字段。</p>
 <h3 id="发送数据">发送数据</h3>
 <p>当我们想要向 Channel 发送数据时，就需要使用 ch &lt;- i 语句，编译器会将它解析成 OSEND 节点并在 cmd/compile/internal/gc.walkexpr 中转换成 runtime.chansend1：</p>
-<p>func walkexpr(n <em>Node, init</em>Nodes) *Node {
-switch n.Op {
-case OSEND:
-n1 := n.Right
-n1 = assignconv(n1, n.Left.Type.Elem(), &ldquo;chan send&rdquo;)
-n1 = walkexpr(n1, init)
-n1 = nod(OADDR, n1, nil)
-n = mkcall1(chanfn(&ldquo;chansend1&rdquo;, 2, n.Left.Type), nil, init, n.Left, n1)
-}
-}
-Go
-runtime.chansend1 只是调用了 runtime.chansend 并传入 Channel 和需要发送的数据。runtime.chansend 是向 Channel 中发送数据时一定会调用的函数，该函数包含了发送数据的全部逻辑，如果我们在调用时将 block 参数设置成 true，那么表示当前发送操作是阻塞的：</p>
-<p>func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
-lock(&amp;c.lock)</p>
-<pre><code>if c.closed != 0 {
-	unlock(&amp;c.lock)
-	panic(plainError(&quot;send on closed channel&quot;))
-}
-</code></pre>
-<p>Go
-在发送数据的逻辑执行之前会先为当前 Channel 加锁，防止多个线程并发修改数据。如果 Channel 已经关闭，那么向该 Channel 发送数据时会报 “send on closed channel” 错误并中止程序。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">walkexpr</span><span class="p">(</span><span class="nx">n</span> <span class="o">*</span><span class="nx">Node</span><span class="p">,</span> <span class="nx">init</span><span class="o">*</span><span class="nx">Nodes</span><span class="p">)</span> <span class="o">*</span><span class="nx">Node</span> <span class="p">{</span>
+	<span class="k">switch</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Op</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="nx">OSEND</span><span class="p">:</span>
+		<span class="nx">n1</span> <span class="o">:=</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Right</span>
+		<span class="nx">n1</span> <span class="p">=</span> <span class="nf">assignconv</span><span class="p">(</span><span class="nx">n1</span><span class="p">,</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Left</span><span class="p">.</span><span class="nx">Type</span><span class="p">.</span><span class="nf">Elem</span><span class="p">(),</span> <span class="s">&#34;chan send&#34;</span><span class="p">)</span>
+		<span class="nx">n1</span> <span class="p">=</span> <span class="nf">walkexpr</span><span class="p">(</span><span class="nx">n1</span><span class="p">,</span> <span class="nx">init</span><span class="p">)</span>
+		<span class="nx">n1</span> <span class="p">=</span> <span class="nf">nod</span><span class="p">(</span><span class="nx">OADDR</span><span class="p">,</span> <span class="nx">n1</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+		<span class="nx">n</span> <span class="p">=</span> <span class="nf">mkcall1</span><span class="p">(</span><span class="nf">chanfn</span><span class="p">(</span><span class="s">&#34;chansend1&#34;</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Left</span><span class="p">.</span><span class="nx">Type</span><span class="p">),</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">init</span><span class="p">,</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Left</span><span class="p">,</span> <span class="nx">n1</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>runtime.chansend1 只是调用了 runtime.chansend 并传入 Channel 和需要发送的数据。runtime.chansend 是向 Channel 中发送数据时一定会调用的函数，该函数包含了发送数据的全部逻辑，如果我们在调用时将 block 参数设置成 true，那么表示当前发送操作是阻塞的：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">chansend</span><span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">hchan</span><span class="p">,</span> <span class="nx">ep</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">,</span> <span class="nx">block</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">callerpc</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+
+	<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">closed</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nf">plainError</span><span class="p">(</span><span class="s">&#34;send on closed channel&#34;</span><span class="p">))</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在发送数据的逻辑执行之前会先为当前 Channel 加锁，防止多个线程并发修改数据。如果 Channel 已经关闭，那么向该 Channel 发送数据时会报 “send on closed channel” 错误并中止程序。</p>
 <p>因为 runtime.chansend 函数的实现比较复杂，所以我们这里将该函数的执行过程分成以下的三个部分：</p>
-<p>当存在等待的接收者时，通过 runtime.send 直接将数据发送给阻塞的接收者；
-当缓冲区存在空余空间时，将发送的数据写入 Channel 的缓冲区；
-当不存在缓冲区或者缓冲区已满时，等待其他 Goroutine 从 Channel 接收数据；
-直接发送 #
-如果目标 Channel 没有被关闭并且已经有处于读等待的 Goroutine，那么 runtime.chansend 会从接收队列 recvq 中取出最先陷入等待的 Goroutine 并直接向它发送数据：</p>
-<pre><code>if sg := c.recvq.dequeue(); sg != nil {
-	send(c, sg, ep, func() { unlock(&amp;c.lock) }, 3)
-	return true
-}
-</code></pre>
-<p>Go
-下图展示了 Channel 中存在等待数据的 Goroutine 时，向 Channel 发送数据的过程：</p>
-<p>channel-direct-send</p>
-<p>图 6-20 直接发送数据的过程</p>
+<ul>
+<li>当存在等待的接收者时，通过 runtime.send 直接将数据发送给阻塞的接收者；</li>
+<li>当缓冲区存在空余空间时，将发送的数据写入 Channel 的缓冲区；</li>
+<li>当不存在缓冲区或者缓冲区已满时，等待其他 Goroutine 从 Channel 接收数据；</li>
+</ul>
+<h4 id="直接发送">直接发送</h4>
+<p>如果目标 Channel 没有被关闭并且已经有处于读等待的 Goroutine，那么 runtime.chansend 会从接收队列 recvq 中取出最先陷入等待的 Goroutine 并直接向它发送数据：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">	<span class="k">if</span> <span class="nx">sg</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">recvq</span><span class="p">.</span><span class="nf">dequeue</span><span class="p">();</span> <span class="nx">sg</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nf">send</span><span class="p">(</span><span class="nx">c</span><span class="p">,</span> <span class="nx">sg</span><span class="p">,</span> <span class="nx">ep</span><span class="p">,</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span> <span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span> <span class="p">},</span> <span class="mi">3</span><span class="p">)</span>
+		<span class="k">return</span> <span class="kc">true</span>
+	<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>下图展示了 Channel 中存在等待数据的 Goroutine 时，向 Channel 发送数据的过程：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210521145117.png" alt=""></p>
 <p>发送数据时会调用 runtime.send，该函数的执行可以分成两个部分：</p>
-<p>调用 runtime.sendDirect 将发送的数据直接拷贝到 x = &lt;-c 表达式中变量 x 所在的内存地址上；
-调用 runtime.goready 将等待接收数据的 Goroutine 标记成可运行状态 Grunnable 并把该 Goroutine 放到发送方所在的处理器的 runnext 上等待执行，该处理器在下一次调度时会立刻唤醒数据的接收方；
-func send(c <em>hchan, sg</em>sudog, ep unsafe.Pointer, unlockf func(), skip int) {
-if sg.elem != nil {
-sendDirect(c.elemtype, sg, ep)
-sg.elem = nil
-}
-gp := sg.g
-unlockf()
-gp.param = unsafe.Pointer(sg)
-goready(gp, skip+1)
-}
-Go
-需要注意的是，发送数据的过程只是将接收方的 Goroutine 放到了处理器的 runnext 中，程序没有立刻执行该 Goroutine。</p>
+<ol>
+<li>调用 runtime.sendDirect 将发送的数据直接拷贝到 x = &lt;-c 表达式中变量 x 所在的内存地址上；</li>
+<li>调用 runtime.goready 将等待接收数据的 Goroutine 标记成可运行状态 Grunnable 并把该 Goroutine 放到发送方所在的处理器的 runnext 上等待执行，该处理器在下一次调度时会立刻唤醒数据的接收方；</li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">send</span><span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">hchan</span><span class="p">,</span> <span class="nx">sg</span><span class="o">*</span><span class="nx">sudog</span><span class="p">,</span> <span class="nx">ep</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">,</span> <span class="nx">unlockf</span> <span class="kd">func</span><span class="p">(),</span> <span class="nx">skip</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">sg</span><span class="p">.</span><span class="nx">elem</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nf">sendDirect</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">elemtype</span><span class="p">,</span> <span class="nx">sg</span><span class="p">,</span> <span class="nx">ep</span><span class="p">)</span>
+		<span class="nx">sg</span><span class="p">.</span><span class="nx">elem</span> <span class="p">=</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+	<span class="nx">gp</span> <span class="o">:=</span> <span class="nx">sg</span><span class="p">.</span><span class="nx">g</span>
+	<span class="nf">unlockf</span><span class="p">()</span>
+	<span class="nx">gp</span><span class="p">.</span><span class="nx">param</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">sg</span><span class="p">)</span>
+	<span class="nf">goready</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">skip</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>需要注意的是，发送数据的过程只是将接收方的 Goroutine 放到了处理器的 runnext 中，程序没有立刻执行该 Goroutine。</p>
 <p>缓冲区 #
 如果创建的 Channel 包含缓冲区并且 Channel 中的数据没有装满，会执行下面这段代码：</p>
 <p>func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
@@ -561,26 +616,51 @@ Go
 <p>图 6-22 Channel 接收操作的路线图</p>
 <p>虽然不同的接收方式会被转换成 runtime.chanrecv1 和 runtime.chanrecv2 两种不同函数的调用，但是这两个函数最终还是会调用 runtime.chanrecv。</p>
 <p>当我们从一个空 Channel 接收数据时会直接调用 runtime.gopark 让出处理器的使用权。</p>
-<p>func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool) {
-if c == nil {
-if !block {
-return
-}
-gopark(nil, nil, waitReasonChanReceiveNilChan, traceEvGoStop, 2)
-throw(&ldquo;unreachable&rdquo;)
-}</p>
-<pre><code>lock(&amp;c.lock)
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">chanrecv</span><span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">hchan</span><span class="p">,</span> <span class="nx">ep</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">,</span> <span class="nx">block</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">(</span><span class="nx">selected</span><span class="p">,</span> <span class="nx">received</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">c</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="p">!</span><span class="nx">block</span> <span class="p">{</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+		<span class="nf">gopark</span><span class="p">(</span><span class="kc">nil</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">waitReasonChanReceiveNilChan</span><span class="p">,</span> <span class="nx">traceEvGoStop</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;unreachable&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
 
-if c.closed != 0 &amp;&amp; c.qcount == 0 {
-	unlock(&amp;c.lock)
-	if ep != nil {
-        typedmemclr(c.elemtype, ep)
-	}
-	return true, false
-}
-</code></pre>
-<p>Go
-如果当前 Channel 已经被关闭并且缓冲区中不存在任何数据，那么会清除 ep 指针中的数据并立刻返回。</p>
+	<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+
+	<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">closed</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">c</span><span class="p">.</span><span class="nx">qcount</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">ep</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nf">typedmemclr</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">elemtype</span><span class="p">,</span> <span class="nx">ep</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="k">return</span> <span class="kc">true</span><span class="p">,</span> <span class="kc">false</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>如果当前 Channel 已经被关闭并且缓冲区中不存在任何数据，那么会清除 ep 指针中的数据并立刻返回。</p>
 <p>除了上述两种特殊情况，使用 runtime.chanrecv 从 Channel 接收数据时还包含以下三种不同情况：</p>
 <p>当存在等待的发送者时，通过 runtime.recv 从阻塞的发送者或者缓冲区中获取数据；
 当缓冲区存在数据时，从 Channel 的缓冲区中接收数据；
