@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>扩展并发原语CyclicBarrier源码剖析 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="CyclicBarrier允许一组 goroutine 彼此等待，到达一个共同的执行点。同时，因为它可以被重复使用，所以叫循环栅栏。具体的机制是，大家都在栅栏前" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.83.1 with theme even" />
+
+
+<link rel="canonical" href="/post/%E6%89%A9%E5%B1%95%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADcyclicbarrier%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="扩展并发原语CyclicBarrier源码剖析" />
+<meta property="og:description" content="CyclicBarrier允许一组 goroutine 彼此等待，到达一个共同的执行点。同时，因为它可以被重复使用，所以叫循环栅栏。具体的机制是，大家都在栅栏前" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/%E6%89%A9%E5%B1%95%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADcyclicbarrier%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-05-24T16:26:29&#43;00:00" />
+<meta property="article:modified_time" content="2021-05-24T16:26:29&#43;00:00" />
+
+<meta itemprop="name" content="扩展并发原语CyclicBarrier源码剖析">
+<meta itemprop="description" content="CyclicBarrier允许一组 goroutine 彼此等待，到达一个共同的执行点。同时，因为它可以被重复使用，所以叫循环栅栏。具体的机制是，大家都在栅栏前"><meta itemprop="datePublished" content="2021-05-24T16:26:29&#43;00:00" />
+<meta itemprop="dateModified" content="2021-05-24T16:26:29&#43;00:00" />
+<meta itemprop="wordCount" content="2731">
+<meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="扩展并发原语CyclicBarrier源码剖析"/>
+<meta name="twitter:description" content="CyclicBarrier允许一组 goroutine 彼此等待，到达一个共同的执行点。同时，因为它可以被重复使用，所以叫循环栅栏。具体的机制是，大家都在栅栏前"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">扩展并发原语CyclicBarrier源码剖析</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-05-24 </span>
+        <div class="post-category">
+            <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
+            </div>
+          <span class="more-meta"> 约 2731 字 </span>
+          <span class="more-meta"> 预计阅读 6 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#实现原理">实现原理</a></li>
+    <li><a href="#并发趣题一氧化二氢制造工厂">并发趣题：一氧化二氢制造工厂</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>CyclicBarrier允许一组 goroutine 彼此等待，到达一个共同的执行点。同时，因为它可以被重复使用，所以叫循环栅栏。具体的机制是，大家都在栅栏前等待，等全部都到齐了，就抬起栅栏放行。</p>
+<p>事实上，这个 CyclicBarrier 是参考Java CyclicBarrier和C# Barrier的功能实现的。Java 提供了 CountDownLatch（倒计时器）和 CyclicBarrier（循环栅栏）两个类似的用于保证多线程到达同一个执行点的类，只不过前者是到达 0 的时候放行，后者是到达某个指定的数的时候放行。C# Barrier 功能也是类似的，你可以查看链接，了解它的具体用法。</p>
+<p>你可能会觉得，CyclicBarrier 和 WaitGroup 的功能有点类似，确实是这样。不过，CyclicBarrier 更适合用在“固定数量的 goroutine 等待同一个执行点”的场景中，而且在放行 goroutine 之后，CyclicBarrier 可以重复利用，不像 WaitGroup 重用的时候，必须小心翼翼避免 panic。处理可重用的多 goroutine 等待同一个执行点的场景的时候，CyclicBarrier 和 WaitGroup 方法调用的对应关系如下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210524163830.png" alt=""></p>
+<p>可以看到，如果使用 WaitGroup 实现的话，调用比较复杂，不像 CyclicBarrier 那么清爽。更重要的是，如果想重用 WaitGroup，你还要保证，将 WaitGroup 的计数值重置到 n 的时候不会出现并发问题。</p>
+<p>WaitGroup 更适合用在“一个 goroutine 等待一组 goroutine 到达同一个执行点”的场景中，或者是不需要重用的场景中。</p>
+<h2 id="实现原理">实现原理</h2>
+<p>CyclicBarrier 有两个初始化方法：</p>
+<ol>
+<li>第一个是 New 方法，它只需要一个参数，来指定循环栅栏参与者的数量；</li>
+<li>第二个方法是 NewWithAction，它额外提供一个函数，可以在每一次到达执行点的时候执行一次。具体的时间点是在最后一个参与者到达之后，但是其它的参与者还未被放行之前。我们可以利用它，做放行之前的一些共享状态的更新等操作。</li>
+</ol>
+<p>这两个方法的签名如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">New</span><span class="p">(</span><span class="nx">parties</span> <span class="kt">int</span><span class="p">)</span> <span class="nx">CyclicBarrier</span>
+<span class="kd">func</span> <span class="nf">NewWithAction</span><span class="p">(</span><span class="nx">parties</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">barrierAction</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span><span class="p">)</span> <span class="nx">CyclicBarrier</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>CyclicBarrier 是一个接口，定义的方法如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">CyclicBarrier</span> <span class="kd">interface</span> <span class="p">{</span>
+    <span class="c1">// 等待所有的参与者到达，如果被ctx.Done()中断，会返回ErrBrokenBarrier
+</span><span class="c1"></span>    <span class="nf">Await</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="kt">error</span>
+
+    <span class="c1">// 重置循环栅栏到初始化状态。如果当前有等待者，那么它们会返回ErrBrokenBarrier
+</span><span class="c1"></span>    <span class="nf">Reset</span><span class="p">()</span>
+
+    <span class="c1">// 返回当前等待者的数量
+</span><span class="c1"></span>    <span class="nf">GetNumberWaiting</span><span class="p">()</span> <span class="kt">int</span>
+
+    <span class="c1">// 参与者的数量
+</span><span class="c1"></span>    <span class="nf">GetParties</span><span class="p">()</span> <span class="kt">int</span>
+
+    <span class="c1">// 循环栅栏是否处于中断状态
+</span><span class="c1"></span>    <span class="nf">IsBroken</span><span class="p">()</span> <span class="kt">bool</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>循环栅栏的使用也很简单。循环栅栏的参与者只需调用 Await 等待，等所有的参与者都到达后，再执行下一步。当执行下一步的时候，循环栅栏的状态又恢复到初始的状态了，可以迎接下一轮同样多的参与者。</p>
+<h2 id="并发趣题一氧化二氢制造工厂">并发趣题：一氧化二氢制造工厂</h2>
+<p>题目是这样的：</p>
+<p>有一个名叫大自然的搬运工的工厂，生产一种叫做一氧化二氢的神秘液体。这种液体的分子是由一个氧原子和两个氢原子组成的，也就是水。</p>
+<p>这个工厂有多条生产线，每条生产线负责生产氧原子或者是氢原子，每条生产线由一个 goroutine 负责。</p>
+<p>这些生产线会通过一个栅栏，只有一个氧原子生产线和两个氢原子生产线都准备好，才能生成出一个水分子，否则所有的生产线都会处于等待状态。也就是说，一个水分子必须由三个不同的生产线提供原子，而且水分子是一个一个按照顺序产生的，每生产一个水分子，就会打印出 HHO、HOH、OHH 三种形式的其中一种。HHH、OOH、OHO、HOO、OOO 都是不允许的。</p>
+<p>生产线中氢原子的生产线为 2N 条，氧原子的生产线为 N 条。</p>
+<p>你可以先想一下，我们怎么来实现呢？</p>
+<p>首先，我们来定义一个 H2O 辅助数据类型，它包含两个信号量的字段和一个循环栅栏。</p>
+<ol>
+<li>semaH 信号量：控制氢原子。一个水分子需要两个氢原子，所以，氢原子的空槽数资源数设置为</li>
+<li>semaO 信号量：控制氧原子。一个水分子需要一个氧原子，所以资源数的空槽数设置为</li>
+<li>循环栅栏：等待两个氢原子和一个氧原子填补空槽，直到任务完成。</li>
+</ol>
+<p>我们来看下具体的代码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">
+<span class="kn">package</span> <span class="nx">water</span>
+<span class="kn">import</span> <span class="p">(</span>
+  <span class="s">&#34;context&#34;</span>
+  <span class="s">&#34;github.com/marusama/cyclicbarrier&#34;</span>
+  <span class="s">&#34;golang.org/x/sync/semaphore&#34;</span>
+<span class="p">)</span>
+<span class="c1">// 定义水分子合成的辅助数据结构
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">H2O</span> <span class="kd">struct</span> <span class="p">{</span>
+  <span class="nx">semaH</span> <span class="o">*</span><span class="nx">semaphore</span><span class="p">.</span><span class="nx">Weighted</span> <span class="c1">// 氢原子的信号量
+</span><span class="c1"></span>  <span class="nx">semaO</span> <span class="o">*</span><span class="nx">semaphore</span><span class="p">.</span><span class="nx">Weighted</span> <span class="c1">// 氧原子的信号量
+</span><span class="c1"></span>  <span class="nx">b</span>     <span class="nx">cyclicbarrier</span><span class="p">.</span><span class="nx">CyclicBarrier</span> <span class="c1">// 循环栅栏，用来控制合成
+</span><span class="c1"></span><span class="p">}</span>
+<span class="kd">func</span> <span class="nf">New</span><span class="p">()</span> <span class="o">*</span><span class="nx">H2O</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="o">&amp;</span><span class="nx">H2O</span><span class="p">{</span>
+    <span class="nx">semaH</span><span class="p">:</span> <span class="nx">semaphore</span><span class="p">.</span><span class="nf">NewWeighted</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="c1">//氢原子需要两个
+</span><span class="c1"></span>    <span class="nx">semaO</span><span class="p">:</span> <span class="nx">semaphore</span><span class="p">.</span><span class="nf">NewWeighted</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="c1">// 氧原子需要一个
+</span><span class="c1"></span>    <span class="nx">b</span><span class="p">:</span>     <span class="nx">cyclicbarrier</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="mi">3</span><span class="p">),</span>  <span class="c1">// 需要三个原子才能合成
+</span><span class="c1"></span>  <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>接下来，我们看看各条流水线的处理情况。</p>
+<p>流水线分为氢原子处理流水线和氧原子处理流水线，首先，我们先看一下氢原子的流水线：如果有可用的空槽，氢原子的流水线的处理方法是 hydrogen，hydrogen 方法就会占用一个空槽（h2o.semaH.Acquire），输出一个 H 字符，然后等待栅栏放行。等其它的 goroutine 填补了氢原子的另一个空槽和氧原子的空槽之后，程序才可以继续进行。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">
+<span class="kd">func</span> <span class="p">(</span><span class="nx">h2o</span> <span class="o">*</span><span class="nx">H2O</span><span class="p">)</span> <span class="nf">hydrogen</span><span class="p">(</span><span class="nx">releaseHydrogen</span> <span class="kd">func</span><span class="p">())</span> <span class="p">{</span>
+  <span class="nx">h2o</span><span class="p">.</span><span class="nx">semaH</span><span class="p">.</span><span class="nf">Acquire</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">Background</span><span class="p">(),</span> <span class="mi">1</span><span class="p">)</span>
+
+  <span class="nf">releaseHydrogen</span><span class="p">()</span> <span class="c1">// 输出H
+</span><span class="c1"></span>  <span class="nx">h2o</span><span class="p">.</span><span class="nx">b</span><span class="p">.</span><span class="nf">Await</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">Background</span><span class="p">())</span> <span class="c1">//等待栅栏放行
+</span><span class="c1"></span>  <span class="nx">h2o</span><span class="p">.</span><span class="nx">semaH</span><span class="p">.</span><span class="nf">Release</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="c1">// 释放氢原子空槽
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在栅栏放行之前，只有两个氢原子的空槽位和一个氧原子的空槽位。只有等栅栏放行之后，这些空槽位才会被释放。栅栏放行，就意味着一个水分子组成成功。</p>
+<p>这个算法是不是正确呢？我们来编写一个单元测试检测一下。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">
+<span class="kn">package</span> <span class="nx">water</span>
+
+
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;math/rand&#34;</span>
+    <span class="s">&#34;sort&#34;</span>
+    <span class="s">&#34;sync&#34;</span>
+    <span class="s">&#34;testing&#34;</span>
+    <span class="s">&#34;time&#34;</span>
+<span class="p">)</span>
+
+
+<span class="kd">func</span> <span class="nf">TestWaterFactory</span><span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">T</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">//用来存放水分子结果的channel
+</span><span class="c1"></span>    <span class="kd">var</span> <span class="nx">ch</span> <span class="kd">chan</span> <span class="kt">string</span>
+    <span class="nx">releaseHydrogen</span> <span class="o">:=</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nx">ch</span> <span class="o">&lt;-</span> <span class="s">&#34;H&#34;</span>
+    <span class="p">}</span>
+    <span class="nx">releaseOxygen</span> <span class="o">:=</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nx">ch</span> <span class="o">&lt;-</span> <span class="s">&#34;O&#34;</span>
+    <span class="p">}</span>
+
+    <span class="c1">// 300个原子，300个goroutine,每个goroutine并发的产生一个原子
+</span><span class="c1"></span>    <span class="kd">var</span> <span class="nx">N</span> <span class="p">=</span> <span class="mi">100</span>
+    <span class="nx">ch</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">N</span><span class="o">*</span><span class="mi">3</span><span class="p">)</span>
+
+
+    <span class="nx">h2o</span> <span class="o">:=</span> <span class="nf">New</span><span class="p">()</span>
+
+    <span class="c1">// 用来等待所有的goroutine完成
+</span><span class="c1"></span>    <span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+    <span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">N</span> <span class="o">*</span> <span class="mi">3</span><span class="p">)</span>
+
+    <span class="c1">// 200个氢原子goroutine
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">2</span><span class="o">*</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+            <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="nx">rand</span><span class="p">.</span><span class="nf">Intn</span><span class="p">(</span><span class="mi">100</span><span class="p">))</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span><span class="p">)</span>
+            <span class="nx">h2o</span><span class="p">.</span><span class="nf">hydrogen</span><span class="p">(</span><span class="nx">releaseHydrogen</span><span class="p">)</span>
+            <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+        <span class="p">}()</span>
+    <span class="p">}</span>
+    <span class="c1">// 100个氧原子goroutine
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+            <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="nx">rand</span><span class="p">.</span><span class="nf">Intn</span><span class="p">(</span><span class="mi">100</span><span class="p">))</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span><span class="p">)</span>
+            <span class="nx">h2o</span><span class="p">.</span><span class="nf">oxygen</span><span class="p">(</span><span class="nx">releaseOxygen</span><span class="p">)</span>
+            <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+        <span class="p">}()</span>
+    <span class="p">}</span>
+
+    <span class="c1">//等待所有的goroutine执行完
+</span><span class="c1"></span>    <span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+
+    <span class="c1">// 结果中肯定是300个原子
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">ch</span><span class="p">)</span> <span class="o">!=</span> <span class="nx">N</span><span class="o">*</span><span class="mi">3</span> <span class="p">{</span>
+        <span class="nx">t</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;expect %d atom but got %d&#34;</span><span class="p">,</span> <span class="nx">N</span><span class="o">*</span><span class="mi">3</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">ch</span><span class="p">))</span>
+    <span class="p">}</span>
+
+    <span class="c1">// 每三个原子一组，分别进行检查。要求这一组原子中必须包含两个氢原子和一个氧原子，这样才能正确组成一个水分子。
+</span><span class="c1"></span>    <span class="kd">var</span> <span class="nx">s</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">string</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="p">=</span> <span class="o">&lt;-</span><span class="nx">ch</span>
+        <span class="nx">s</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="p">=</span> <span class="o">&lt;-</span><span class="nx">ch</span>
+        <span class="nx">s</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="p">=</span> <span class="o">&lt;-</span><span class="nx">ch</span>
+        <span class="nx">sort</span><span class="p">.</span><span class="nf">Strings</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+
+
+        <span class="nx">water</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="nx">s</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="nx">s</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nx">water</span> <span class="o">!=</span> <span class="s">&#34;HHO&#34;</span> <span class="p">{</span>
+            <span class="nx">t</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;expect a water molecule but got %s&#34;</span><span class="p">,</span> <span class="nx">water</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>如果你没有学习 CyclicBarrier，你可能只会想到，用 WaitGroup 来实现这个水分子制造工厂的例子。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">
+<span class="kd">type</span> <span class="nx">H2O</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">semaH</span> <span class="o">*</span><span class="nx">semaphore</span><span class="p">.</span><span class="nx">Weighted</span>
+    <span class="nx">semaO</span> <span class="o">*</span><span class="nx">semaphore</span><span class="p">.</span><span class="nx">Weighted</span>
+    <span class="nx">wg</span>    <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span> <span class="c1">//将循环栅栏替换成WaitGroup
+</span><span class="c1"></span><span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">New</span><span class="p">()</span> <span class="o">*</span><span class="nx">H2O</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+    <span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">H2O</span><span class="p">{</span>
+        <span class="nx">semaH</span><span class="p">:</span> <span class="nx">semaphore</span><span class="p">.</span><span class="nf">NewWeighted</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span>
+        <span class="nx">semaO</span><span class="p">:</span> <span class="nx">semaphore</span><span class="p">.</span><span class="nf">NewWeighted</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span>
+        <span class="nx">wg</span><span class="p">:</span>    <span class="nx">wg</span><span class="p">,</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">h2o</span> <span class="o">*</span><span class="nx">H2O</span><span class="p">)</span> <span class="nf">hydrogen</span><span class="p">(</span><span class="nx">releaseHydrogen</span> <span class="kd">func</span><span class="p">())</span> <span class="p">{</span>
+    <span class="nx">h2o</span><span class="p">.</span><span class="nx">semaH</span><span class="p">.</span><span class="nf">Acquire</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">Background</span><span class="p">(),</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="nf">releaseHydrogen</span><span class="p">()</span>
+
+    <span class="c1">// 标记自己已达到，等待其它goroutine到达
+</span><span class="c1"></span>    <span class="nx">h2o</span><span class="p">.</span><span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+    <span class="nx">h2o</span><span class="p">.</span><span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+
+    <span class="nx">h2o</span><span class="p">.</span><span class="nx">semaH</span><span class="p">.</span><span class="nf">Release</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">h2o</span> <span class="o">*</span><span class="nx">H2O</span><span class="p">)</span> <span class="nf">oxygen</span><span class="p">(</span><span class="nx">releaseOxygen</span> <span class="kd">func</span><span class="p">())</span> <span class="p">{</span>
+    <span class="nx">h2o</span><span class="p">.</span><span class="nx">semaO</span><span class="p">.</span><span class="nf">Acquire</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">Background</span><span class="p">(),</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="nf">releaseOxygen</span><span class="p">()</span>
+
+    <span class="c1">// 标记自己已达到，等待其它goroutine到达
+</span><span class="c1"></span>    <span class="nx">h2o</span><span class="p">.</span><span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+    <span class="nx">h2o</span><span class="p">.</span><span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+    <span class="c1">//都到达后重置wg
+</span><span class="c1"></span>    <span class="nx">h2o</span><span class="p">.</span><span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
+
+    <span class="nx">h2o</span><span class="p">.</span><span class="nx">semaO</span><span class="p">.</span><span class="nf">Release</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>你一看代码就知道了，使用 WaitGroup 非常复杂，而且，重用和 Done 方法的调用有并发的问题，程序可能 panic，远远没有使用循环栅栏更加简单直接。</p>
+<p>所以，我建议你多了解一些并发原语，甚至是从其它编程语言、操作系统中学习更多的并发原语，这样可以让你的知识库更加丰富，在面对并发场景的时候，你也能更加游刃有余。</p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-05-24
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/%E6%89%A9%E5%B1%95%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADsingleflight%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <span class="next-text nav-default">扩展并发原语SingleFlight源码剖析</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
