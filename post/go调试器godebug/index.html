@@ -53,7 +53,7 @@
 <meta itemprop="name" content="Go调试器:GODEBUG">
 <meta itemprop="description" content="介绍 让 Go 更强大的原因之一莫过于它的 GODEBUG 工具，GODEBUG 的设置可以让 Go 程序在运行时输出调试信息，可以根据你的要求很直观的看到你想要的调度器或"><meta itemprop="datePublished" content="2020-02-11T10:22:37&#43;00:00" />
 <meta itemprop="dateModified" content="2020-02-11T10:22:37&#43;00:00" />
-<meta itemprop="wordCount" content="7066">
+<meta itemprop="wordCount" content="7208">
 <meta itemprop="keywords" content="Go," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go调试器:GODEBUG"/>
 <meta name="twitter:description" content="介绍 让 Go 更强大的原因之一莫过于它的 GODEBUG 工具，GODEBUG 的设置可以让 Go 程序在运行时输出调试信息，可以根据你的要求很直观的看到你想要的调度器或"/>
@@ -164,7 +164,7 @@
         <div class="post-category">
             <a href="/categories/go%E8%B0%83%E4%BC%98/"> Go调优 </a>
             </div>
-          <span class="more-meta"> 约 7066 字 </span>
+          <span class="more-meta"> 约 7208 字 </span>
           <span class="more-meta"> 预计阅读 15 分钟 </span>
         
       </div>
@@ -192,6 +192,7 @@
     <li><a href="#演示代码-1">演示代码</a></li>
     <li><a href="#gctrace">gctrace</a></li>
     <li><a href="#格式">格式</a></li>
+    <li><a href="#gcvis">gcvis</a></li>
     <li><a href="#案例">案例</a></li>
     <li><a href="#副作用runtime调度阻塞">副作用:runtime调度阻塞</a>
       <ul>
@@ -591,7 +592,7 @@ G17: status=1() m=-1 lockedm=-1
 G18: status=2() m=4 lockedm=-1
 </code></pre></td></tr></table>
 </div>
-</div><p>在这个片段中，G1 的运行状态为 _Gwaiting，并没有分配 M 和锁定。这时候你可能好奇在片段中括号里的是什么东西呢，其实是因为该 status=4 是表示 Goroutine 在运行时时被阻止，而阻止它的事件就是 semacquire 事件，是因为 semacquire 会检查信号量的情况，在合适的时机就调用 goparkunlock 函数，把当前 Goroutine 放进等待队列，并把它设为 _Gwaiting 状态。</p>
+</div><p>在这个片段中，G1 的运行状态为 _Gwaiting，并没有分配 M 和锁定。这时候你可能好奇在片段中括号里的是什么东西呢，其实是因为该 status=4 是表示 Goroutine 在运行时时被阻止，而阻止它的事件就是 semacquire 事件，是因为 semacquire 会检查信号量的情况，在合适的时机就调用 goparkunlock 函数，把当前 Goroutine 放进等待队列，并把它设为_Gwaiting 状态。</p>
 <p>那么在实际运行中还有什么原因会导致这种现象呢，我们一起看看，如下：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -839,7 +840,7 @@ G18: status=2() m=4 lockedm=-1
 </span><span class="lnt">29
 </span></code></pre></td>
 <td class="lntd">
-<pre class="chroma"><code class="language-fallback" data-lang="fallback">$ GODEBUG=gctrace=1 go run main.go    
+<pre class="chroma"><code class="language-fallback" data-lang="fallback">$ GODEBUG=gctrace=1 go run main.go
 gc 1 @0.001s 0%: 0.005+0.92+0.004 ms clock, 0.011+0.027/0/0.13+0.009 ms cpu, 4-&gt;6-&gt;2 MB, 5 MB goal, 2 P
 gc 2 @0.003s 0%: 0.002+0.43+0.002 ms clock, 0.004+0.013/0/0.32+0.005 ms cpu, 5-&gt;5-&gt;1 MB, 6 MB goal, 2 P
 gc 3 @0.003s 1%: 0.002+0.47+0.003 ms clock, 0.004+0.027/0/0.44+0.006 ms cpu, 4-&gt;4-&gt;2 MB, 5 MB goal, 2 P
@@ -912,6 +913,41 @@ scvg#: inuse: # idle: # sys: # released: # consumed: # (MB)
 <li>released: #  MB 归还给系统的大小</li>
 <li>consumed: #  MB 从系统申请的大小</li>
 </ul>
+<h2 id="gcvis">gcvis</h2>
+<p>gcvis 的原理很简单， 就是逐行解析目标程序的 GC 输出，然后用正则匹配相关的数据，然后生成 JSON 数据，另外也会起一个协程开启 HTTP 服务，用于图表展示。</p>
+<p>Installation</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="c1"># install gcvis</span>
+<span class="o">$</span> <span class="n">go</span> <span class="n">get</span> <span class="o">-</span><span class="n">u</span> <span class="o">-</span><span class="n">v</span> <span class="n">github.com</span><span class="o">/</span><span class="n">davecheney</span><span class="o">/</span><span class="n">gcvis</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>gcvis 主要有两种用法：</p>
+<p>直接运行:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">gcvis</span> <span class="o">/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">binary</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>管道重定向方式（standard error）</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">GODEBUG</span><span class="o">=</span><span class="n">gctrace</span><span class="o">=</span><span class="m">1</span>  <span class="o">/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">binary</span>  <span class="o">|&amp;</span> <span class="n">gcvis</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>gcvis 的图标输出效果如下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210608181908.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210608181915.png" alt=""></p>
 <h2 id="案例">案例</h2>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1059,10 +1095,10 @@ scvg#: inuse: # idle: # sys: # released: # consumed: # (MB)
 <p>线上就不应该长期的去监控gctrace的日志。另外需要把较为频繁的业务日志进行采样输出。前面有说，我们第一个解决方法就修改日志的写入模式，当几千个协程写日志时，不利于磁盘的高效使用和性能，可以借助disruptor做日志缓存，然后由独立的协程来写入日志。</p>
 <p>除此之外，还发现一个问题，开始时整个golang进程开了几百个线程，这是由于过多的写操作超过磁盘瓶颈，继而触发了disk io阻塞。这时候golang runtime sysmon检测到syscall超时，继而解绑mp，接着实例化新的m线程进行绑定p。</p>
 <p>我们可以想到如果函数gcMarkTermination输出日志放在关闭stop the world后面，这样就不会影响runtime调度。当然，这个在线上重定向go gctrace的问题本来就很奇葩。</p>
-<p>参考:<br>
-<a href="https://book.eddycjy.com/golang/tools/godebug-sched.html">https://book.eddycjy.com/golang/tools/godebug-sched.html</a><br>
-<a href="https://book.eddycjy.com/golang/tools/godebug-gc.html">https://book.eddycjy.com/golang/tools/godebug-gc.html</a><br>
-<a href="http://xiaorui.cc/2019/12/13/go-gctrace%E6%97%A5%E5%BF%97%E5%BC%95%E8%B5%B7runtime%E8%B0%83%E5%BA%A6%E9%98%BB%E5%A1%9E/">http://xiaorui.cc/2019/12/13/go-gctrace%E6%97%A5%E5%BF%97%E5%BC%95%E8%B5%B7runtime%E8%B0%83%E5%BA%A6%E9%98%BB%E5%A1%9E/</a><br>
+<p>参考:
+<a href="https://book.eddycjy.com/golang/tools/godebug-sched.html">https://book.eddycjy.com/golang/tools/godebug-sched.html</a>
+<a href="https://book.eddycjy.com/golang/tools/godebug-gc.html">https://book.eddycjy.com/golang/tools/godebug-gc.html</a>
+<a href="http://xiaorui.cc/2019/12/13/go-gctrace%E6%97%A5%E5%BF%97%E5%BC%95%E8%B5%B7runtime%E8%B0%83%E5%BA%A6%E9%98%BB%E5%A1%9E/">http://xiaorui.cc/2019/12/13/go-gctrace%E6%97%A5%E5%BF%97%E5%BC%95%E8%B5%B7runtime%E8%B0%83%E5%BA%A6%E9%98%BB%E5%A1%9E/</a>
 <a href="https://colobu.com/2016/04/19/Scheduler-Tracing-In-Go/">https://colobu.com/2016/04/19/Scheduler-Tracing-In-Go/</a></p>
 
     </div>
