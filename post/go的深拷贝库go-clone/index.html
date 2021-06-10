@@ -53,7 +53,7 @@
 <meta itemprop="name" content="Go的深拷贝库:go-clone">
 <meta itemprop="description" content="背景 这个库是 github.com/huandu/go-clone，主要用途是对任意的 Go 结构进行深拷贝，创造一个内容完全相同的副本，得到的值可"><meta itemprop="datePublished" content="2021-06-08T23:26:17&#43;00:00" />
 <meta itemprop="dateModified" content="2021-06-08T23:26:17&#43;00:00" />
-<meta itemprop="wordCount" content="6519">
+<meta itemprop="wordCount" content="8825">
 <meta itemprop="keywords" content="Go," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的深拷贝库:go-clone"/>
 <meta name="twitter:description" content="背景 这个库是 github.com/huandu/go-clone，主要用途是对任意的 Go 结构进行深拷贝，创造一个内容完全相同的副本，得到的值可"/>
@@ -164,8 +164,8 @@
         <div class="post-category">
             <a href="/categories/go/"> Go </a>
             </div>
-          <span class="more-meta"> 约 6519 字 </span>
-          <span class="more-meta"> 预计阅读 14 分钟 </span>
+          <span class="more-meta"> 约 8825 字 </span>
+          <span class="more-meta"> 预计阅读 18 分钟 </span>
         
       </div>
     </header>
@@ -183,7 +183,17 @@
     <li><a href="#减少反射使用的次数">减少反射使用的次数</a></li>
     <li><a href="#定义特殊的数值类型结构体">定义特殊的数值类型结构体</a></li>
     <li><a href="#拷贝函数指针">拷贝函数指针</a></li>
-    <li><a href="#小结">小结</a></li>
+    <li><a href="#使用方法">使用方法</a>
+      <ul>
+        <li><a href="#安装">安装</a></li>
+        <li><a href="#clone-和-slowly">Clone 和 Slowly</a></li>
+        <li><a href="#将结构类型标记为标量">将结构类型标记为标量</a></li>
+        <li><a href="#将指针类型标记为不透明">将指针类型标记为不透明</a></li>
+        <li><a href="#克隆sync和syncatomic中定义的no-copy类型">克隆sync和sync/atomic中定义的“no-copy”类型</a></li>
+        <li><a href="#设置自定义克隆功能">设置自定义克隆功能</a></li>
+        <li><a href="#wrapunwrap和undo">Wrap，Unwrap和Undo</a></li>
+      </ul>
+    </li>
     <li><a href="#转载">转载</a></li>
   </ul>
 </nav>
@@ -201,10 +211,10 @@
 <p>要实现深拷贝函数 <code>Clone(v interface{}) interface{}</code>，其基本思路很简单：</p>
 <ol>
 <li>首先通过函数 <code>val := reflect.ValueOf(v)</code> 拿到 v 的反射值；</li>
-<li>根据 val.Kind() 区分各种类型，主要分两种：一种是 scala 类型，即数值类型，包括各种整型、浮点、虚数、字符串等，直接返回原值即可；一种是复杂类型，每种类型用对应的反射方法来创建，包括 reflect.New/reflect.MakeMap/reflect.MakeSlice / reflect.MakeChan 等方法；</li>
-<li>通过各种反射方法来将新申请 val.Set* 方法将新值设置到新申请的变量里面。</li>
+<li>根据 val.Kind() 区分各种类型，主要分两种：一种是 scala 类型，即数值类型，包括各种整型、浮点、虚数、字符串等，直接返回原值即可；一种是复杂类型，每种类型用对应的反射方法来创建，包括 <code>reflect.New/reflect.MakeMap/reflect.MakeSlice / reflect.MakeChan</code> 等方法；</li>
+<li>通过各种反射方法来将新申请 <code>val.Set*</code> 方法将新值设置到新申请的变量里面。</li>
 </ol>
-<p>这里面比较麻烦的是处理 struct，为了深拷贝结构，必须首先通过 val.NumField() 得到 struct field 个数，然后用循环不断的将 val.Field(i) 的值拷贝到新申请的变量对应字段里面去，这里递归调用深拷贝方法即可。</p>
+<p>这里面比较麻烦的是处理 struct，为了深拷贝结构，必须首先通过 <code>val.NumField()</code> 得到 struct field 个数，然后用循环不断的将 <code>val.Field(i)</code> 的值拷贝到新申请的变量对应字段里面去，这里递归调用深拷贝方法即可。</p>
 <p>思路看起来很简单，似乎都是些体力活，但做了之后就会发现有一些特殊情况还得多加小心，真要实现好不容易。</p>
 <h2 id="处理递归数据">处理递归数据</h2>
 <p>当我们使用循环链表的时候就会遇到递归数据。一个首尾相连的链表，如果一直跟着指针深拷贝所有数据，那么深拷贝函数一定会陷入死循环而无法退出。</p>
@@ -828,12 +838,490 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>至此，我们就可以正常的通过 Set 来设置这个反射值了，最后再将复制出来的值通过内存操作拷贝到结构里面去即可。</p>
-<h2 id="小结">小结</h2>
-<p>通过利用 Go 数据结构内存布局的特点，先进行浅拷贝再对有需要的字段进行深拷贝，并且预先将结构字段的类型信息缓存起来方便处理，这样可以极大的提升拷贝性能。对于字段都是纯数值类型来说，可以提升超过一个数量级的性能；对于本身就很复杂的类型来说，也会因为减少了反射调用而提升几倍性能。具体的测试结果可以看项目的 README。</p>
-<p>基于这种非常彻底和高效的深拷贝，使得我们甚至于可以用这种技术来实现一些原来不敢想的功能，比如 Go 的 immutable data，这也就是 clone.Wrap、clone.Unwrap 和 clone.Undo 实现的功能了，通过这些 API 我们可以做到数据透明的保存和重置，模拟其他语言的 immutable 特性。这方面的实现细节也挺多的，未来有机会再分享吧。</p>
-<h2 id="转载">转载</h2>
+<h2 id="使用方法">使用方法</h2>
+<p>包clone提供了深度克隆任何 Go 数据的功能。它还提供了一个包装器来保护指针免受任何意外的变化。</p>
+<p>Clone/Slowly也可以克隆未导出的字段和“无复制”结构。明智地使用此功能。</p>
+<h3 id="安装">安装</h3>
+<p>使用go get安装该软件包。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">go</span> <span class="n">get</span> <span class="n">github.com</span><span class="o">/</span><span class="n">huandu</span><span class="o">/</span><span class="n">go</span><span class="o">-</span><span class="n">clone</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="clone-和-slowly">Clone 和 Slowly</h3>
+<p>如果我们想克隆任何 Go 值，请使用Clone.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">t</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">T</span><span class="p">{</span><span class="o">...</span><span class="p">}</span>
+<span class="nx">v</span> <span class="o">:=</span> <span class="nx">clone</span><span class="p">.</span><span class="nf">Clone</span><span class="p">(</span><span class="nx">t</span><span class="p">).(</span><span class="o">*</span><span class="nx">T</span><span class="p">)</span>
+<span class="nx">reflect</span><span class="p">.</span><span class="nf">DeepEqual</span><span class="p">(</span><span class="nx">t</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span> <span class="c1">// true
+</span></code></pre></td></tr></table>
+</div>
+</div><p>出于性能考虑，Clone不处理包含指针循环的值。如果我们需要克隆这些值，请Slowly改用。</p>
+<h4 id="func-clone">func Clone</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Clone</span><span class="p">(</span><span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>递归深度克隆v为新值。它假设 v 中没有指针循环，例如 v 有一个指向 v 本身的指针。如果存在指针循环，请使用 Slowly。</p>
+<p>Clone 分配内存并以深度优先的顺序在 v 内部深度复制值。以下类型有一些特殊规则。</p>
+<ul>
+<li>标量类型：所有类似数字的类型都按值复制。</li>
+<li>func：按值复制，因为 func 在运行时是一个不透明的指针。</li>
+<li>字符串：按值复制，因为字符串在设计上是不可变的。</li>
+<li>unsafe.Pointer：按值复制，因为我们不知道里面有什么。</li>
+<li>chan：创建一个新的空 chan，因为我们无法读取旧 chan 中的数据。
+与许多其他包不同，Clone 能够克隆任何结构体的未导出字段。明智地使用此功能。</li>
+</ul>
+<h4 id="func-slowly">func Slowly</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Slowly</span><span class="p">(</span><span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Slowly递归地将v 深度克隆到一个新值。它在内部标记所有克隆的值，因此它可以使用循环指针克隆 v。</p>
+<p>Slowly与Clone完全相同。有关更多详细信息，请参阅克隆文档。</p>
+<p>Example</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">ListNode</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">Data</span> <span class="kt">int</span>
+	<span class="nx">Next</span> <span class="o">*</span><span class="nx">ListNode</span>
+<span class="p">}</span>
+<span class="nx">node1</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">ListNode</span><span class="p">{</span>
+	<span class="nx">Data</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="nx">node2</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">ListNode</span><span class="p">{</span>
+	<span class="nx">Data</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="nx">node3</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">ListNode</span><span class="p">{</span>
+	<span class="nx">Data</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="nx">node1</span><span class="p">.</span><span class="nx">Next</span> <span class="p">=</span> <span class="nx">node2</span>
+<span class="nx">node2</span><span class="p">.</span><span class="nx">Next</span> <span class="p">=</span> <span class="nx">node3</span>
+<span class="nx">node3</span><span class="p">.</span><span class="nx">Next</span> <span class="p">=</span> <span class="nx">node1</span>
+
+<span class="c1">// We must use `Slowly` to clone a circular linked list.
+</span><span class="c1"></span><span class="nx">node</span> <span class="o">:=</span> <span class="nf">Slowly</span><span class="p">(</span><span class="nx">node1</span><span class="p">).(</span><span class="o">*</span><span class="nx">ListNode</span><span class="p">)</span>
+
+<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">10</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">node</span><span class="p">.</span><span class="nx">Data</span><span class="p">)</span>
+	<span class="nx">node</span> <span class="p">=</span> <span class="nx">node</span><span class="p">.</span><span class="nx">Next</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Output:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="m">1</span>
+<span class="m">2</span>
+<span class="m">3</span>
+<span class="m">1</span>
+<span class="m">2</span>
+<span class="m">3</span>
+<span class="m">1</span>
+<span class="m">2</span>
+<span class="m">3</span>
+<span class="m">1</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="将结构类型标记为标量">将结构类型标记为标量</h3>
+<p>一些结构类型可以被视为标量。</p>
+<p>一个众所周知的案例是time.Time。虽然time.Time中有一个<code>loc *time.Location</code>指针，我们总是用time.Time的值。克隆time.Time时，返回一个浅拷贝副本应该是可以的。</p>
+<p>目前，以下类型默认标记为标量。</p>
+<ul>
+<li>time.Time</li>
+<li>reflect.Value</li>
+</ul>
+<p>如果内置包中定义的任何类型应视为标量，请打开新问题让我知道。我会更新默认值。</p>
+<p>如果有任何自定义类型应视为标量，则调用MarkAsScalar手动标记它。</p>
+<h4 id="func-markasscalar">func MarkAsScalar</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">MarkAsScalar</span><span class="p">(</span><span class="nx">t</span> <span class="nx">reflect</span><span class="p">.</span><span class="nx">Type</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>MarkAsScalar 将 t 标记为标量类型，以便所有克隆方法都将按值复制 t。如果 t 不是结构体或指向结构体的指针，MarkAsScalar 将忽略 t。</p>
+<p>在大多数情况下，没有必要显式调用它。如果 struct 类型仅包含标量类型字段，则该结构将自动标记为标量。</p>
+<p>以下是默认标记为标量的类型列表：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="o">*</span> <span class="n">time.Time</span>
+<span class="o">*</span> <span class="n">reflect.Value</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Example</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">ScalarType</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">stderr</span> <span class="o">*</span><span class="nx">os</span><span class="p">.</span><span class="nx">File</span>
+<span class="p">}</span>
+
+<span class="nf">MarkAsScalar</span><span class="p">(</span><span class="nx">reflect</span><span class="p">.</span><span class="nf">TypeOf</span><span class="p">(</span><span class="nb">new</span><span class="p">(</span><span class="nx">ScalarType</span><span class="p">)))</span>
+
+<span class="nx">scalar</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">ScalarType</span><span class="p">{</span>
+	<span class="nx">stderr</span><span class="p">:</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="nx">cloned</span> <span class="o">:=</span> <span class="nf">Clone</span><span class="p">(</span><span class="nx">scalar</span><span class="p">).(</span><span class="o">*</span><span class="nx">ScalarType</span><span class="p">)</span>
+
+<span class="c1">// cloned is a shadow copy of scalar
+</span><span class="c1">// so that the pointer value should be the same.
+</span><span class="c1"></span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">scalar</span><span class="p">.</span><span class="nx">stderr</span> <span class="o">==</span> <span class="nx">cloned</span><span class="p">.</span><span class="nx">stderr</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Output:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">true</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="将指针类型标记为不透明">将指针类型标记为不透明</h3>
+<p>一些指针值用作可枚举的常量值。</p>
+<p>一个众所周知的案例是<code>elliptic.Curve</code>。在<code>crypto/tls</code>包中，通过将值与预定义的曲线值进行比较来检查证书的曲线类型，例如elliptic.P521()。在这种情况下，作为指针或结构体的曲线值不能被深度克隆。</p>
+<p>目前，以下类型默认标记为标量。</p>
+<ul>
+<li>elliptic.Curve，即<code>*elliptic.CurveParam</code>或<code>elliptic.p256Curve</code>。</li>
+<li>reflect.Type，在<code>*reflect.rtype</code>中定义runtime。</li>
+</ul>
+<p>如果有任何自定义指针类型应该被认为是不透明的，请调用<code>MarkAsOpaquePointer</code>手动标记它。</p>
+<h4 id="func-markasopaquepointer">func MarkAsOpaquePointer</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">MarkAsOpaquePointer</span><span class="p">(</span><span class="nx">t</span> <span class="nx">reflect</span><span class="p">.</span><span class="nx">Type</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Example</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">OpaquePointerType</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">foo</span> <span class="kt">int</span>
+<span class="p">}</span>
+
+<span class="nf">MarkAsOpaquePointer</span><span class="p">(</span><span class="nx">reflect</span><span class="p">.</span><span class="nf">TypeOf</span><span class="p">(</span><span class="nb">new</span><span class="p">(</span><span class="nx">OpaquePointerType</span><span class="p">)))</span>
+
+<span class="nx">opaque</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">OpaquePointerType</span><span class="p">{}</span>
+<span class="nx">cloned</span> <span class="o">:=</span> <span class="nf">Clone</span><span class="p">(</span><span class="nx">opaque</span><span class="p">).(</span><span class="o">*</span><span class="nx">OpaquePointerType</span><span class="p">)</span>
+
+<span class="c1">// cloned is a shadow copy of opaque.
+</span><span class="c1">// so that opaque and cloned should be the same.
+</span><span class="c1"></span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">opaque</span> <span class="o">==</span> <span class="nx">cloned</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Output:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">true</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="克隆sync和syncatomic中定义的no-copy类型">克隆sync和sync/atomic中定义的“no-copy”类型</h3>
+<p>有一些“no-copy”类型，如sync.Mutex、atomic.Value等。它们不能通过将所有字段一一复制来克隆，但我们可以分配一个新的零值并调用方法来进行适当的初始化。</p>
+<p>目前，所有“不复制”类型的定义sync，并sync/atomic能正常使用以下策略来克隆。</p>
+<ul>
+<li>sync.Mutex：克隆值是新分配的零互斥锁。</li>
+<li>sync.RWMutex：克隆值是新分配的零互斥锁。</li>
+<li>sync.WaitGroup：克隆值是新分配的零等待组。</li>
+<li>sync.Cond: 克隆值是一个带有新分配的零锁的 cond。</li>
+<li>sync.Pool: 克隆值是一个具有相同New功能的空池。</li>
+<li>sync.Map：克隆值是具有克隆键/值对的同步映射。</li>
+<li>sync.Once: 克隆值是具有相同完成标志的一次类型。</li>
+<li>atomic.Value: 克隆值是具有相同值的新原子值。</li>
+</ul>
+<p>如果内置包中定义的任何类型应视为“no-copy”类型，请打开新issue让我知道。我会更新默认值。</p>
+<h3 id="设置自定义克隆功能">设置自定义克隆功能</h3>
+<p>如果默认克隆策略不适用于结构类型，我们可以调用SetCustomFunc以实现自定义克隆逻辑。 Clone并且Slowly可以在自定义克隆函数中使用。</p>
+<p>有关更多详细信息，请参阅SetCustomFunc 示例代码。</p>
+<h3 id="wrapunwrap和undo">Wrap，Unwrap和Undo</h3>
+<p>clone包提供Wrap/Unwrap函数来保护指针值免受任何意外变化。当我们想要保护一个设计为不可变的变量时，它很有用，例如全局配置、存储在上下文中的值、发送到 chan 的值等。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Suppose we have a type T defined as following.
+</span><span class="c1">//     type T struct {
+</span><span class="c1">//         Foo int
+</span><span class="c1">//     }
+</span><span class="c1"></span><span class="nx">v</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">T</span><span class="p">{</span>
+    <span class="nx">Foo</span><span class="p">:</span> <span class="mi">123</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="nx">w</span> <span class="o">:=</span> <span class="nf">Wrap</span><span class="p">(</span><span class="nx">v</span><span class="p">).(</span><span class="o">*</span><span class="nx">T</span><span class="p">)</span> <span class="c1">// Wrap value to protect it.
+</span><span class="c1"></span>
+<span class="c1">// Use w freely. The type of w is the same as that of v.
+</span><span class="c1"></span>
+<span class="c1">// It&#39;s OK to modify w. The change will not affect v.
+</span><span class="c1"></span><span class="nx">w</span><span class="p">.</span><span class="nx">Foo</span> <span class="p">=</span> <span class="mi">456</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">w</span><span class="p">.</span><span class="nx">Foo</span><span class="p">)</span> <span class="c1">// 456
+</span><span class="c1"></span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">v</span><span class="p">.</span><span class="nx">Foo</span><span class="p">)</span> <span class="c1">// 123
+</span><span class="c1"></span>
+<span class="c1">// Once we need the original value stored in w, call `Unwrap`.
+</span><span class="c1"></span><span class="nx">orig</span> <span class="o">:=</span> <span class="nf">Unwrap</span><span class="p">(</span><span class="nx">w</span><span class="p">).(</span><span class="o">*</span><span class="nx">T</span><span class="p">)</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">orig</span> <span class="o">==</span> <span class="nx">v</span><span class="p">)</span> <span class="c1">// true
+</span><span class="c1"></span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">orig</span><span class="p">.</span><span class="nx">Foo</span><span class="p">)</span>  <span class="c1">// 123
+</span><span class="c1"></span>
+<span class="c1">// Or, we can simply undo any change made in w.
+</span><span class="c1">// Note that `Undo` is significantly slower than `Unwrap`, thus
+</span><span class="c1">// the latter is always preferred.
+</span><span class="c1"></span><span class="nf">Undo</span><span class="p">(</span><span class="nx">w</span><span class="p">)</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">w</span><span class="p">.</span><span class="nx">Foo</span><span class="p">)</span> <span class="c1">// 123
+</span></code></pre></td></tr></table>
+</div>
+</div><h4 id="func-undo">func Undo</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Undo</span><span class="p">(</span><span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Undo放弃对包装值所做的任何更改。如果 v 不是包装值，则什么也不会发生。</p>
+<h4 id="func-unwrap">func Unwrap</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Unwrap</span><span class="p">(</span><span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>如果 v 是一个包装值，则 Unwrap 返回 v 的原始值。否则，简单地返回 v 本身。</p>
+<h4 id="func-wrap">func Wrap</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Wrap</span><span class="p">(</span><span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Wrap 创建 v 的包装器，它必须是一个指针。如果 v 不是指针，Wrap 只返回 v 并且什么都不做。</p>
+<p>包装器是 v 值的深度克隆。它在内部保存了 v 的影子副本。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">t</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">T</span><span class="p">{</span><span class="nx">Foo</span><span class="p">:</span> <span class="mi">123</span><span class="p">}</span>
+<span class="nx">v</span> <span class="o">:=</span> <span class="nf">Wrap</span><span class="p">(</span><span class="nx">t</span><span class="p">).(</span><span class="o">*</span><span class="nx">T</span><span class="p">)</span>               <span class="c1">// v is a clone of t.
+</span><span class="c1"></span><span class="nx">reflect</span><span class="p">.</span><span class="nf">DeepEqual</span><span class="p">(</span><span class="nx">t</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span> <span class="o">==</span> <span class="kc">true</span> <span class="c1">// v equals t.
+</span><span class="c1"></span><span class="nx">v</span><span class="p">.</span><span class="nx">Foo</span> <span class="p">=</span> <span class="mi">456</span>                     <span class="c1">// v.Foo is changed, but t.Foo doesn&#39;t change.
+</span><span class="c1"></span><span class="nx">orig</span> <span class="o">:=</span> <span class="nf">Unwrap</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span>               <span class="c1">// Use `Unwrap` to discard wrapper and return original value, which is t.
+</span><span class="c1"></span><span class="nx">orig</span><span class="p">.(</span><span class="o">*</span><span class="nx">T</span><span class="p">)</span> <span class="o">==</span> <span class="nx">t</span>                  <span class="c1">// orig and t is exactly the same.
+</span><span class="c1"></span><span class="nf">Undo</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span>                         <span class="c1">// Use `Undo` to discard any change on v.
+</span><span class="c1"></span><span class="nx">v</span><span class="p">.</span><span class="nx">Foo</span> <span class="o">==</span> <span class="nx">t</span><span class="p">.</span><span class="nx">Foo</span>                  <span class="c1">// Now, the value of v and t are the same again.
+</span></code></pre></td></tr></table>
+</div>
+</div><p>Example:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Suppose we have a type T defined as following.
+</span><span class="c1">//     type T struct {
+</span><span class="c1">//         Foo int
+</span><span class="c1">//     }
+</span><span class="c1"></span><span class="nx">v</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">T</span><span class="p">{</span>
+	<span class="nx">Foo</span><span class="p">:</span> <span class="mi">123</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="nx">w</span> <span class="o">:=</span> <span class="nf">Wrap</span><span class="p">(</span><span class="nx">v</span><span class="p">).(</span><span class="o">*</span><span class="nx">T</span><span class="p">)</span> <span class="c1">// Wrap value to protect it.
+</span><span class="c1"></span>
+<span class="c1">// Use w freely. The type of w is the same as that of v.
+</span><span class="c1"></span>
+<span class="c1">// It&#39;s OK to modify w. The change will not affect v.
+</span><span class="c1"></span><span class="nx">w</span><span class="p">.</span><span class="nx">Foo</span> <span class="p">=</span> <span class="mi">456</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">w</span><span class="p">.</span><span class="nx">Foo</span><span class="p">)</span> <span class="c1">// 456
+</span><span class="c1"></span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">v</span><span class="p">.</span><span class="nx">Foo</span><span class="p">)</span> <span class="c1">// 123
+</span><span class="c1"></span>
+<span class="c1">// Once we need the original value stored in w, call `Unwrap`.
+</span><span class="c1"></span><span class="nx">orig</span> <span class="o">:=</span> <span class="nf">Unwrap</span><span class="p">(</span><span class="nx">w</span><span class="p">).(</span><span class="o">*</span><span class="nx">T</span><span class="p">)</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">orig</span> <span class="o">==</span> <span class="nx">v</span><span class="p">)</span> <span class="c1">// true
+</span><span class="c1"></span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">orig</span><span class="p">.</span><span class="nx">Foo</span><span class="p">)</span>  <span class="c1">// 123
+</span><span class="c1"></span>
+<span class="c1">// Or, we can simply undo any change made in w.
+</span><span class="c1">// Note that `Undo` is significantly slower than `Unwrap`, thus
+</span><span class="c1">// the latter is always preferred.
+</span><span class="c1"></span><span class="nf">Undo</span><span class="p">(</span><span class="nx">w</span><span class="p">)</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">w</span><span class="p">.</span><span class="nx">Foo</span><span class="p">)</span> <span class="c1">// 123
+</span></code></pre></td></tr></table>
+</div>
+</div><p>Output:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="m">456</span>
+<span class="m">123</span>
+<span class="n">true</span>
+<span class="m">123</span>
+<span class="m">123</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="转载">转载</h2>
 <p><a href="https://zhuanlan.zhihu.com/p/107216411">go-clone：深拷贝 Go 数据结构</a></p>
 <p><a href="https://zhuanlan.zhihu.com/p/161210711">go-clone：极致优化深拷贝效率与拷贝私有字段</a></p>
+<p><a href="https://github.com/huandu/go-clone">huandu/go-clone</a></p>
 
     </div>
 
