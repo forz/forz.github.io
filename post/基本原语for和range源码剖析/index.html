@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>基本原语for和range源码剖析 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="汇编 循环是所有编程语言都有的控制结构，除了使用经典的三段式循环之外，Go 语言还引入了另一个关键字 range 帮助我们快速遍历数组、切片、哈希表以及 Channel 等" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.83.1 with theme even" />
+
+
+<link rel="canonical" href="/post/%E5%9F%BA%E6%9C%AC%E5%8E%9F%E8%AF%ADfor%E5%92%8Crange%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="基本原语for和range源码剖析" />
+<meta property="og:description" content="汇编 循环是所有编程语言都有的控制结构，除了使用经典的三段式循环之外，Go 语言还引入了另一个关键字 range 帮助我们快速遍历数组、切片、哈希表以及 Channel 等" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/%E5%9F%BA%E6%9C%AC%E5%8E%9F%E8%AF%ADfor%E5%92%8Crange%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-06-14T22:03:44&#43;00:00" />
+<meta property="article:modified_time" content="2021-06-14T22:03:44&#43;00:00" />
+
+<meta itemprop="name" content="基本原语for和range源码剖析">
+<meta itemprop="description" content="汇编 循环是所有编程语言都有的控制结构，除了使用经典的三段式循环之外，Go 语言还引入了另一个关键字 range 帮助我们快速遍历数组、切片、哈希表以及 Channel 等"><meta itemprop="datePublished" content="2021-06-14T22:03:44&#43;00:00" />
+<meta itemprop="dateModified" content="2021-06-14T22:03:44&#43;00:00" />
+<meta itemprop="wordCount" content="5335">
+<meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="基本原语for和range源码剖析"/>
+<meta name="twitter:description" content="汇编 循环是所有编程语言都有的控制结构，除了使用经典的三段式循环之外，Go 语言还引入了另一个关键字 range 帮助我们快速遍历数组、切片、哈希表以及 Channel 等"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">基本原语for和range源码剖析</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-06-14 </span>
+        <div class="post-category">
+            <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
+            </div>
+          <span class="more-meta"> 约 5335 字 </span>
+          <span class="more-meta"> 预计阅读 11 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#汇编">汇编</a></li>
+    <li><a href="#现象">现象</a>
+      <ul>
+        <li><a href="#循环永动机">循环永动机</a></li>
+        <li><a href="#神奇的指针">神奇的指针</a></li>
+        <li><a href="#遍历清空数组">遍历清空数组</a></li>
+        <li><a href="#随机遍历">随机遍历</a></li>
+      </ul>
+    </li>
+    <li><a href="#经典循环">经典循环</a></li>
+    <li><a href="#范围循环">范围循环</a>
+      <ul>
+        <li><a href="#数组和切片">数组和切片</a></li>
+        <li><a href="#哈希表">哈希表</a></li>
+        <li><a href="#字符串">字符串</a></li>
+        <li><a href="#通道">通道</a></li>
+      </ul>
+    </li>
+    <li><a href="#小结">小结</a></li>
+    <li><a href="#转载">转载</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="汇编">汇编</h2>
+<p>循环是所有编程语言都有的控制结构，除了使用经典的三段式循环之外，Go 语言还引入了另一个关键字 range 帮助我们快速遍历数组、切片、哈希表以及 Channel 等集合类型。本节将深入分析 Go 语言的两种循环，也就是 for 循环和 for-range 循环，我们会分析这两种循环的运行时结构以及它们的实现原理，</p>
+<p>for 循环能够将代码中的数据和逻辑分离，让同一份代码能够多次复用相同的处理逻辑。我们先来看一下 Go 语言 for 循环对应的汇编代码，下面是一段经典的三段式循环的代码，我们将它编译成汇编指令：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">10</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nb">println</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">main</span> <span class="nx">STEXT</span> <span class="nx">size</span><span class="p">=</span><span class="mi">98</span> <span class="nx">args</span><span class="p">=</span><span class="mh">0x0</span> <span class="nx">locals</span><span class="p">=</span><span class="mh">0x18</span>
+	<span class="mo">00000</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">3</span><span class="p">)</span>	<span class="nx">TEXT</span>	<span class="s">&#34;&#34;</span><span class="p">.</span><span class="nf">main</span><span class="p">(</span><span class="nx">SB</span><span class="p">),</span> <span class="err">$</span><span class="mi">24</span><span class="o">-</span><span class="mi">0</span>
+	<span class="o">...</span>
+	<span class="mo">0002</span><span class="mi">9</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">3</span><span class="p">)</span>	<span class="nx">XORL</span>	<span class="nx">AX</span><span class="p">,</span> <span class="nx">AX</span>                   <span class="p">;;</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span>
+	<span class="mo">00031</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">4</span><span class="p">)</span>	<span class="nx">JMP</span>	<span class="mi">75</span>
+	<span class="mo">00033</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">4</span><span class="p">)</span>	<span class="nx">MOVQ</span>	<span class="nx">AX</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">i</span><span class="o">+</span><span class="mi">8</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>
+	<span class="mo">0003</span><span class="mi">8</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">5</span><span class="p">)</span>	<span class="nx">CALL</span>	<span class="nx">runtime</span><span class="p">.</span><span class="nf">printlock</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span>
+	<span class="mo">00043</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">5</span><span class="p">)</span>	<span class="nx">MOVQ</span>	<span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">i</span><span class="o">+</span><span class="mi">8</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">AX</span>
+	<span class="mo">0004</span><span class="mi">8</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">5</span><span class="p">)</span>	<span class="nx">MOVQ</span>	<span class="nx">AX</span><span class="p">,</span> <span class="p">(</span><span class="nx">SP</span><span class="p">)</span>
+	<span class="mo">00052</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">5</span><span class="p">)</span>	<span class="nx">CALL</span>	<span class="nx">runtime</span><span class="p">.</span><span class="nf">printint</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span>
+	<span class="mo">00057</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">5</span><span class="p">)</span>	<span class="nx">CALL</span>	<span class="nx">runtime</span><span class="p">.</span><span class="nf">printnl</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span>
+	<span class="mo">00062</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">5</span><span class="p">)</span>	<span class="nx">CALL</span>	<span class="nx">runtime</span><span class="p">.</span><span class="nf">printunlock</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span>
+	<span class="mo">00067</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">4</span><span class="p">)</span>	<span class="nx">MOVQ</span>	<span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">i</span><span class="o">+</span><span class="mi">8</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">AX</span>
+	<span class="mo">00072</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">4</span><span class="p">)</span>	<span class="nx">INCQ</span>	<span class="nx">AX</span>                       <span class="p">;;</span> <span class="nx">i</span><span class="o">++</span>
+	<span class="mo">00075</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">4</span><span class="p">)</span>	<span class="nx">CMPQ</span>	<span class="nx">AX</span><span class="p">,</span> <span class="err">$</span><span class="mi">10</span>                  <span class="p">;;</span> <span class="nx">比较变量</span> <span class="nx">i</span> <span class="nx">和</span> <span class="mi">10</span>
+	<span class="mo">0007</span><span class="mi">9</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">4</span><span class="p">)</span>	<span class="nx">JLT</span>	<span class="mi">33</span>                           <span class="p">;;</span> <span class="nx">跳转到</span> <span class="mi">33</span> <span class="nx">行如果</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">10</span>
+	<span class="o">...</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这里将上述汇编指令的执行过程分成三个部分进行分析：</p>
+<ol>
+<li>0029 ~ 0031 行负责循环的初始化；
+<ol>
+<li>对寄存器 AX 中的变量 i 进行初始化并执行 JMP 75 指令跳转到 0075 行；</li>
+</ol>
+</li>
+<li>0075 ~ 0079 行负责检查循环的终止条件，将寄存器中存储的数据 i 与 10 比较；
+<ol>
+<li>JLT 33 命令会在变量的值小于 10 时跳转到 0033 行执行循环主体；</li>
+<li>JLT 33 命令会在变量的值大于 10 时跳出循环体执行下面的代码；</li>
+</ol>
+</li>
+<li>0033 ~ 0072 行是循环内部的语句；
+<ol>
+<li>通过多个汇编指令打印变量中的内容；</li>
+<li>INCQ AX 指令会将变量加一，然后再与 10 进行比较，回到第二步；</li>
+</ol>
+</li>
+</ol>
+<p>经过优化的 for-range 循环的汇编代码有着相同的结构。无论是变量的初始化、循环体的执行还是最后的条件判断都是完全一样的，所以这里也就不展开分析对应的汇编指令了。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">arr</span> <span class="o">:=</span> <span class="p">[]</span><span class="kt">int</span><span class="p">{</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">}</span>
+	<span class="k">for</span> <span class="nx">i</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arr</span> <span class="p">{</span>
+		<span class="nb">println</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在汇编语言中，无论是经典的 for 循环还是 for-range 循环都会使用 JMP 等命令跳回循环体的开始位置复用代码。从不同循环具有相同的汇编代码可以猜到，使用 for-range 的控制结构最终也会被 Go 语言编译器转换成普通的 for 循环，后面的分析也会印证这一点。</p>
+<h2 id="现象">现象</h2>
+<p>在深入语言源代码了解两种不同循环的实现之前，我们可以先来看一下使用 for 和 range 会遇到的一些问题，我们可以带着问题去源代码中寻找答案，这样能更高效地理解它们的实现原理。</p>
+<h3 id="循环永动机">循环永动机</h3>
+<p>如果我们在遍历数组的同时修改数组的元素，能否得到一个永远都不会停止的循环呢？你可以尝试运行下面的代码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">arr</span> <span class="o">:=</span> <span class="p">[]</span><span class="kt">int</span><span class="p">{</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">}</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arr</span> <span class="p">{</span>
+		<span class="nx">arr</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">arr</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">arr</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="o">$</span> <span class="n">go</span> <span class="n">run</span> <span class="n">main.go</span>
+<span class="m">1</span> <span class="m">2</span> <span class="m">3</span> <span class="m">1</span> <span class="m">2</span> <span class="m">3</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>上述代码的输出意味着循环只遍历了原始切片中的三个元素，我们在遍历切片时追加的元素不会增加循环的执行次数，所以循环最终还是停了下来。</p>
+<h3 id="神奇的指针">神奇的指针</h3>
+<p>第二个例子是使用 Go 语言经常会犯的错误1。当我们在遍历一个数组时，如果获取 range 返回变量的地址并保存到另一个数组或者哈希时，会遇到令人困惑的现象，下面的代码会输出 “3 3 3”：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">arr</span> <span class="o">:=</span> <span class="p">[]</span><span class="kt">int</span><span class="p">{</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">}</span>
+	<span class="nx">newArr</span> <span class="o">:=</span> <span class="p">[]</span><span class="o">*</span><span class="kt">int</span><span class="p">{}</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arr</span> <span class="p">{</span>
+		<span class="nx">newArr</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">newArr</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">v</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">newArr</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="o">*</span><span class="nx">v</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="o">$</span> <span class="n">go</span> <span class="n">run</span> <span class="n">main.go</span>
+<span class="m">3</span> <span class="m">3</span> <span class="m">3</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>一些有经验的开发者不经意也会犯这种错误，正确的做法应该是使用 <code>&amp;arr[i]</code> 替代 <code>&amp;v</code>，我们会在下面分析这一现象背后的原因。</p>
+<h3 id="遍历清空数组">遍历清空数组</h3>
+<p>当我们想要在 Go 语言中清空一个切片或者哈希时，一般都会使用以下的方法将切片中的元素置零：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">arr</span> <span class="o">:=</span> <span class="p">[]</span><span class="kt">int</span><span class="p">{</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">}</span>
+	<span class="k">for</span> <span class="nx">i</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arr</span> <span class="p">{</span>
+		<span class="nx">arr</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="mi">0</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>依次遍历切片和哈希看起来是非常耗费性能的，因为数组、切片和哈希占用的内存空间都是连续的，所以最快的方法是直接清空这片内存中的内容，当我们编译上述代码时会得到以下的汇编指令：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="s">&#34;&#34;</span><span class="n">.main</span> <span class="n">STEXT</span> <span class="n">size</span><span class="o">=</span><span class="m">93</span> <span class="n">args</span><span class="o">=</span><span class="mh">0x0</span> <span class="n">locals</span><span class="o">=</span><span class="mh">0x30</span>
+	<span class="mh">0x0000</span> <span class="m">00000</span> <span class="p">(</span><span class="n">main.go</span><span class="o">:</span><span class="m">3</span><span class="p">)</span>	<span class="n">TEXT</span>	<span class="s">&#34;&#34;</span><span class="nf">.main</span><span class="p">(</span><span class="n">SB</span><span class="p">),</span> <span class="o">$</span><span class="m">48-0</span>
+	<span class="kc">...</span>
+	<span class="mh">0x001d</span> <span class="m">00029</span> <span class="p">(</span><span class="n">main.go</span><span class="o">:</span><span class="m">4</span><span class="p">)</span>	<span class="n">MOVQ</span>	<span class="s">&#34;&#34;</span><span class="nf">.statictmp_0</span><span class="p">(</span><span class="n">SB</span><span class="p">),</span> <span class="n">AX</span>
+	<span class="mh">0x0024</span> <span class="m">00036</span> <span class="p">(</span><span class="n">main.go</span><span class="o">:</span><span class="m">4</span><span class="p">)</span>	<span class="n">MOVQ</span>	<span class="n">AX</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="n">..autotmp_3</span><span class="m">+16</span><span class="p">(</span><span class="n">SP</span><span class="p">)</span>
+	<span class="mh">0x0029</span> <span class="m">00041</span> <span class="p">(</span><span class="n">main.go</span><span class="o">:</span><span class="m">4</span><span class="p">)</span>	<span class="n">MOVUPS</span>	<span class="s">&#34;&#34;</span><span class="n">.statictmp_0</span><span class="m">+8</span><span class="p">(</span><span class="n">SB</span><span class="p">),</span> <span class="n">X0</span>
+	<span class="mh">0x0030</span> <span class="m">00048</span> <span class="p">(</span><span class="n">main.go</span><span class="o">:</span><span class="m">4</span><span class="p">)</span>	<span class="n">MOVUPS</span>	<span class="n">X0</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="n">..autotmp_3</span><span class="m">+24</span><span class="p">(</span><span class="n">SP</span><span class="p">)</span>
+	<span class="mh">0x0035</span> <span class="m">00053</span> <span class="p">(</span><span class="n">main.go</span><span class="o">:</span><span class="m">5</span><span class="p">)</span>	<span class="n">PCDATA</span>	<span class="o">$</span><span class="m">2</span><span class="p">,</span> <span class="o">$</span><span class="m">1</span>
+	<span class="mh">0x0035</span> <span class="m">00053</span> <span class="p">(</span><span class="n">main.go</span><span class="o">:</span><span class="m">5</span><span class="p">)</span>	<span class="n">LEAQ</span>	<span class="s">&#34;&#34;</span><span class="n">..autotmp_3</span><span class="m">+16</span><span class="p">(</span><span class="n">SP</span><span class="p">),</span> <span class="n">AX</span>
+	<span class="mh">0x003a</span> <span class="m">00058</span> <span class="p">(</span><span class="n">main.go</span><span class="o">:</span><span class="m">5</span><span class="p">)</span>	<span class="n">PCDATA</span>	<span class="o">$</span><span class="m">2</span><span class="p">,</span> <span class="o">$</span><span class="m">0</span>
+	<span class="mh">0x003a</span> <span class="m">00058</span> <span class="p">(</span><span class="n">main.go</span><span class="o">:</span><span class="m">5</span><span class="p">)</span>	<span class="n">MOVQ</span>	<span class="n">AX</span><span class="p">,</span> <span class="p">(</span><span class="n">SP</span><span class="p">)</span>
+	<span class="mh">0x003e</span> <span class="m">00062</span> <span class="p">(</span><span class="n">main.go</span><span class="o">:</span><span class="m">5</span><span class="p">)</span>	<span class="n">MOVQ</span>	<span class="o">$</span><span class="m">24</span><span class="p">,</span> <span class="m">8</span><span class="p">(</span><span class="n">SP</span><span class="p">)</span>
+	<span class="mh">0x0047</span> <span class="m">00071</span> <span class="p">(</span><span class="n">main.go</span><span class="o">:</span><span class="m">5</span><span class="p">)</span>	<span class="n">CALL</span>	<span class="nf">runtime.memclrNoHeapPointers</span><span class="p">(</span><span class="n">SB</span><span class="p">)</span>
+	<span class="kc">...</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>从生成的汇编代码我们可以看出，编译器会直接使用 runtime.memclrNoHeapPointers 清空切片中的数据，这也是我们在下面的小节会介绍的内容。</p>
+<h3 id="随机遍历">随机遍历</h3>
+<p>当我们在 Go 语言中使用 range 遍历哈希表时，往往都会使用如下的代码结构，但是这段代码在每次运行时都会打印出不同的结果：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">hash</span> <span class="o">:=</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">int</span><span class="p">{</span>
+		<span class="s">&#34;1&#34;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+		<span class="s">&#34;2&#34;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+		<span class="s">&#34;3&#34;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span>
+	<span class="p">}</span>
+	<span class="k">for</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">hash</span> <span class="p">{</span>
+		<span class="nb">println</span><span class="p">(</span><span class="nx">k</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>两次运行上述代码可能会得到不同的结果，第一次会打印 2 3 1，第二次会打印 1 2 3，如果我们运行的次数足够多，最后会得到几种不同的遍历顺序。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="o">$</span> <span class="n">go</span> <span class="n">run</span> <span class="n">main.go</span>
+<span class="m">2</span> <span class="m">2</span>
+<span class="m">3</span> <span class="m">3</span>
+<span class="m">1</span> <span class="m">1</span>
+
+<span class="o">$</span> <span class="n">go</span> <span class="n">run</span> <span class="n">main.go</span>
+<span class="m">1</span> <span class="m">1</span>
+<span class="m">2</span> <span class="m">2</span>
+<span class="m">3</span> <span class="m">3</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Go 语言在运行时为哈希表的遍历引入了不确定性，也是告诉所有 Go 语言的使用者，程序不要依赖于哈希表的稳定遍历，我们在下面的小节会介绍在遍历的过程是如何引入不确定性的。</p>
+<h2 id="经典循环">经典循环</h2>
+<p>Go 语言中的经典循环在编译器看来是一个 OFOR 类型的节点，这个节点由以下四个部分组成：</p>
+<ol>
+<li>初始化循环的 Ninit；</li>
+<li>循环的继续条件 Left；</li>
+<li>循环体结束时执行的 Right；</li>
+<li>循环体 NBody：</li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="k">for</span> <span class="nx">Ninit</span><span class="p">;</span> <span class="nx">Left</span><span class="p">;</span> <span class="nx">Right</span> <span class="p">{</span>
+    <span class="nx">NBody</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在生成 SSA 中间代码的阶段，<code>cmd/compile/internal/gc.state.stmt</code> 方法在发现传入的节点类型是 OFOR 时会执行以下的代码块，这段代码会将循环中的代码分成不同的块：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">state</span><span class="p">)</span> <span class="nf">stmt</span><span class="p">(</span><span class="nx">n</span><span class="o">*</span><span class="nx">Node</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">switch</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Op</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="nx">OFOR</span><span class="p">,</span> <span class="nx">OFORUNTIL</span><span class="p">:</span>
+		<span class="nx">bCond</span><span class="p">,</span> <span class="nx">bBody</span><span class="p">,</span> <span class="nx">bIncr</span><span class="p">,</span> <span class="nx">bEnd</span> <span class="o">:=</span> <span class="o">...</span>
+
+		<span class="nx">b</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">endBlock</span><span class="p">()</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">AddEdgeTo</span><span class="p">(</span><span class="nx">bCond</span><span class="p">)</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nf">startBlock</span><span class="p">(</span><span class="nx">bCond</span><span class="p">)</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nf">condBranch</span><span class="p">(</span><span class="nx">n</span><span class="p">.</span><span class="nx">Left</span><span class="p">,</span> <span class="nx">bBody</span><span class="p">,</span> <span class="nx">bEnd</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+		<span class="nx">s</span><span class="p">.</span><span class="nf">startBlock</span><span class="p">(</span><span class="nx">bBody</span><span class="p">)</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nf">stmtList</span><span class="p">(</span><span class="nx">n</span><span class="p">.</span><span class="nx">Nbody</span><span class="p">)</span>
+
+		<span class="nx">b</span><span class="p">.</span><span class="nf">AddEdgeTo</span><span class="p">(</span><span class="nx">bIncr</span><span class="p">)</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nf">startBlock</span><span class="p">(</span><span class="nx">bIncr</span><span class="p">)</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nf">stmt</span><span class="p">(</span><span class="nx">n</span><span class="p">.</span><span class="nx">Right</span><span class="p">)</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">AddEdgeTo</span><span class="p">(</span><span class="nx">bCond</span><span class="p">)</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nf">startBlock</span><span class="p">(</span><span class="nx">bEnd</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>一个常见的 for 循环代码会被 cmd/compile/internal/gc.state.stmt 转换成下面的控制结构，该结构中包含了 4 个不同的块，这些代码块之间的连接表示汇编语言中的跳转关系，与我们理解的 for 循环控制结构没有太多的差别。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210614222854.png" alt=""></p>
+<p>机器码生成阶段会将这些代码块转换成机器码，以及指定 CPU 架构上运行的机器语言，就是我们在前面编译得到的汇编指令。</p>
+<h2 id="范围循环">范围循环</h2>
+<p>与简单的经典循环相比，范围循环在 Go 语言中更常见、实现也更复杂。这种循环同时使用 for 和 range 两个关键字，编译器会在编译期间将所有 for-range 循环变成经典循环。从编译器的视角来看，就是将 ORANGE 类型的节点转换成 OFOR 节点:</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210614222932.png" alt=""></p>
+<p>节点类型的转换过程都发生在中间代码生成阶段，所有的 for-range 循环都会被 <code>cmd/compile/internal/gc.walkrange</code> 转换成不包含复杂结构、只包含基本表达式的语句。接下来，我们按照循环遍历的元素类型依次介绍遍历数组和切片、哈希表、字符串以及管道时的过程。</p>
+<h3 id="数组和切片">数组和切片</h3>
+<p>对于数组和切片来说，Go 语言有三种不同的遍历方式，这三种不同的遍历方式分别对应着代码中的不同条件，它们会在 <code>cmd/compile/internal/gc.walkrange</code> 函数中转换成不同的控制逻辑，我们会分成几种情况分析该函数的逻辑：</p>
+<ol>
+<li>分析遍历数组和切片清空元素的情况；</li>
+<li>分析使用 <code>for range a {}</code> 遍历数组和切片，不关心索引和数据的情况；</li>
+<li>分析使用 <code>for i := range a {}</code> 遍历数组和切片，只关心索引的情况；</li>
+<li>分析使用 <code>for i, elem := range a {}</code> 遍历数组和切片，关心索引和数据的情况；</li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">walkrange</span><span class="p">(</span><span class="nx">n</span> <span class="o">*</span><span class="nx">Node</span><span class="p">)</span><span class="o">*</span><span class="nx">Node</span> <span class="p">{</span>
+	<span class="k">switch</span> <span class="nx">t</span><span class="p">.</span><span class="nx">Etype</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="nx">TARRAY</span><span class="p">,</span> <span class="nx">TSLICE</span><span class="p">:</span>
+		<span class="k">if</span> <span class="nf">arrayClear</span><span class="p">(</span><span class="nx">n</span><span class="p">,</span> <span class="nx">v1</span><span class="p">,</span> <span class="nx">v2</span><span class="p">,</span> <span class="nx">a</span><span class="p">)</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">n</span>
+		<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>cmd/compile/internal/gc.arrayClear</code> 是一个非常有趣的优化，它会优化 Go 语言遍历数组或者切片并删除全部元素的逻辑：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 原代码
+</span><span class="c1"></span><span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">a</span> <span class="p">{</span>
+	<span class="nx">a</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nx">zero</span>
+<span class="p">}</span>
+
+<span class="c1">// 优化后
+</span><span class="c1"></span><span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">a</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+	<span class="nx">hp</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">a</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+	<span class="nx">hn</span> <span class="p">=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">a</span><span class="p">)</span><span class="o">*</span><span class="nf">sizeof</span><span class="p">(</span><span class="nf">elem</span><span class="p">(</span><span class="nx">a</span><span class="p">))</span>
+	<span class="nf">memclrNoHeapPointers</span><span class="p">(</span><span class="nx">hp</span><span class="p">,</span> <span class="nx">hn</span><span class="p">)</span>
+	<span class="nx">i</span> <span class="p">=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">a</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>相比于依次清除数组或者切片中的数据，Go 语言会直接使用 <code>runtime.memclrNoHeapPointers</code> 或者 <code>runtime.memclrHasPointers</code> 清除目标数组内存空间中的全部数据，并在执行完成后更新遍历数组的索引，这也印证了我们在遍历清空数组一节中观察到的现象。</p>
+<p>处理了这种特殊的情况之后，我们可以回到 ORANGE 节点的处理过程了。这里会设置 for 循环的 Left 和 Right 字段，也就是终止条件和循环体每次执行结束后运行的代码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s">		<span class="n">ha</span> <span class="o">:=</span> <span class="n">a</span>
+
+		<span class="n">hv1</span> <span class="o">:=</span> <span class="nf">temp</span><span class="p">(</span><span class="n">types.Types[TINT]</span><span class="p">)</span>
+		<span class="n">hn</span> <span class="o">:=</span> <span class="nf">temp</span><span class="p">(</span><span class="n">types.Types[TINT]</span><span class="p">)</span>
+
+		<span class="n">init</span> <span class="o">=</span> <span class="nf">append</span><span class="p">(</span><span class="n">init</span><span class="p">,</span> <span class="nf">nod</span><span class="p">(</span><span class="n">OAS</span><span class="p">,</span> <span class="n">hv1</span><span class="p">,</span> <span class="n">nil</span><span class="p">))</span>
+		<span class="n">init</span> <span class="o">=</span> <span class="nf">append</span><span class="p">(</span><span class="n">init</span><span class="p">,</span> <span class="nf">nod</span><span class="p">(</span><span class="n">OAS</span><span class="p">,</span> <span class="n">hn</span><span class="p">,</span> <span class="nf">nod</span><span class="p">(</span><span class="n">OLEN</span><span class="p">,</span> <span class="n">ha</span><span class="p">,</span> <span class="n">nil</span><span class="p">)))</span>
+
+		<span class="n">n.Left</span> <span class="o">=</span> <span class="nf">nod</span><span class="p">(</span><span class="n">OLT</span><span class="p">,</span> <span class="n">hv1</span><span class="p">,</span> <span class="n">hn</span><span class="p">)</span>
+		<span class="n">n.Right</span> <span class="o">=</span> <span class="nf">nod</span><span class="p">(</span><span class="n">OAS</span><span class="p">,</span> <span class="n">hv1</span><span class="p">,</span> <span class="nf">nod</span><span class="p">(</span><span class="n">OADD</span><span class="p">,</span> <span class="n">hv1</span><span class="p">,</span> <span class="nf">nodintconst</span><span class="p">(</span><span class="m">1</span><span class="p">)))</span>
+
+		<span class="n">if</span> <span class="n">v1</span> <span class="o">==</span> <span class="n">nil</span> <span class="p">{</span>
+			<span class="n">break</span>
+		<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>如果循环是 <code>for range a {}</code>，那么就满足了上述代码中的条件 <code>v1 == nil</code>，即循环不关心数组的索引和数据，这种循环会被编译器转换成如下形式：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">ha</span> <span class="o">:=</span> <span class="nx">a</span>
+<span class="nx">hv1</span> <span class="o">:=</span> <span class="mi">0</span>
+<span class="nx">hn</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">ha</span><span class="p">)</span>
+<span class="nx">v1</span> <span class="o">:=</span> <span class="nx">hv1</span>
+<span class="k">for</span> <span class="p">;</span> <span class="nx">hv1</span> <span class="p">&lt;</span> <span class="nx">hn</span><span class="p">;</span> <span class="nx">hv1</span><span class="o">++</span> <span class="p">{</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这是 ORANGE 结构在编译期间被转换的最简单形式，由于原代码不需要获取数组的索引和元素，只需要使用数组或者切片的数量执行对应次数的循环，所以会生成一个最简单的 for 循环。</p>
+<p>如果我们在遍历数组时需要使用索引 <code>for i := range a {}</code>，那么编译器会继续会执行下面的代码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">		<span class="k">if</span> <span class="nx">v2</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">body</span> <span class="p">=</span> <span class="p">[]</span><span class="o">*</span><span class="nx">Node</span><span class="p">{</span><span class="nf">nod</span><span class="p">(</span><span class="nx">OAS</span><span class="p">,</span> <span class="nx">v1</span><span class="p">,</span> <span class="nx">hv1</span><span class="p">)}</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>v2 == nil 意味着调用方不关心数组的元素，只关心遍历数组使用的索引。它会将 <code>for i := range a {}</code> 转换成下面的逻辑，与第一种循环相比，这种循环在循环体中添加了 v1 := hv1 语句，传递遍历数组时的索引：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">ha</span> <span class="o">:=</span> <span class="nx">a</span>
+<span class="nx">hv1</span> <span class="o">:=</span> <span class="mi">0</span>
+<span class="nx">hn</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">ha</span><span class="p">)</span>
+<span class="nx">v1</span> <span class="o">:=</span> <span class="nx">hv1</span>
+<span class="k">for</span> <span class="p">;</span> <span class="nx">hv1</span> <span class="p">&lt;</span> <span class="nx">hn</span><span class="p">;</span> <span class="nx">hv1</span><span class="o">++</span> <span class="p">{</span>
+    <span class="nx">v1</span> <span class="p">=</span> <span class="nx">hv1</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>上面两种情况虽然也是使用 range 会经常遇到的情况，但是同时去遍历索引和元素也很常见。处理这种情况会使用下面这段的代码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">		<span class="nx">tmp</span> <span class="o">:=</span> <span class="nf">nod</span><span class="p">(</span><span class="nx">OINDEX</span><span class="p">,</span> <span class="nx">ha</span><span class="p">,</span> <span class="nx">hv1</span><span class="p">)</span>
+		<span class="nx">tmp</span><span class="p">.</span><span class="nf">SetBounded</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
+		<span class="nx">a</span> <span class="o">:=</span> <span class="nf">nod</span><span class="p">(</span><span class="nx">OAS2</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+		<span class="nx">a</span><span class="p">.</span><span class="nx">List</span><span class="p">.</span><span class="nf">Set2</span><span class="p">(</span><span class="nx">v1</span><span class="p">,</span> <span class="nx">v2</span><span class="p">)</span>
+		<span class="nx">a</span><span class="p">.</span><span class="nx">Rlist</span><span class="p">.</span><span class="nf">Set2</span><span class="p">(</span><span class="nx">hv1</span><span class="p">,</span> <span class="nx">tmp</span><span class="p">)</span>
+		<span class="nx">body</span> <span class="p">=</span> <span class="p">[]</span><span class="o">*</span><span class="nx">Node</span><span class="p">{</span><span class="nx">a</span><span class="p">}</span>
+	<span class="p">}</span>
+	<span class="nx">n</span><span class="p">.</span><span class="nx">Ninit</span><span class="p">.</span><span class="nf">Append</span><span class="p">(</span><span class="nx">init</span><span class="o">...</span><span class="p">)</span>
+	<span class="nx">n</span><span class="p">.</span><span class="nx">Nbody</span><span class="p">.</span><span class="nf">Prepend</span><span class="p">(</span><span class="nx">body</span><span class="o">...</span><span class="p">)</span>
+
+	<span class="k">return</span> <span class="nx">n</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这段代码处理的使用者同时关心索引和切片的情况。它不仅会在循环体中插入更新索引的语句，还会插入赋值操作让循环体内部的代码能够访问数组中的元素：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">ha</span> <span class="o">:=</span> <span class="nx">a</span>
+<span class="nx">hv1</span> <span class="o">:=</span> <span class="mi">0</span>
+<span class="nx">hn</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">ha</span><span class="p">)</span>
+<span class="nx">v1</span> <span class="o">:=</span> <span class="nx">hv1</span>
+<span class="nx">v2</span> <span class="o">:=</span> <span class="kc">nil</span>
+<span class="k">for</span> <span class="p">;</span> <span class="nx">hv1</span> <span class="p">&lt;</span> <span class="nx">hn</span><span class="p">;</span> <span class="nx">hv1</span><span class="o">++</span> <span class="p">{</span>
+    <span class="nx">tmp</span> <span class="o">:=</span> <span class="nx">ha</span><span class="p">[</span><span class="nx">hv1</span><span class="p">]</span>
+    <span class="nx">v1</span><span class="p">,</span> <span class="nx">v2</span> <span class="p">=</span> <span class="nx">hv1</span><span class="p">,</span> <span class="nx">tmp</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>对于所有的 range 循环，Go 语言都会在编译期将原切片或者数组赋值给一个新变量 ha，在赋值的过程中就发生了拷贝，而我们又通过 len 关键字预先获取了切片的长度，所以在循环中追加新的元素也不会改变循环执行的次数，这也就解释了循环永动机一节提到的现象。</p>
+<p>而遇到这种同时遍历索引和元素的 range 循环时，Go 语言会额外创建一个新的 v2 变量存储切片中的元素，循环中使用的这个变量 v2 会在每一次迭代被重新赋值而覆盖，赋值时也会触发拷贝。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">arr</span> <span class="o">:=</span> <span class="p">[]</span><span class="kt">int</span><span class="p">{</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">}</span>
+	<span class="nx">newArr</span> <span class="o">:=</span> <span class="p">[]</span><span class="o">*</span><span class="kt">int</span><span class="p">{}</span>
+	<span class="k">for</span> <span class="nx">i</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arr</span> <span class="p">{</span>
+		<span class="nx">newArr</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">newArr</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">arr</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+	<span class="p">}</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">newArr</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="o">*</span><span class="nx">v</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>因为在循环中获取返回变量的地址都完全相同，所以会发生神奇的指针一节中的现象。因此当我们想要访问数组中元素所在的地址时，不应该直接获取 range 返回的变量地址 <code>&amp;v2</code>，而应该使用 <code>&amp;a[index]</code> 这种形式。</p>
+<h3 id="哈希表">哈希表</h3>
+<p>在遍历哈希表时，编译器会使用 <code>runtime.mapiterinit</code> 和 <code>runtime.mapiternext</code> 两个运行时函数重写原始的 for-range 循环：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">ha</span> <span class="o">:=</span> <span class="nx">a</span>
+<span class="nx">hit</span> <span class="o">:=</span> <span class="nf">hiter</span><span class="p">(</span><span class="nx">n</span><span class="p">.</span><span class="nx">Type</span><span class="p">)</span>
+<span class="nx">th</span> <span class="o">:=</span> <span class="nx">hit</span><span class="p">.</span><span class="nx">Type</span>
+<span class="nf">mapiterinit</span><span class="p">(</span><span class="nf">typename</span><span class="p">(</span><span class="nx">t</span><span class="p">),</span> <span class="nx">ha</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">hit</span><span class="p">)</span>
+<span class="k">for</span> <span class="p">;</span> <span class="nx">hit</span><span class="p">.</span><span class="nx">key</span> <span class="o">!=</span> <span class="kc">nil</span><span class="p">;</span> <span class="nf">mapiternext</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">hit</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">key</span> <span class="o">:=</span> <span class="o">*</span><span class="nx">hit</span><span class="p">.</span><span class="nx">key</span>
+<span class="nx">val</span> <span class="o">:=*</span><span class="nx">hit</span><span class="p">.</span><span class="nx">val</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>上述代码是展开 <code>for key, val := range hash {}</code> 后的结果，在 <code>cmd/compile/internal/gc.walkrange</code> 处理 TMAP 节点时，编译器会根据 range 返回值的数量在循环体中插入需要的赋值语句：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210614224801.png" alt=""></p>
+<p>这三种不同的情况分别向循环体插入了不同的赋值语句。遍历哈希表时会使用 runtime.mapiterinit 函数初始化遍历开始的元素：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mapiterinit</span><span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">maptype</span><span class="p">,</span> <span class="nx">h</span><span class="o">*</span><span class="nx">hmap</span><span class="p">,</span> <span class="nx">it</span> <span class="o">*</span><span class="nx">hiter</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">it</span><span class="p">.</span><span class="nx">t</span> <span class="p">=</span> <span class="nx">t</span>
+	<span class="nx">it</span><span class="p">.</span><span class="nx">h</span> <span class="p">=</span> <span class="nx">h</span>
+	<span class="nx">it</span><span class="p">.</span><span class="nx">B</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">B</span>
+	<span class="nx">it</span><span class="p">.</span><span class="nx">buckets</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">buckets</span>
+
+	<span class="nx">r</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nf">fastrand</span><span class="p">())</span>
+	<span class="nx">it</span><span class="p">.</span><span class="nx">startBucket</span> <span class="p">=</span> <span class="nx">r</span> <span class="o">&amp;</span> <span class="nf">bucketMask</span><span class="p">(</span><span class="nx">h</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span>
+	<span class="nx">it</span><span class="p">.</span><span class="nx">offset</span> <span class="p">=</span> <span class="nb">uint8</span><span class="p">(</span><span class="nx">r</span> <span class="o">&gt;&gt;</span> <span class="nx">h</span><span class="p">.</span><span class="nx">B</span> <span class="o">&amp;</span> <span class="p">(</span><span class="nx">bucketCnt</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span>
+	<span class="nx">it</span><span class="p">.</span><span class="nx">bucket</span> <span class="p">=</span> <span class="nx">it</span><span class="p">.</span><span class="nx">startBucket</span>
+	<span class="nf">mapiternext</span><span class="p">(</span><span class="nx">it</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>该函数会初始化 <code>runtime.hiter</code> 结构体中的字段，并通过 <code>runtime.fastrand</code> 生成一个随机数帮助我们随机选择一个遍历桶的起始位置。Go 团队在设计哈希表的遍历时就不想让使用者依赖固定的遍历顺序，所以引入了随机数保证遍历的随机性。</p>
+<p>遍历哈希会使用 <code>runtime.mapiternext</code>，我们在这里简化了很多逻辑，省去了一些边界条件以及哈希表扩容时的兼容操作，这里只需要关注处理遍历逻辑的核心代码，我们会将该函数分成桶的选择和桶内元素的遍历两部分，首先是桶的选择过程：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mapiternext</span><span class="p">(</span><span class="nx">it</span> <span class="o">*</span><span class="nx">hiter</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">h</span> <span class="o">:=</span> <span class="nx">it</span><span class="p">.</span><span class="nx">h</span>
+	<span class="nx">t</span> <span class="o">:=</span> <span class="nx">it</span><span class="p">.</span><span class="nx">t</span>
+	<span class="nx">bucket</span> <span class="o">:=</span> <span class="nx">it</span><span class="p">.</span><span class="nx">bucket</span>
+	<span class="nx">b</span> <span class="o">:=</span> <span class="nx">it</span><span class="p">.</span><span class="nx">bptr</span>
+	<span class="nx">i</span> <span class="o">:=</span> <span class="nx">it</span><span class="p">.</span><span class="nx">i</span>
+	<span class="nx">alg</span> <span class="o">:=</span> <span class="nx">t</span><span class="p">.</span><span class="nx">key</span><span class="p">.</span><span class="nx">alg</span>
+
+<span class="nx">next</span><span class="p">:</span>
+	<span class="k">if</span> <span class="nx">b</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">bucket</span> <span class="o">==</span> <span class="nx">it</span><span class="p">.</span><span class="nx">startBucket</span> <span class="o">&amp;&amp;</span> <span class="nx">it</span><span class="p">.</span><span class="nx">wrapped</span> <span class="p">{</span>
+			<span class="nx">it</span><span class="p">.</span><span class="nx">key</span> <span class="p">=</span> <span class="kc">nil</span>
+			<span class="nx">it</span><span class="p">.</span><span class="nx">value</span> <span class="p">=</span> <span class="kc">nil</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+		<span class="nx">b</span> <span class="p">=</span> <span class="p">(</span><span class="o">*</span><span class="nx">bmap</span><span class="p">)(</span><span class="nf">add</span><span class="p">(</span><span class="nx">it</span><span class="p">.</span><span class="nx">buckets</span><span class="p">,</span> <span class="nx">bucket</span><span class="o">*</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">t</span><span class="p">.</span><span class="nx">bucketsize</span><span class="p">)))</span>
+		<span class="nx">bucket</span><span class="o">++</span>
+		<span class="k">if</span> <span class="nx">bucket</span> <span class="o">==</span> <span class="nf">bucketShift</span><span class="p">(</span><span class="nx">it</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">bucket</span> <span class="p">=</span> <span class="mi">0</span>
+			<span class="nx">it</span><span class="p">.</span><span class="nx">wrapped</span> <span class="p">=</span> <span class="kc">true</span>
+		<span class="p">}</span>
+		<span class="nx">i</span> <span class="p">=</span> <span class="mi">0</span>
+	<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这段代码主要有两个作用：</p>
+<ol>
+<li>在待遍历的桶为空时，选择需要遍历的新桶；</li>
+<li>在不存在待遍历的桶时。返回 (nil, nil) 键值对并中止遍历；</li>
+</ol>
+<p>runtime.mapiternext 剩余代码的作用是从桶中找到下一个遍历的元素，在大多数情况下都会直接操作内存获取目标键值的内存地址，不过如果哈希表处于扩容期间就会调用 runtime.mapaccessK 获取键值对：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">	<span class="k">for</span> <span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">bucketCnt</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">offi</span> <span class="o">:=</span> <span class="p">(</span><span class="nx">i</span> <span class="o">+</span> <span class="nx">it</span><span class="p">.</span><span class="nx">offset</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="nx">bucketCnt</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+		<span class="nx">k</span> <span class="o">:=</span> <span class="nf">add</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">b</span><span class="p">),</span> <span class="nx">dataOffset</span><span class="o">+</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">offi</span><span class="p">)</span><span class="o">*</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">t</span><span class="p">.</span><span class="nx">keysize</span><span class="p">))</span>
+		<span class="nx">v</span> <span class="o">:=</span> <span class="nf">add</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">b</span><span class="p">),</span> <span class="nx">dataOffset</span><span class="o">+</span><span class="nx">bucketCnt</span><span class="o">*</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">t</span><span class="p">.</span><span class="nx">keysize</span><span class="p">)</span><span class="o">+</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">offi</span><span class="p">)</span><span class="o">*</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">t</span><span class="p">.</span><span class="nx">valuesize</span><span class="p">))</span>
+		<span class="k">if</span> <span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">tophash</span><span class="p">[</span><span class="nx">offi</span><span class="p">]</span> <span class="o">!=</span> <span class="nx">evacuatedX</span> <span class="o">&amp;&amp;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">tophash</span><span class="p">[</span><span class="nx">offi</span><span class="p">]</span> <span class="o">!=</span> <span class="nx">evacuatedY</span><span class="p">)</span> <span class="o">||</span>
+			<span class="p">!(</span><span class="nx">t</span><span class="p">.</span><span class="nf">reflexivekey</span><span class="p">()</span> <span class="o">||</span> <span class="nx">alg</span><span class="p">.</span><span class="nf">equal</span><span class="p">(</span><span class="nx">k</span><span class="p">,</span> <span class="nx">k</span><span class="p">))</span> <span class="p">{</span>
+			<span class="nx">it</span><span class="p">.</span><span class="nx">key</span> <span class="p">=</span> <span class="nx">k</span>
+			<span class="nx">it</span><span class="p">.</span><span class="nx">value</span> <span class="p">=</span> <span class="nx">v</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">rk</span><span class="p">,</span> <span class="nx">rv</span> <span class="o">:=</span> <span class="nf">mapaccessK</span><span class="p">(</span><span class="nx">t</span><span class="p">,</span> <span class="nx">h</span><span class="p">,</span> <span class="nx">k</span><span class="p">)</span>
+			<span class="nx">it</span><span class="p">.</span><span class="nx">key</span> <span class="p">=</span> <span class="nx">rk</span>
+			<span class="nx">it</span><span class="p">.</span><span class="nx">value</span> <span class="p">=</span> <span class="nx">rv</span>
+		<span class="p">}</span>
+		<span class="nx">it</span><span class="p">.</span><span class="nx">bucket</span> <span class="p">=</span> <span class="nx">bucket</span>
+		<span class="nx">it</span><span class="p">.</span><span class="nx">i</span> <span class="p">=</span> <span class="nx">i</span> <span class="o">+</span> <span class="mi">1</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="nx">b</span> <span class="p">=</span> <span class="nx">b</span><span class="p">.</span><span class="nf">overflow</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span>
+	<span class="nx">i</span> <span class="p">=</span> <span class="mi">0</span>
+	<span class="k">goto</span> <span class="nx">next</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>当上述函数已经遍历了正常桶后，会通过 <code>runtime.bmap.overflow</code> 遍历哈希中的溢出桶。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210614225710.png" alt=""></p>
+<p>简单总结一下哈希表遍历的顺序，首先会选出一个绿色的正常桶开始遍历，随后遍历所有黄色的溢出桶，最后依次按照索引顺序遍历哈希表中其他的桶，直到所有的桶都被遍历完成。</p>
+<h3 id="字符串">字符串</h3>
+<p>遍历字符串的过程与数组、切片和哈希表非常相似，只是在遍历时会获取字符串中索引对应的字节并将字节转换成 rune。我们在遍历字符串时拿到的值都是 rune 类型的变量，<code>for i, r := range s {}</code> 的结构都会被转换成如下所示的形式：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">ha</span> <span class="o">:=</span> <span class="nx">s</span>
+<span class="k">for</span> <span class="nx">hv1</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">hv1</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">ha</span><span class="p">);</span> <span class="p">{</span>
+    <span class="nx">hv1t</span> <span class="o">:=</span> <span class="nx">hv1</span>
+    <span class="nx">hv2</span> <span class="o">:=</span> <span class="nb">rune</span><span class="p">(</span><span class="nx">ha</span><span class="p">[</span><span class="nx">hv1</span><span class="p">])</span>
+    <span class="k">if</span> <span class="nx">hv2</span> <span class="p">&lt;</span> <span class="nx">utf8</span><span class="p">.</span><span class="nx">RuneSelf</span> <span class="p">{</span>
+        <span class="nx">hv1</span><span class="o">++</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="nx">hv2</span><span class="p">,</span> <span class="nx">hv1</span> <span class="p">=</span> <span class="nf">decoderune</span><span class="p">(</span><span class="nx">ha</span><span class="p">,</span> <span class="nx">hv1</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">v1</span><span class="p">,</span> <span class="nx">v2</span> <span class="p">=</span> <span class="nx">hv1t</span><span class="p">,</span> <span class="nx">hv2</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在前面的字符串一节中我们曾经介绍过字符串是一个只读的字节数组切片，所以范围循环在编译期间生成的框架与切片非常类似，只是细节有一些不同。</p>
+<p>使用下标访问字符串中的元素时得到的就是字节，但是这段代码会将当前的字节转换成 rune 类型。如果当前的 rune 是 ASCII 的，那么只会占用一个字节长度，每次循环体运行之后只需要将索引加一，但是如果当前 rune 占用了多个字节就会使用 runtime.decoderune 函数解码，具体的过程就不在这里详细介绍了。</p>
+<h3 id="通道">通道</h3>
+<p>使用 range 遍历 Channel 也是比较常见的做法，一个形如 for v := range ch {} 的语句最终会被转换成如下的格式：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">ha</span> <span class="o">:=</span> <span class="nx">a</span>
+<span class="nx">hv1</span><span class="p">,</span> <span class="nx">hb</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">ha</span>
+<span class="k">for</span> <span class="p">;</span> <span class="nx">hb</span> <span class="o">!=</span> <span class="kc">false</span><span class="p">;</span> <span class="nx">hv1</span><span class="p">,</span> <span class="nx">hb</span> <span class="p">=</span> <span class="o">&lt;-</span><span class="nx">ha</span> <span class="p">{</span>
+    <span class="nx">v1</span> <span class="o">:=</span> <span class="nx">hv1</span>
+    <span class="nx">hv1</span> <span class="p">=</span> <span class="kc">nil</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这里的代码可能与编译器生成的稍微有一些出入，但是结构和效果是完全相同的。该循环会使用 <code>&lt;-ch</code> 从管道中取出等待处理的值，这个操作会调用 <code>runtime.chanrecv2</code> 并阻塞当前的协程，当 <code>runtime.chanrecv2</code> 返回时会根据布尔值 hb 判断当前的值是否存在：</p>
+<ul>
+<li>如果不存在当前值，意味着当前的管道已经被关闭；</li>
+<li>如果存在当前值，会为 v1 赋值并清除 hv1 变量中的数据，然后重新陷入阻塞等待新数据；</li>
+</ul>
+<h2 id="小结">小结</h2>
+<p>这一节介绍的两个关键字 for 和 range 都是我们在学习和使用 Go 语言中无法绕开的，通过分析和研究它们的底层原理，让我们对实现细节有了更清楚的认识，包括 Go 语言遍历数组和切片时会复用变量、哈希表的随机遍历原理以及底层的一些优化，这都能帮助我们更好地理解和使用 Go 语言。</p>
+<h2 id="转载">转载</h2>
+<p><a href="https://draveness.me/golang/docs/part2-foundation/ch05-keyword/golang-for-range/">5.1 for 和 range</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-06-14
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/protobuf%E5%A6%82%E4%BD%95%E4%BC%A0%E9%80%92%E5%8A%A8%E6%80%81%E5%8F%82%E6%95%B0/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Protobuf如何传递动态参数</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/go-assert%E5%BA%93%E4%BB%8B%E7%BB%8D/">
+            <span class="next-text nav-default">go-assert库介绍</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>基本原语make和new源码剖析 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="前言 当我们想要在 Go 语言中初始化一个结构时，可能会用到两个不同的关键字 — make 和 new。因为它们的功能相似，所以初学者可能会对这两个关键字的作用感" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.83.1 with theme even" />
+
+
+<link rel="canonical" href="/post/%E5%9F%BA%E6%9C%AC%E5%8E%9F%E8%AF%ADmake%E5%92%8Cnew%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="基本原语make和new源码剖析" />
+<meta property="og:description" content="前言 当我们想要在 Go 语言中初始化一个结构时，可能会用到两个不同的关键字 — make 和 new。因为它们的功能相似，所以初学者可能会对这两个关键字的作用感" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/%E5%9F%BA%E6%9C%AC%E5%8E%9F%E8%AF%ADmake%E5%92%8Cnew%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-06-18T16:00:43&#43;00:00" />
+<meta property="article:modified_time" content="2021-06-18T16:00:43&#43;00:00" />
+
+<meta itemprop="name" content="基本原语make和new源码剖析">
+<meta itemprop="description" content="前言 当我们想要在 Go 语言中初始化一个结构时，可能会用到两个不同的关键字 — make 和 new。因为它们的功能相似，所以初学者可能会对这两个关键字的作用感"><meta itemprop="datePublished" content="2021-06-18T16:00:43&#43;00:00" />
+<meta itemprop="dateModified" content="2021-06-18T16:00:43&#43;00:00" />
+<meta itemprop="wordCount" content="2511">
+<meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="基本原语make和new源码剖析"/>
+<meta name="twitter:description" content="前言 当我们想要在 Go 语言中初始化一个结构时，可能会用到两个不同的关键字 — make 和 new。因为它们的功能相似，所以初学者可能会对这两个关键字的作用感"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">基本原语make和new源码剖析</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-06-18 </span>
+        <div class="post-category">
+            <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
+            </div>
+          <span class="more-meta"> 约 2511 字 </span>
+          <span class="more-meta"> 预计阅读 6 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#前言">前言</a></li>
+    <li><a href="#newt-返回的是-t-的指针">new(T) 返回的是 T 的指针</a></li>
+    <li><a href="#make-只能用于-slicemapchannel">make 只能用于 slice,map,channel</a></li>
+    <li><a href="#很少需要使用-new">很少需要使用 new</a></li>
+    <li><a href="#并不是使用new就一定会在堆上分配内存">并不是使用new就一定会在堆上分配内存</a></li>
+    <li><a href="#make">make</a></li>
+    <li><a href="#new">new</a></li>
+    <li><a href="#小结">小结</a></li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="前言">前言</h2>
+<p>当我们想要在 Go 语言中初始化一个结构时，可能会用到两个不同的关键字 — make 和 new。因为它们的功能相似，所以初学者可能会对这两个关键字的作用感到困惑，但是它们两者能够初始化的变量却有较大的不同。</p>
+<ul>
+<li>make 的作用是初始化内置的数据结构，也就是我们在前面提到的切片、哈希表和 Channel；</li>
+<li>new 的作用是根据传入的类型分配一片内存空间并返回指向这片内存空间的指针；</li>
+</ul>
+<h2 id="newt-返回的是-t-的指针">new(T) 返回的是 T 的指针</h2>
+<p>new(T) 为一个 T 类型新值分配空间并将此空间初始化为 T 的零值，返回的是新值的地址，也就是 T 类型的指针 *T，该指针指向 T 的新分配的零值。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">p1</span> <span class="o">:=</span> <span class="nb">new</span><span class="p">(</span><span class="kt">int</span><span class="p">)</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;p1 --&gt; %#v \n &#34;</span><span class="p">,</span> <span class="nx">p1</span><span class="p">)</span> <span class="c1">//(*int)(0xc42000e250)
+</span><span class="c1"></span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;p1 point to --&gt; %#v \n &#34;</span><span class="p">,</span> <span class="o">*</span><span class="nx">p1</span><span class="p">)</span> <span class="c1">//0
+</span><span class="c1"></span><span class="kd">var</span> <span class="nx">p2</span> <span class="o">*</span><span class="kt">int</span>
+<span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span>
+<span class="nx">p2</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">i</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;p2 --&gt; %#v \n &#34;</span><span class="p">,</span> <span class="nx">p2</span><span class="p">)</span> <span class="c1">//(*int)(0xc42000e278)
+</span><span class="c1"></span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;p2 point to --&gt; %#v \n &#34;</span><span class="p">,</span> <span class="o">*</span><span class="nx">p2</span><span class="p">)</span> <span class="c1">//0
+</span></code></pre></td></tr></table>
+</div>
+</div><p>上面的代码是等价的，new(int) 将分配的空间初始化为 int 的零值，也就是 0，并返回 int 的指针，这和直接声明指针并初始化的效果是相同的。</p>
+<h2 id="make-只能用于-slicemapchannel">make 只能用于 slice,map,channel</h2>
+<p>make 只能用于 slice，map，channel 三种类型，make(T, args) 返回的是初始化之后的 T 类型的值，这个新值并不是 T 类型的零值，也不是指针 *T，是经过初始化之后的 T 的引用。因为这三种类型就是引用类型，所以就没有必要返回他们的指针了。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">s1</span> <span class="p">[]</span><span class="kt">int</span>
+<span class="k">if</span> <span class="nx">s1</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;s1 is nil --&gt; %#v \n &#34;</span><span class="p">,</span> <span class="nx">s1</span><span class="p">)</span> <span class="c1">// []int(nil)
+</span><span class="c1"></span><span class="p">}</span>
+<span class="nx">s2</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">int</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+<span class="k">if</span> <span class="nx">s2</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;s2 is nil --&gt; %#v \n &#34;</span><span class="p">,</span> <span class="nx">s2</span><span class="p">)</span>
+<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;s2 is not nill --&gt; %#v \n &#34;</span><span class="p">,</span> <span class="nx">s2</span><span class="p">)</span><span class="c1">// []int{0, 0, 0}
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>slice 的零值是 nil，使用 make 之后 slice 是一个初始化的 slice，即 slice 的长度、容量、底层指向的 array 都被 make 完成初始化，此时 slice 内容被类型 int 的零值填充，形式是 [0 0 0]，map 和 channel 也是类似的。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">m1</span> <span class="kd">map</span><span class="p">[</span><span class="kt">int</span><span class="p">]</span><span class="kt">string</span>
+<span class="k">if</span> <span class="nx">m1</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;m1 is nil --&gt; %#v \n &#34;</span><span class="p">,</span> <span class="nx">m1</span><span class="p">)</span> <span class="c1">//map[int]string(nil)
+</span><span class="c1"></span><span class="p">}</span>
+<span class="nx">m2</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">int</span><span class="p">]</span><span class="kt">string</span><span class="p">)</span>
+<span class="k">if</span> <span class="nx">m2</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;m2 is nil --&gt; %#v \n &#34;</span><span class="p">,</span> <span class="nx">m2</span><span class="p">)</span>
+<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;m2 is not nill --&gt; %#v \n &#34;</span><span class="p">,</span> <span class="nx">m2</span><span class="p">)</span> <span class="kd">map</span><span class="p">[</span><span class="kt">int</span><span class="p">]</span><span class="kt">string</span><span class="p">{}</span>
+<span class="p">}</span>
+<span class="kd">var</span> <span class="nx">c1</span> <span class="kd">chan</span> <span class="kt">string</span>
+<span class="k">if</span> <span class="nx">c1</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;c1 is nil --&gt; %#v \n &#34;</span><span class="p">,</span> <span class="nx">c1</span><span class="p">)</span> <span class="c1">//(chan string)(nil)
+</span><span class="c1"></span><span class="p">}</span>
+<span class="nx">c2</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">string</span><span class="p">)</span>
+<span class="k">if</span> <span class="nx">c2</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;c2 is nil --&gt; %#v \n &#34;</span><span class="p">,</span> <span class="nx">c2</span><span class="p">)</span>
+<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;c2 is not nill --&gt; %#v \n &#34;</span><span class="p">,</span> <span class="nx">c2</span><span class="p">)</span><span class="c1">//(chan string)(0xc420016120)
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="很少需要使用-new">很少需要使用 new</h2>
+<p>以下代码演示了 struct 初始化的过程，可以说明不使用 new 一样可以完成 struct 的初始化工作。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Foo</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">name</span> <span class="kt">string</span>
+    <span class="nx">age</span>  <span class="kt">int</span>
+<span class="p">}</span>
+<span class="c1">//声明初始化
+</span><span class="c1"></span><span class="kd">var</span> <span class="nx">foo1</span> <span class="nx">Foo</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;foo1 --&gt; %#v\n &#34;</span><span class="p">,</span> <span class="nx">foo1</span><span class="p">)</span> <span class="c1">//main.Foo{age:0, name:&#34;&#34;}
+</span><span class="c1"></span><span class="nx">foo1</span><span class="p">.</span><span class="nx">age</span> <span class="p">=</span> <span class="mi">1</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">foo1</span><span class="p">.</span><span class="nx">age</span><span class="p">)</span>
+<span class="c1">//struct literal 初始化
+</span><span class="c1"></span><span class="nx">foo2</span> <span class="o">:=</span> <span class="nx">Foo</span><span class="p">{}</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;foo2 --&gt; %#v\n &#34;</span><span class="p">,</span> <span class="nx">foo2</span><span class="p">)</span> <span class="c1">//main.Foo{age:0, name:&#34;&#34;}
+</span><span class="c1"></span><span class="nx">foo2</span><span class="p">.</span><span class="nx">age</span> <span class="p">=</span> <span class="mi">2</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">foo2</span><span class="p">.</span><span class="nx">age</span><span class="p">)</span>
+<span class="c1">//指针初始化
+</span><span class="c1"></span><span class="nx">foo3</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Foo</span><span class="p">{}</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;foo3 --&gt; %#v\n &#34;</span><span class="p">,</span> <span class="nx">foo3</span><span class="p">)</span> <span class="c1">//&amp;main.Foo{age:0, name:&#34;&#34;}
+</span><span class="c1"></span><span class="nx">foo3</span><span class="p">.</span><span class="nx">age</span> <span class="p">=</span> <span class="mi">3</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">foo3</span><span class="p">.</span><span class="nx">age</span><span class="p">)</span>
+<span class="c1">//new 初始化
+</span><span class="c1"></span><span class="nx">foo4</span> <span class="o">:=</span> <span class="nb">new</span><span class="p">(</span><span class="nx">Foo</span><span class="p">)</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;foo4 --&gt; %#v\n &#34;</span><span class="p">,</span> <span class="nx">foo4</span><span class="p">)</span> <span class="c1">//&amp;main.Foo{age:0, name:&#34;&#34;}
+</span><span class="c1"></span><span class="nx">foo4</span><span class="p">.</span><span class="nx">age</span> <span class="p">=</span> <span class="mi">4</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">foo4</span><span class="p">.</span><span class="nx">age</span><span class="p">)</span>
+<span class="c1">//声明指针并用 new 初始化
+</span><span class="c1"></span><span class="kd">var</span> <span class="nx">foo5</span> <span class="o">*</span><span class="nx">Foo</span> <span class="p">=</span> <span class="nb">new</span><span class="p">(</span><span class="nx">Foo</span><span class="p">)</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;foo5 --&gt; %#v\n &#34;</span><span class="p">,</span> <span class="nx">foo5</span><span class="p">)</span> <span class="c1">//&amp;main.Foo{age:0, name:&#34;&#34;}
+</span><span class="c1"></span><span class="nx">foo5</span><span class="p">.</span><span class="nx">age</span> <span class="p">=</span> <span class="mi">5</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">foo5</span><span class="p">.</span><span class="nx">age</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>foo1 和 foo2 是同样的类型，都是 Foo 类型的值，foo1 是通过 var 声明，Foo 的 filed 自动初始化为每个类型的零值，foo2 是通过字面量的完成初始化。foo3，foo4 和 foo5 是一样的类型，都是 Foo 的指针 Foo。</p>
+<p>如果 x 是可寻址的，&amp;x 的 filed 集合包含 m，x.m 和 (&amp;x).m 是等同的，go 自动做转换，也就是 foo1.age 和 foo3.age 调用是等价的，go 在下面自动做了转换。</p>
+<p>因而可以直接使用 struct literal 的方式创建对象，能达到和 new 创建是一样的情况而不需要使用 new。</p>
+<h2 id="并不是使用new就一定会在堆上分配内存">并不是使用new就一定会在堆上分配内存</h2>
+<p>编译器会自动选择在栈上还是在堆上分配局部变量的存储空间，但可能令人惊讶的是，这个选择并不是由用var还是new声明变量的方式决定的。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">global</span> <span class="o">*</span><span class="kt">int</span>
+
+<span class="kd">func</span> <span class="nf">f</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">x</span> <span class="kt">int</span>
+    <span class="nx">x</span> <span class="p">=</span> <span class="mi">1</span>
+    <span class="nx">global</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">x</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">g</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">y</span> <span class="o">:=</span> <span class="nb">new</span><span class="p">(</span><span class="kt">int</span><span class="p">)</span>
+    <span class="o">*</span><span class="nx">y</span> <span class="p">=</span> <span class="mi">1</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>f函数里的x变量必须在堆上分配，因为它在函数退出后依然可以通过包一级的global变量找到，虽然它是在函数内部定义的；用Go语言的术语说，这个x局部变量从函数f中逃逸了。相反，当g函数返回时，变量*y将是不可达的，也就是说可以马上被回收的。因此，*y并没有从函数g中逃逸，编译器可以选择在栈上分配*y的存储空间（译注：也可以选择在堆上分配，然后由Go语言的GC回收这个变量的内存空间），虽然这里用的是new方式。其实在任何时候，你并不需为了编写正确的代码而要考虑变量的逃逸行为，要记住的是，逃逸的变量需要额外分配内存，同时对性能的优化可能会产生细微的影响。</p>
+<p>Go语言的自动垃圾收集器对编写正确的代码是一个巨大的帮助，但也并不是说你完全不用考虑内存了。你虽然不需要显式地分配和释放内存，但是要编写高效的程序你依然需要了解变量的生命周期。例如，如果将指向短生命周期对象的指针保存到具有长生命周期的对象中，特别是保存到全局变量时，会阻止对短生命周期对象的垃圾回收（从而可能影响程序的性能）。</p>
+<h2 id="make">make</h2>
+<p>在前面的章节中我们已经谈到过 make 在创建切片、哈希表和 Channel 的具体过程，所以在这一小节，我们只是会简单提及 make 相关的数据结构的初始化原理。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210618160638.png" alt=""></p>
+<p>在编译期间的类型检查阶段，Go 语言会将代表 make 关键字的 OMAKE 节点根据参数类型的不同转换成了 OMAKESLICE、OMAKEMAP 和 OMAKECHAN 三种不同类型的节点，这些节点会调用不同的运行时函数来初始化相应的数据结构。</p>
+<h2 id="new">new</h2>
+<p>编译器会在中间代码生成阶段通过以下两个函数处理该关键字：</p>
+<ol>
+<li><code>cmd/compile/internal/gc.callnew</code> 会将关键字转换成 ONEWOBJ 类型的节点2；</li>
+<li><code>cmd/compile/internal/gc.state.expr</code> 会根据申请空间的大小分两种情况处理：
+<ol>
+<li>如果申请的空间为 0，就会返回一个表示空指针的 zerobase 变量；</li>
+<li>在遇到其他情况时会将关键字转换成 runtime.newobject 函数：</li>
+</ol>
+</li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">callnew</span><span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">types</span><span class="p">.</span><span class="nx">Type</span><span class="p">)</span><span class="o">*</span><span class="nx">Node</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="nx">n</span> <span class="o">:=</span> <span class="nf">nod</span><span class="p">(</span><span class="nx">ONEWOBJ</span><span class="p">,</span> <span class="nf">typename</span><span class="p">(</span><span class="nx">t</span><span class="p">),</span> <span class="kc">nil</span><span class="p">)</span>
+	<span class="o">...</span>
+	<span class="k">return</span> <span class="nx">n</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">state</span><span class="p">)</span> <span class="nf">expr</span><span class="p">(</span><span class="nx">n</span><span class="o">*</span><span class="nx">Node</span><span class="p">)</span> <span class="o">*</span><span class="nx">ssa</span><span class="p">.</span><span class="nx">Value</span> <span class="p">{</span>
+	<span class="k">switch</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Op</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="nx">ONEWOBJ</span><span class="p">:</span>
+		<span class="k">if</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Type</span><span class="p">.</span><span class="nf">Elem</span><span class="p">().</span><span class="nf">Size</span><span class="p">()</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">s</span><span class="p">.</span><span class="nf">newValue1A</span><span class="p">(</span><span class="nx">ssa</span><span class="p">.</span><span class="nx">OpAddr</span><span class="p">,</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Type</span><span class="p">,</span> <span class="nx">zerobaseSym</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">sb</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">typ</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">expr</span><span class="p">(</span><span class="nx">n</span><span class="p">.</span><span class="nx">Left</span><span class="p">)</span>
+		<span class="nx">vv</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">rtcall</span><span class="p">(</span><span class="nx">newobject</span><span class="p">,</span> <span class="kc">true</span><span class="p">,</span> <span class="p">[]</span><span class="o">*</span><span class="nx">types</span><span class="p">.</span><span class="nx">Type</span><span class="p">{</span><span class="nx">n</span><span class="p">.</span><span class="nx">Type</span><span class="p">},</span> <span class="nx">typ</span><span class="p">)</span>
+		<span class="k">return</span> <span class="nx">vv</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>需要注意的是，无论是直接使用 new，还是使用 var 初始化变量，它们在编译器看来都是 ONEW 和 ODCL 节点。如果变量会逃逸到堆上，这些节点在这一阶段都会被 <code>cmd/compile/internal/gc.walkstmt</code> 转换成通过 <code>runtime.newobject</code> 函数并在堆上申请内存：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">walkstmt</span><span class="p">(</span><span class="nx">n</span> <span class="o">*</span><span class="nx">Node</span><span class="p">)</span><span class="o">*</span><span class="nx">Node</span> <span class="p">{</span>
+	<span class="k">switch</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Op</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="nx">ODCL</span><span class="p">:</span>
+		<span class="nx">v</span> <span class="o">:=</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Left</span>
+		<span class="k">if</span> <span class="nx">v</span><span class="p">.</span><span class="nf">Class</span><span class="p">()</span> <span class="o">==</span> <span class="nx">PAUTOHEAP</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">prealloc</span><span class="p">[</span><span class="nx">v</span><span class="p">]</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nx">prealloc</span><span class="p">[</span><span class="nx">v</span><span class="p">]</span> <span class="p">=</span> <span class="nf">callnew</span><span class="p">(</span><span class="nx">v</span><span class="p">.</span><span class="nx">Type</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="nx">nn</span> <span class="o">:=</span> <span class="nf">nod</span><span class="p">(</span><span class="nx">OAS</span><span class="p">,</span> <span class="nx">v</span><span class="p">.</span><span class="nx">Name</span><span class="p">.</span><span class="nx">Param</span><span class="p">.</span><span class="nx">Heapaddr</span><span class="p">,</span> <span class="nx">prealloc</span><span class="p">[</span><span class="nx">v</span><span class="p">])</span>
+			<span class="nx">nn</span><span class="p">.</span><span class="nf">SetColas</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
+			<span class="nx">nn</span> <span class="p">=</span> <span class="nf">typecheck</span><span class="p">(</span><span class="nx">nn</span><span class="p">,</span> <span class="nx">ctxStmt</span><span class="p">)</span>
+			<span class="k">return</span> <span class="nf">walkstmt</span><span class="p">(</span><span class="nx">nn</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="k">case</span> <span class="nx">ONEW</span><span class="p">:</span>
+		<span class="k">if</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Esc</span> <span class="o">==</span> <span class="nx">EscNone</span> <span class="p">{</span>
+			<span class="nx">r</span> <span class="o">:=</span> <span class="nf">temp</span><span class="p">(</span><span class="nx">n</span><span class="p">.</span><span class="nx">Type</span><span class="p">.</span><span class="nf">Elem</span><span class="p">())</span>
+			<span class="nx">r</span> <span class="p">=</span> <span class="nf">nod</span><span class="p">(</span><span class="nx">OAS</span><span class="p">,</span> <span class="nx">r</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+			<span class="nx">r</span> <span class="p">=</span> <span class="nf">typecheck</span><span class="p">(</span><span class="nx">r</span><span class="p">,</span> <span class="nx">ctxStmt</span><span class="p">)</span>
+			<span class="nx">init</span><span class="p">.</span><span class="nf">Append</span><span class="p">(</span><span class="nx">r</span><span class="p">)</span>
+			<span class="nx">r</span> <span class="p">=</span> <span class="nf">nod</span><span class="p">(</span><span class="nx">OADDR</span><span class="p">,</span> <span class="nx">r</span><span class="p">.</span><span class="nx">Left</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+			<span class="nx">r</span> <span class="p">=</span> <span class="nf">typecheck</span><span class="p">(</span><span class="nx">r</span><span class="p">,</span> <span class="nx">ctxExpr</span><span class="p">)</span>
+			<span class="nx">n</span> <span class="p">=</span> <span class="nx">r</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">n</span> <span class="p">=</span> <span class="nf">callnew</span><span class="p">(</span><span class="nx">n</span><span class="p">.</span><span class="nx">Type</span><span class="p">.</span><span class="nf">Elem</span><span class="p">())</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>不过这也不是绝对的，如果通过 var 或者 new 创建的变量不需要在当前作用域外生存，例如不用作为返回值返回给调用方，那么就不需要初始化在堆上。</p>
+<p>runtime.newobject 函数会获取传入类型占用空间的大小，调用 runtime.mallocgc 在堆上申请一片内存空间并返回指向这片内存空间的指针：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">newobject</span><span class="p">(</span><span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">typ</span><span class="p">.</span><span class="nx">size</span><span class="p">,</span> <span class="nx">typ</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>runtime.mallocgc 函数的实现大概有 200 多行代码，我们会在后面的章节中详细分析 Go 语言的内存管理机制。</p>
+<h2 id="小结">小结</h2>
+<p>这里我们简单总结一下 Go 语言中 make 和 new 关键字的实现原理，make 关键字的作用是创建切片、哈希表和 Channel 等内置的数据结构，而 new 的作用是为类型申请一片内存空间，并返回指向这片内存的指针。</p>
+<h2 id="参考">参考</h2>
+<p><a href="https://sanyuesha.com/2017/07/26/go-make-and-new/">理解 Go make 和 new 的区别</a></p>
+<p><a href="https://draveness.me/golang/docs/part2-foundation/ch05-keyword/golang-make-and-new/">5.5 make 和 new</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-06-18
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/%E5%9F%BA%E6%9C%AC%E5%8E%9F%E8%AF%ADdefer%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">基本原语defer源码剖析</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/%E5%A6%82%E4%BD%95%E5%81%9Acodereview/">
+            <span class="next-text nav-default">如何做CodeReview</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
