@@ -53,7 +53,7 @@
 <meta itemprop="name" content="基本原语panic和recover源码剖析">
 <meta itemprop="description" content="前言 本节将分析 Go 语言中两个经常成对出现的两个关键字 — panic 和 recover。这两个关键字与上一节提到的 defer 有紧密的联系，它们都是 Go 语言中的内置函数"><meta itemprop="datePublished" content="2021-06-20T20:28:45&#43;00:00" />
 <meta itemprop="dateModified" content="2021-06-20T20:28:45&#43;00:00" />
-<meta itemprop="wordCount" content="5284">
+<meta itemprop="wordCount" content="6274">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="基本原语panic和recover源码剖析"/>
 <meta name="twitter:description" content="前言 本节将分析 Go 语言中两个经常成对出现的两个关键字 — panic 和 recover。这两个关键字与上一节提到的 defer 有紧密的联系，它们都是 Go 语言中的内置函数"/>
@@ -164,8 +164,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 5284 字 </span>
-          <span class="more-meta"> 预计阅读 11 分钟 </span>
+          <span class="more-meta"> 约 6274 字 </span>
+          <span class="more-meta"> 预计阅读 13 分钟 </span>
         
       </div>
     </header>
@@ -188,7 +188,9 @@
     <li><a href="#panic">panic</a>
       <ul>
         <li><a href="#reflectcall">reflectcall</a></li>
+        <li><a href="#preprintpanics">preprintpanics</a></li>
         <li><a href="#fatalpanic">fatalpanic</a></li>
+        <li><a href="#recovery">recovery</a></li>
       </ul>
     </li>
     <li><a href="#gorecover">gorecover</a></li>
@@ -510,6 +512,7 @@
 <ol>
 <li>创建新的 runtime._panic 并添加到所在 Goroutine 的_panic 链表的最前面；</li>
 <li>在循环中不断从当前 Goroutine 的 _defer 中链表获取 runtime._defer 并调用 runtime.reflectcall 运行延迟调用函数；</li>
+<li>如果recovered=true,执行程序的恢复;</li>
 <li>调用 runtime.fatalpanic 中止整个程序；</li>
 </ol>
 <div class="highlight"><div class="chroma">
@@ -723,6 +726,11 @@
 </span><span class="lnt">207
 </span><span class="lnt">208
 </span><span class="lnt">209
+</span><span class="lnt">210
+</span><span class="lnt">211
+</span><span class="lnt">212
+</span><span class="lnt">213
+</span><span class="lnt">214
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// The implementation of the predeclared function panic.
@@ -852,10 +860,12 @@
 			<span class="nx">gp</span><span class="p">.</span><span class="nx">_defer</span> <span class="p">=</span> <span class="nx">d</span><span class="p">.</span><span class="nx">link</span>
 			<span class="nf">freedefer</span><span class="p">(</span><span class="nx">d</span><span class="p">)</span>
 		<span class="p">}</span>
-		<span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">recovered</span> <span class="p">{</span>
+		<span class="c1">// 执行延迟调用函数，可能会设置 p.recovered = true
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">recovered</span> <span class="p">{</span>
 			<span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">link</span>
 			<span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">.</span><span class="nx">goexit</span> <span class="o">&amp;&amp;</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">.</span><span class="nx">aborted</span> <span class="p">{</span>
-				<span class="c1">// A normal recover would bypass/abort the Goexit.  Instead,
+				<span class="c1">// 从 runtime._defer 中取出了程序计数器 pc 和栈指针 sp 并调用 runtime.recovery 函数触发 Goroutine 的调度，调度之前会准备好 sp、pc 以及函数的返回值：
+</span><span class="c1"></span>				<span class="c1">// A normal recover would bypass/abort the Goexit.  Instead,
 </span><span class="c1"></span>				<span class="c1">// we return to the processing loop of the Goexit.
 </span><span class="c1"></span>				<span class="nx">gp</span><span class="p">.</span><span class="nx">sigcode0</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">.</span><span class="nx">sp</span><span class="p">)</span>
 				<span class="nx">gp</span><span class="p">.</span><span class="nx">sigcode1</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">.</span><span class="nx">pc</span><span class="p">)</span>
@@ -924,15 +934,18 @@
 </span><span class="c1"></span>			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;recovery failed&#34;</span><span class="p">)</span> <span class="c1">// mcall should not return
 </span><span class="c1"></span>		<span class="p">}</span>
 	<span class="p">}</span>
-
-	<span class="c1">// ran out of deferred calls - old-school panic now
+	<span class="c1">// 当然如果所有的 defer 都没有指明显式的 recover，那么这时候则直接在运行时抛出 panic 信息：
+</span><span class="c1"></span>	<span class="c1">// 消耗完所有的 defer 调用，保守地进行 panic
+</span><span class="c1"></span>	<span class="c1">// 因为在冻结之后调用任意用户代码是不安全的，所以我们调用 preprintpanics 来调用
+</span><span class="c1"></span>	<span class="c1">// 所有必要的 Error 和 String 方法来在 startpanic 之前准备 panic 字符串。
+</span><span class="c1"></span>	<span class="c1">// ran out of deferred calls - old-school panic now
 </span><span class="c1"></span>	<span class="c1">// Because it is unsafe to call arbitrary user code after freezing
 </span><span class="c1"></span>	<span class="c1">// the world, we call preprintpanics to invoke all necessary Error
 </span><span class="c1"></span>	<span class="c1">// and String methods to prepare the panic strings before startpanic.
 </span><span class="c1"></span>	<span class="nf">preprintpanics</span><span class="p">(</span><span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">)</span>
 
-	<span class="nf">fatalpanic</span><span class="p">(</span><span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">)</span> <span class="c1">// should not return
-</span><span class="c1"></span>	<span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">int</span><span class="p">)(</span><span class="kc">nil</span><span class="p">)</span> <span class="p">=</span> <span class="mi">0</span>      <span class="c1">// not reached
+	<span class="nf">fatalpanic</span><span class="p">(</span><span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">)</span> <span class="c1">// should not return	// 不应该返回
+</span><span class="c1"></span>	<span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">int</span><span class="p">)(</span><span class="kc">nil</span><span class="p">)</span> <span class="p">=</span> <span class="mi">0</span>      <span class="c1">// not reached	// 无法触及
 </span><span class="c1"></span><span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
@@ -960,7 +973,54 @@
 </span><span class="c1"></span><span class="kd">func</span> <span class="nf">reflectcall</span><span class="p">(</span><span class="nx">argtype</span> <span class="o">*</span><span class="nx">_type</span><span class="p">,</span> <span class="nx">fn</span><span class="p">,</span> <span class="nx">arg</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">,</span> <span class="nx">argsize</span> <span class="kt">uint32</span><span class="p">,</span> <span class="nx">retoffset</span> <span class="kt">uint32</span><span class="p">)</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="fatalpanic">fatalpanic</h3>
+</div><h3 id="preprintpanics">preprintpanics</h3>
+<p>至于 preprintpanics 和 fatalpanic 无非是一些错误输出，不再赘述：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Call all Error and String methods before freezing the world.
+</span><span class="c1">// Used when crashing with panicking.
+</span><span class="c1">// 在停止前调用所有的 Error 和 String 方法
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">preprintpanics</span><span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">_panic</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nb">recover</span><span class="p">()</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;panic while printing panic value&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+	<span class="k">for</span> <span class="nx">p</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">switch</span> <span class="nx">v</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">arg</span><span class="p">.(</span><span class="kd">type</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="kt">error</span><span class="p">:</span>
+			<span class="nx">p</span><span class="p">.</span><span class="nx">arg</span> <span class="p">=</span> <span class="nx">v</span><span class="p">.</span><span class="nf">Error</span><span class="p">()</span>
+		<span class="k">case</span> <span class="nx">stringer</span><span class="p">:</span>
+			<span class="nx">p</span><span class="p">.</span><span class="nx">arg</span> <span class="p">=</span> <span class="nx">v</span><span class="p">.</span><span class="nf">String</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="nx">p</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">link</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>至于 preprintpanics 和 fatalpanic 无非是一些错误输出，不再赘述：</p>
+<h3 id="fatalpanic">fatalpanic</h3>
 <p>Go 语言在 1.14 通过 runtime: ensure that Goexit cannot be aborted by a recursive panic/recover 提交解决了递归 panic 和 recover 与 runtime.Goexit 的冲突。</p>
 <p>runtime.fatalpanic 实现了无法被恢复的程序崩溃，它在中止程序之前会通过 runtime.printpanics 打印出全部的 panic 消息以及调用时传入的参数：</p>
 <div class="highlight"><div class="chroma">
@@ -980,26 +1040,149 @@
 </span><span class="lnt">13
 </span><span class="lnt">14
 </span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
 </span></code></pre></td>
 <td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">fatalpanic</span><span class="p">(</span><span class="nx">msgs</span> <span class="o">*</span><span class="nx">_panic</span><span class="p">)</span> <span class="p">{</span>
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// fatalpanic 实现了不可恢复的 panic。类似于 fatalthrow，
+</span><span class="c1">// 要求如果 msgs != nil，则 fatalpanic 仍然能够打印 panic 的消息并在 main 在退出时候减少 runningPanicDefers。
+</span><span class="c1">// fatalpanic implements an unrecoverable panic. It is like fatalthrow, except
+</span><span class="c1">// that if msgs != nil, fatalpanic also prints panic messages and decrements
+</span><span class="c1">// runningPanicDefers once main is blocked from exiting.
+</span><span class="c1">//
+</span><span class="c1">//go:nosplit
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">fatalpanic</span><span class="p">(</span><span class="nx">msgs</span> <span class="o">*</span><span class="nx">_panic</span><span class="p">)</span> <span class="p">{</span>
 	<span class="nx">pc</span> <span class="o">:=</span> <span class="nf">getcallerpc</span><span class="p">()</span>
 	<span class="nx">sp</span> <span class="o">:=</span> <span class="nf">getcallersp</span><span class="p">()</span>
 	<span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+	<span class="kd">var</span> <span class="nx">docrash</span> <span class="kt">bool</span>
+	<span class="c1">// Switch to the system stack to avoid any stack growth, which
+</span><span class="c1"></span>	<span class="c1">// may make things worse if the runtime is in a bad state.
+</span><span class="c1"></span>	<span class="c1">// 切换到系统栈来避免栈增长，如果运行时状态较差则可能导致更糟糕的事情
+</span><span class="c1"></span>	<span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nf">startpanic_m</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="nx">msgs</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="c1">// There were panic messages and startpanic_m
+</span><span class="c1"></span>			<span class="c1">// says it&#39;s okay to try to print them.
+</span><span class="c1"></span>
+			<span class="c1">// startpanic_m set panicking, which will
+</span><span class="c1"></span>			<span class="c1">// block main from exiting, so now OK to
+</span><span class="c1"></span>			<span class="c1">// decrement runningPanicDefers.
+</span><span class="c1"></span>			<span class="c1">// 有 panic 消息和 startpanic_m 则可以尝试打印它们
+</span><span class="c1"></span>
+			<span class="c1">// startpanic_m 设置 panic 会从阻止 main 的退出，
+</span><span class="c1"></span>			<span class="c1">// 因此现在可以开始减少 runningPanicDefers 了
+</span><span class="c1"></span>			<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">runningPanicDefers</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
 
-	<span class="k">if</span> <span class="nf">startpanic_m</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="nx">msgs</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">runningPanicDefers</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
-		<span class="nf">printpanics</span><span class="p">(</span><span class="nx">msgs</span><span class="p">)</span>
-	<span class="p">}</span>
-	<span class="k">if</span> <span class="nf">dopanic_m</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">pc</span><span class="p">,</span> <span class="nx">sp</span><span class="p">)</span> <span class="p">{</span>
-		<span class="nf">crash</span><span class="p">()</span>
-	<span class="p">}</span>
+			<span class="nf">printpanics</span><span class="p">(</span><span class="nx">msgs</span><span class="p">)</span>
+		<span class="p">}</span>
 
-	<span class="nf">exit</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
-<span class="p">}</span>
+		<span class="nx">docrash</span> <span class="p">=</span> <span class="nf">dopanic_m</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">pc</span><span class="p">,</span> <span class="nx">sp</span><span class="p">)</span>
+	<span class="p">})</span>
+
+	<span class="k">if</span> <span class="nx">docrash</span> <span class="p">{</span>
+		<span class="c1">// By crashing outside the above systemstack call, debuggers
+</span><span class="c1"></span>		<span class="c1">// will not be confused when generating a backtrace.
+</span><span class="c1"></span>		<span class="c1">// Function crash is marked nosplit to avoid stack growth.
+</span><span class="c1"></span>		<span class="c1">// 通过在上述 systemstack 调用之外崩溃，调试器在生成回溯时不会混淆。
+</span><span class="c1"></span>		<span class="c1">// 函数崩溃标记为 nosplit 以避免堆栈增长。
+</span><span class="c1"></span>		<span class="nf">crash</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="c1">// 从系统栈退出
+</span><span class="c1"></span>	<span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nf">exit</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+	<span class="p">})</span>
+	<span class="c1">// 不可达
+</span><span class="c1"></span>	<span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">int</span><span class="p">)(</span><span class="kc">nil</span><span class="p">)</span> <span class="p">=</span> <span class="mi">0</span> <span class="c1">// not reached
+</span><span class="c1"></span><span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
 </div><p>打印崩溃消息后会调用 runtime.exit 退出当前程序并返回错误码 2，程序的正常退出也是通过 runtime.exit 实现的。</p>
+<h3 id="recovery">recovery</h3>
+<p>当 reflectcall 执行完毕后，这时如果一个 panic 是可恢复的，p.recovered 已经被标记为 true， 从而会通过 mcall 的方式来执行 recovery 函数来重新进入调度循环：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 在发生 panic 后 defer 函数调用 recover 后展开栈。然后安排继续运行，
+</span><span class="c1">// 就像 defer 函数的调用方正常返回一样。
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">recovery</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">)</span> <span class="p">{</span>
+	<span class="c1">// 传递到 G 结构的 defer 信息
+</span><span class="c1"></span>	<span class="nx">sp</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">sigcode0</span>
+	<span class="nx">pc</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">sigcode1</span>
+	<span class="c1">// 使 deferproc 为此 d 返回
+</span><span class="c1"></span>	<span class="c1">// 这时候返回 1。调用函数将跳转到标准的返回尾声
+</span><span class="c1"></span>	<span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sp</span> <span class="p">=</span> <span class="nx">sp</span>
+	<span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">pc</span> <span class="p">=</span> <span class="nx">pc</span>
+	<span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lr</span> <span class="p">=</span> <span class="mi">0</span>
+	<span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">ret</span> <span class="p">=</span> <span class="mi">1</span>
+	<span class="nf">gogo</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>当我们在调用 defer 关键字时，调用时的栈指针 sp 和程序计数器 pc 就已经存储到了 <code>runtime._defer</code> 结构体中，这里的 <code>runtime.gogo</code> 函数会跳回 defer 关键字调用的位置。</p>
+<p><code>runtime.recovery</code> 在调度过程中会将函数的返回值设置成 1。从 <code>runtime.deferproc</code> 的注释中我们会发现，当 <code>runtime.deferproc</code> 函数的返回值是 1 时，编译器生成的代码会直接跳转到调用方函数返回之前并执行 <code>runtime.deferreturn</code>：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">deferproc</span><span class="p">(</span><span class="nx">siz</span> <span class="kt">int32</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">*</span><span class="nx">funcval</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="nf">return0</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>跳转到 runtime.deferreturn 函数之后，程序就已经从 panic 中恢复了并执行正常的逻辑，而 runtime.gorecover 函数也能从 runtime._panic 结构中取出了调用 panic 时传入的 arg 参数并返回给调用方。</p>
 <h2 id="gorecover">gorecover</h2>
 <p>到这里我们已经掌握了 panic 退出程序的过程，接下来将分析 defer 中的 recover 是如何中止程序崩溃的。编译器会将关键字 recover 转换成 <code>runtime.gorecover</code>：</p>
 <p>如果reflectcall调起的某个defer函数包含了 recover 的调用（即 gorecover 调用）被执行，这时 _panic 实例 p.recovered 会被标记为 true：</p>
@@ -1061,111 +1244,8 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>该函数的实现很简单，如果当前 Goroutine 没有调用 panic，那么该函数会直接返回 nil，这也是崩溃恢复在非 defer 中调用会失效的原因。在正常情况下，它会修改 runtime._panic 的 recovered 字段，runtime.gorecover 函数中并不包含恢复程序的逻辑，程序的恢复是由 runtime.gopanic 函数负责的：</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code><span class="lnt"> 1
-</span><span class="lnt"> 2
-</span><span class="lnt"> 3
-</span><span class="lnt"> 4
-</span><span class="lnt"> 5
-</span><span class="lnt"> 6
-</span><span class="lnt"> 7
-</span><span class="lnt"> 8
-</span><span class="lnt"> 9
-</span><span class="lnt">10
-</span><span class="lnt">11
-</span><span class="lnt">12
-</span><span class="lnt">13
-</span><span class="lnt">14
-</span><span class="lnt">15
-</span><span class="lnt">16
-</span><span class="lnt">17
-</span><span class="lnt">18
-</span><span class="lnt">19
-</span><span class="lnt">20
-</span><span class="lnt">21
-</span><span class="lnt">22
-</span><span class="lnt">23
-</span><span class="lnt">24
-</span><span class="lnt">25
-</span><span class="lnt">26
-</span><span class="lnt">27
-</span></code></pre></td>
-<td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gopanic</span><span class="p">(</span><span class="nx">e</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
-	<span class="o">...</span>
-
-	<span class="k">for</span> <span class="p">{</span>
-		<span class="c1">// 执行延迟调用函数，可能会设置 p.recovered = true
-</span><span class="c1"></span>		<span class="o">...</span>
-
-		<span class="nx">pc</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nx">pc</span>
-		<span class="nx">sp</span> <span class="o">:=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">sp</span><span class="p">)</span>
-
-		<span class="o">...</span>
-		<span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">recovered</span> <span class="p">{</span>
-			<span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">link</span>
-			<span class="k">for</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">.</span><span class="nx">aborted</span> <span class="p">{</span>
-				<span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span> <span class="p">=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">.</span><span class="nx">link</span>
-			<span class="p">}</span>
-			<span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
-				<span class="nx">gp</span><span class="p">.</span><span class="nx">sig</span> <span class="p">=</span> <span class="mi">0</span>
-			<span class="p">}</span>
-			<span class="nx">gp</span><span class="p">.</span><span class="nx">sigcode0</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">sp</span><span class="p">)</span>
-			<span class="nx">gp</span><span class="p">.</span><span class="nx">sigcode1</span> <span class="p">=</span> <span class="nx">pc</span>
-			<span class="nf">mcall</span><span class="p">(</span><span class="nx">recovery</span><span class="p">)</span>
-			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;recovery failed&#34;</span><span class="p">)</span>
-		<span class="p">}</span>
-	<span class="p">}</span>
-	<span class="o">...</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>上述这段代码也省略了 defer 的内联优化，它从 runtime._defer 中取出了程序计数器 pc 和栈指针 sp 并调用 runtime.recovery 函数触发 Goroutine 的调度，调度之前会准备好 sp、pc 以及函数的返回值：</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code><span class="lnt"> 1
-</span><span class="lnt"> 2
-</span><span class="lnt"> 3
-</span><span class="lnt"> 4
-</span><span class="lnt"> 5
-</span><span class="lnt"> 6
-</span><span class="lnt"> 7
-</span><span class="lnt"> 8
-</span><span class="lnt"> 9
-</span><span class="lnt">10
-</span></code></pre></td>
-<td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">recovery</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">sp</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">sigcode0</span>
-	<span class="nx">pc</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">sigcode1</span>
-
-	<span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sp</span> <span class="p">=</span> <span class="nx">sp</span>
-	<span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">pc</span> <span class="p">=</span> <span class="nx">pc</span>
-	<span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lr</span> <span class="p">=</span> <span class="mi">0</span>
-	<span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">ret</span> <span class="p">=</span> <span class="mi">1</span>
-	<span class="nf">gogo</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">)</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>当我们在调用 defer 关键字时，调用时的栈指针 sp 和程序计数器 pc 就已经存储到了 <code>runtime._defer</code> 结构体中，这里的 <code>runtime.gogo</code> 函数会跳回 defer 关键字调用的位置。</p>
-<p><code>runtime.recovery</code> 在调度过程中会将函数的返回值设置成 1。从 <code>runtime.deferproc</code> 的注释中我们会发现，当 <code>runtime.deferproc</code> 函数的返回值是 1 时，编译器生成的代码会直接跳转到调用方函数返回之前并执行 <code>runtime.deferreturn</code>：</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code><span class="lnt">1
-</span><span class="lnt">2
-</span><span class="lnt">3
-</span><span class="lnt">4
-</span></code></pre></td>
-<td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">deferproc</span><span class="p">(</span><span class="nx">siz</span> <span class="kt">int32</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">*</span><span class="nx">funcval</span><span class="p">)</span> <span class="p">{</span>
-	<span class="o">...</span>
-	<span class="nf">return0</span><span class="p">()</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>跳转到 runtime.deferreturn 函数之后，程序就已经从 panic 中恢复了并执行正常的逻辑，而 runtime.gorecover 函数也能从 runtime._panic 结构中取出了调用 panic 时传入的 arg 参数并返回给调用方。</p>
+</div><p>同时 recover() 这个函数还会返回 panic 的保存相关信息 p.arg。 恢复的原则取决于 gorecover 这个方法调用方报告的 argp 是否与 p.argp 相同，仅当相同才可恢复。</p>
+<p>该函数的实现很简单，如果当前 Goroutine 没有调用 panic，那么该函数会直接返回 nil，这也是崩溃恢复在非 defer 中调用会失效的原因。在正常情况下，它会修改 runtime._panic 的 recovered 字段，runtime.gorecover 函数中并不包含恢复程序的逻辑，程序的恢复是由 runtime.gopanic 函数负责的</p>
 <h2 id="小结">小结</h2>
 <p>分析程序的崩溃和恢复过程比较棘手，代码不是特别容易理解。我们在本节的最后还是简单总结一下程序崩溃和恢复的过程：</p>
 <ol>
@@ -1186,9 +1266,11 @@
 </li>
 <li>如果没有遇到 runtime.gorecover 就会依次遍历所有的 runtime._defer，并在最后调用 runtime.fatalpanic 中止程序、打印 panic 的参数并返回错误码 2；</li>
 </ol>
-<p>分析的过程涉及了很多语言底层的知识，源代码阅读起来也比较晦涩，其中充斥着反常规的控制流程，通过程序计数器来回跳转，不过对于我们理解程序的执行流程还是很有帮助。</p>
+<p>从 panic 和 recover 这对关键字的实现上可以看出，可恢复的 panic 必须要 recover 的配合。 而且，这个 recover 必须位于同一 goroutine 的直接调用链上（例如，如果 A 依次调用了 B 和 C，而 B 包含了 recover，而 C 发生了 panic，则这时 B 的 panic 无法恢复 C 的 panic； 又例如 A 调用了 B 而 B 又调用了 C，那么 C 发生 panic 时，如果 A 要求了 recover 则仍然可以恢复）， 否则无法对 panic 进行恢复。</p>
+<p>当一个 panic 被恢复后，调度并因此中断，会重新进入调度循环，进而继续执行 recover 后面的代码， 包括比 recover 更早的 defer（因为已经执行过得 defer 已经被释放， 而尚未执行的 defer 仍在 goroutine 的 defer 链表中），或者 recover 所在函数的调用方。</p>
 <h2 id="参考">参考</h2>
 <p><a href="https://draveness.me/golang/docs/part2-foundation/ch05-keyword/golang-panic-recover/">5.4 panic 和 recover</a></p>
+<p><a href="https://golang.design/under-the-hood/zh-cn/part2runtime/ch09lang/panic/">9.3 恐慌与恢复内建函数</a></p>
 
     </div>
 
