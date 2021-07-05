@@ -25,7 +25,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.84.1 with theme even" />
+<meta name="generator" content="Hugo 0.84.4 with theme even" />
 
 
 <link rel="canonical" href="/post/%E5%9F%BA%E6%9C%AC%E5%8E%9F%E8%AF%ADfor%E5%92%8Crange%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
@@ -47,13 +47,13 @@
 <meta property="og:description" content="汇编 循环是所有编程语言都有的控制结构，除了使用经典的三段式循环之外，Go 语言还引入了另一个关键字 range 帮助我们快速遍历数组、切片、哈希表以及 Channel 等" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/%E5%9F%BA%E6%9C%AC%E5%8E%9F%E8%AF%ADfor%E5%92%8Crange%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
-<meta property="article:published_time" content="2021-06-14T22:03:44&#43;00:00" />
-<meta property="article:modified_time" content="2021-06-14T22:03:44&#43;00:00" />
+<meta property="article:published_time" content="2021-06-14T22:03:44+00:00" />
+<meta property="article:modified_time" content="2021-06-14T22:03:44+00:00" />
 
 <meta itemprop="name" content="基本原语for和range源码剖析">
-<meta itemprop="description" content="汇编 循环是所有编程语言都有的控制结构，除了使用经典的三段式循环之外，Go 语言还引入了另一个关键字 range 帮助我们快速遍历数组、切片、哈希表以及 Channel 等"><meta itemprop="datePublished" content="2021-06-14T22:03:44&#43;00:00" />
-<meta itemprop="dateModified" content="2021-06-14T22:03:44&#43;00:00" />
-<meta itemprop="wordCount" content="5335">
+<meta itemprop="description" content="汇编 循环是所有编程语言都有的控制结构，除了使用经典的三段式循环之外，Go 语言还引入了另一个关键字 range 帮助我们快速遍历数组、切片、哈希表以及 Channel 等"><meta itemprop="datePublished" content="2021-06-14T22:03:44+00:00" />
+<meta itemprop="dateModified" content="2021-06-14T22:03:44+00:00" />
+<meta itemprop="wordCount" content="5942">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="基本原语for和range源码剖析"/>
 <meta name="twitter:description" content="汇编 循环是所有编程语言都有的控制结构，除了使用经典的三段式循环之外，Go 语言还引入了另一个关键字 range 帮助我们快速遍历数组、切片、哈希表以及 Channel 等"/>
@@ -164,8 +164,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 5335 字 </span>
-          <span class="more-meta"> 预计阅读 11 分钟 </span>
+          <span class="more-meta"> 约 5942 字 </span>
+          <span class="more-meta"> 预计阅读 12 分钟 </span>
         
       </div>
     </header>
@@ -561,6 +561,7 @@
 <p>与简单的经典循环相比，范围循环在 Go 语言中更常见、实现也更复杂。这种循环同时使用 for 和 range 两个关键字，编译器会在编译期间将所有 for-range 循环变成经典循环。从编译器的视角来看，就是将 ORANGE 类型的节点转换成 OFOR 节点:</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210614222932.png" alt=""></p>
 <p>节点类型的转换过程都发生在中间代码生成阶段，所有的 for-range 循环都会被 <code>cmd/compile/internal/gc.walkrange</code> 转换成不包含复杂结构、只包含基本表达式的语句。接下来，我们按照循环遍历的元素类型依次介绍遍历数组和切片、哈希表、字符串以及管道时的过程。</p>
+<p>for-range其实是语法糖，内部调用还是for循环，初始化会拷贝带遍历的列表（如array，slice，map），然后每次遍历的v都是对同一个元素的遍历赋值。</p>
 <h3 id="数组和切片">数组和切片</h3>
 <p>对于数组和切片来说，Go 语言有三种不同的遍历方式，这三种不同的遍历方式分别对应着代码中的不同条件，它们会在 <code>cmd/compile/internal/gc.walkrange</code> 函数中转换成不同的控制逻辑，我们会分成几种情况分析该函数的逻辑：</p>
 <ol>
@@ -1000,8 +1001,115 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>在前面的字符串一节中我们曾经介绍过字符串是一个只读的字节数组切片，所以范围循环在编译期间生成的框架与切片非常类似，只是细节有一些不同。</p>
-<p>使用下标访问字符串中的元素时得到的就是字节，但是这段代码会将当前的字节转换成 rune 类型。如果当前的 rune 是 ASCII 的，那么只会占用一个字节长度，每次循环体运行之后只需要将索引加一，但是如果当前 rune 占用了多个字节就会使用 runtime.decoderune 函数解码，具体的过程就不在这里详细介绍了。</p>
-<h3 id="通道">通道</h3>
+<p>首先仍然和遍历数组和切片一样，会对原对象进行一次拷贝，接下来开始使用传统三段式遍历方式进行遍历，接下来其把当前遍历到的字节（字符串底层类似为byte数组）转换为rune类型，然后判断该rune类型是否为utf8码点，如果判断为true，则代表当前的rune是一个ASCII字符，此时索引仅+1即可，如果为false，需要将其转换为对应长度的rune字符并且对应索引也会随之增加，随后，赋值给v1,v1即for k, v := range str 的k和v。至此，字符串的遍历也讲完了，主要就是针对utf8码点进行了索引递增，每个中文字符占用3个byte长度。</p>
+<p>decoderune函数的功能就是返回 <code>s[k:]</code>开头的非 ASCII 符文和 s 中符文后的索引。其中，s为传入的字符串，k为索引</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// decoderune returns the non-ASCII rune at the start of
+</span><span class="c1">// s[k:] and the index after the rune in s.
+</span><span class="c1">//
+</span><span class="c1">// decoderune assumes that caller has checked that
+</span><span class="c1">// the to be decoded rune is a non-ASCII rune.
+</span><span class="c1">//
+</span><span class="c1">// If the string appears to be incomplete or decoding problems
+</span><span class="c1">// are encountered (runeerror, k + 1) is returned to ensure
+</span><span class="c1">// progress when decoderune is used to iterate over a string.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">decoderune</span><span class="p">(</span><span class="nx">s</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">k</span> <span class="kt">int</span><span class="p">)</span> <span class="p">(</span><span class="nx">r</span> <span class="kt">rune</span><span class="p">,</span> <span class="nx">pos</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">pos</span> <span class="p">=</span> <span class="nx">k</span>
+
+	<span class="k">if</span> <span class="nx">k</span> <span class="o">&gt;=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">runeError</span><span class="p">,</span> <span class="nx">k</span> <span class="o">+</span> <span class="mi">1</span>
+	<span class="p">}</span>
+
+	<span class="nx">s</span> <span class="p">=</span> <span class="nx">s</span><span class="p">[</span><span class="nx">k</span><span class="p">:]</span>
+
+	<span class="k">switch</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="nx">t2</span> <span class="o">&lt;=</span> <span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&amp;&amp;</span> <span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="p">&lt;</span> <span class="nx">t3</span><span class="p">:</span>
+		<span class="c1">// 0080-07FF two byte sequence
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">1</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="nx">locb</span> <span class="o">&lt;=</span> <span class="nx">s</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&amp;&amp;</span> <span class="nx">s</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="nx">hicb</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">r</span> <span class="p">=</span> <span class="nb">rune</span><span class="p">(</span><span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">&amp;</span><span class="nx">mask2</span><span class="p">)</span><span class="o">&lt;&lt;</span><span class="mi">6</span> <span class="p">|</span> <span class="nb">rune</span><span class="p">(</span><span class="nx">s</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">&amp;</span><span class="nx">maskx</span><span class="p">)</span>
+			<span class="nx">pos</span> <span class="o">+=</span> <span class="mi">2</span>
+			<span class="k">if</span> <span class="nx">rune1Max</span> <span class="p">&lt;</span> <span class="nx">r</span> <span class="p">{</span>
+				<span class="k">return</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="k">case</span> <span class="nx">t3</span> <span class="o">&lt;=</span> <span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&amp;&amp;</span> <span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="p">&lt;</span> <span class="nx">t4</span><span class="p">:</span>
+		<span class="c1">// 0800-FFFF three byte sequence
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">2</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="nx">locb</span> <span class="o">&lt;=</span> <span class="nx">s</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&amp;&amp;</span> <span class="nx">s</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="nx">hicb</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="nx">locb</span> <span class="o">&lt;=</span> <span class="nx">s</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">&amp;&amp;</span> <span class="nx">s</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="nx">hicb</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">r</span> <span class="p">=</span> <span class="nb">rune</span><span class="p">(</span><span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">&amp;</span><span class="nx">mask3</span><span class="p">)</span><span class="o">&lt;&lt;</span><span class="mi">12</span> <span class="p">|</span> <span class="nb">rune</span><span class="p">(</span><span class="nx">s</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">&amp;</span><span class="nx">maskx</span><span class="p">)</span><span class="o">&lt;&lt;</span><span class="mi">6</span> <span class="p">|</span> <span class="nb">rune</span><span class="p">(</span><span class="nx">s</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">&amp;</span><span class="nx">maskx</span><span class="p">)</span>
+			<span class="nx">pos</span> <span class="o">+=</span> <span class="mi">3</span>
+			<span class="k">if</span> <span class="nx">rune2Max</span> <span class="p">&lt;</span> <span class="nx">r</span> <span class="o">&amp;&amp;</span> <span class="p">!(</span><span class="nx">surrogateMin</span> <span class="o">&lt;=</span> <span class="nx">r</span> <span class="o">&amp;&amp;</span> <span class="nx">r</span> <span class="o">&lt;=</span> <span class="nx">surrogateMax</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">return</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="k">case</span> <span class="nx">t4</span> <span class="o">&lt;=</span> <span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&amp;&amp;</span> <span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="p">&lt;</span> <span class="nx">t5</span><span class="p">:</span>
+		<span class="c1">// 10000-1FFFFF four byte sequence
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">3</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="nx">locb</span> <span class="o">&lt;=</span> <span class="nx">s</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&amp;&amp;</span> <span class="nx">s</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="nx">hicb</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="nx">locb</span> <span class="o">&lt;=</span> <span class="nx">s</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">&amp;&amp;</span> <span class="nx">s</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="nx">hicb</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="nx">locb</span> <span class="o">&lt;=</span> <span class="nx">s</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">&amp;&amp;</span> <span class="nx">s</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="nx">hicb</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">r</span> <span class="p">=</span> <span class="nb">rune</span><span class="p">(</span><span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">&amp;</span><span class="nx">mask4</span><span class="p">)</span><span class="o">&lt;&lt;</span><span class="mi">18</span> <span class="p">|</span> <span class="nb">rune</span><span class="p">(</span><span class="nx">s</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">&amp;</span><span class="nx">maskx</span><span class="p">)</span><span class="o">&lt;&lt;</span><span class="mi">12</span> <span class="p">|</span> <span class="nb">rune</span><span class="p">(</span><span class="nx">s</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">&amp;</span><span class="nx">maskx</span><span class="p">)</span><span class="o">&lt;&lt;</span><span class="mi">6</span> <span class="p">|</span> <span class="nb">rune</span><span class="p">(</span><span class="nx">s</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span><span class="o">&amp;</span><span class="nx">maskx</span><span class="p">)</span>
+			<span class="nx">pos</span> <span class="o">+=</span> <span class="mi">4</span>
+			<span class="k">if</span> <span class="nx">rune3Max</span> <span class="p">&lt;</span> <span class="nx">r</span> <span class="o">&amp;&amp;</span> <span class="nx">r</span> <span class="o">&lt;=</span> <span class="nx">maxRune</span> <span class="p">{</span>
+				<span class="k">return</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span> <span class="nx">runeError</span><span class="p">,</span> <span class="nx">k</span> <span class="o">+</span> <span class="mi">1</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="通道">通道</h3>
 <p>使用 range 遍历 Channel 也是比较常见的做法，一个形如 for v := range ch {} 的语句最终会被转换成如下的格式：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
