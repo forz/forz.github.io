@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Go实现层级时间轮 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="引言 在软件系统中，“在一段时间后执行一个任务” 的需求比比皆是。比如： 客户端发起 HTTP 请求后，如果在指定时间内没有收到服务器的响应，则自动断开连接" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.84.4 with theme even" />
+
+
+<link rel="canonical" href="/post/go%E5%AE%9E%E7%8E%B0%E5%B1%82%E7%BA%A7%E6%97%B6%E9%97%B4%E8%BD%AE/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Go实现层级时间轮" />
+<meta property="og:description" content="引言 在软件系统中，“在一段时间后执行一个任务” 的需求比比皆是。比如： 客户端发起 HTTP 请求后，如果在指定时间内没有收到服务器的响应，则自动断开连接" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/go%E5%AE%9E%E7%8E%B0%E5%B1%82%E7%BA%A7%E6%97%B6%E9%97%B4%E8%BD%AE/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2019-10-23T17:21:10+00:00" />
+<meta property="article:modified_time" content="2019-10-23T17:21:10+00:00" />
+
+<meta itemprop="name" content="Go实现层级时间轮">
+<meta itemprop="description" content="引言 在软件系统中，“在一段时间后执行一个任务” 的需求比比皆是。比如： 客户端发起 HTTP 请求后，如果在指定时间内没有收到服务器的响应，则自动断开连接"><meta itemprop="datePublished" content="2019-10-23T17:21:10+00:00" />
+<meta itemprop="dateModified" content="2019-10-23T17:21:10+00:00" />
+<meta itemprop="wordCount" content="6872">
+<meta itemprop="keywords" content="Go,时间轮," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Go实现层级时间轮"/>
+<meta name="twitter:description" content="引言 在软件系统中，“在一段时间后执行一个任务” 的需求比比皆是。比如： 客户端发起 HTTP 请求后，如果在指定时间内没有收到服务器的响应，则自动断开连接"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Go实现层级时间轮</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2019-10-23 </span>
+        <div class="post-category">
+            <a href="/categories/go/"> Go </a>
+            </div>
+          <span class="more-meta"> 约 6872 字 </span>
+          <span class="more-meta"> 预计阅读 14 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#引言">引言</a></li>
+    <li><a href="#理论">理论</a>
+      <ul>
+        <li><a href="#简单时间轮">简单时间轮</a></li>
+        <li><a href="#层级时间轮">层级时间轮</a></li>
+        <li><a href="#kafka-的变体实现">Kafka 的变体实现</a></li>
+      </ul>
+    </li>
+    <li><a href="#源码分析">源码分析</a>
+      <ul>
+        <li><a href="#结构体">结构体</a></li>
+        <li><a href="#初始化时间轮">初始化时间轮</a></li>
+        <li><a href="#启动时间轮">启动时间轮</a></li>
+        <li><a href="#add-task">add task</a></li>
+      </ul>
+    </li>
+    <li><a href="#与标准库比较">与标准库比较</a></li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="引言">引言</h2>
+<p>在软件系统中，“在一段时间后执行一个任务” 的需求比比皆是。比如：</p>
+<ul>
+<li>客户端发起 HTTP 请求后，如果在指定时间内没有收到服务器的响应，则自动断开连接。</li>
+</ul>
+<p>为了实现上述功能，通常我们会使用定时器 Timer：</p>
+<ol>
+<li>客户端发起请求后，立即创建（启动）一个 Timer：到期间隔为 d，到期后执行 “断开连接” 的操作。</li>
+<li>如果到期间隔 d 以内收到了服务器的响应，客户端就删除（停止）这个 Timer。</li>
+<li>如果一直没有收到响应，则 Timer 最终会到期，然后执行 “断开连接” 的操作。</li>
+</ol>
+<p>论文 Hashed and Hierarchical Timing Wheels提出了一种用于实现 Timer 的高效数据结构：时间轮。采用时间轮实现的 Timer，创建和删除的时间复杂度为 O(1)。</p>
+<p>常见的时间轮实现有两种：</p>
+<ul>
+<li>简单时间轮（Simple Timing Wheel）—— 比如 Netty4 的 HashedWheelTimer。</li>
+<li>层级时间轮（Hierarchical Timing Wheels）—— 比如 Kafka 的 Purgatory。</li>
+</ul>
+<p>下面我们来看看简单时间轮、层级时间轮、Kafka 的层级时间轮变体的实现原理，以及 Golang 实现中的一些要点。</p>
+<h2 id="理论">理论</h2>
+<h3 id="简单时间轮">简单时间轮</h3>
+<p>一个 <strong>简单时间轮</strong> 就是一个循环列表，列表中的每一格包含一个定时任务列表（双向链表）。一个时间单位为 u、大小为 n 的简单时间轮，可以包含的定时任务的最大到期间隔为 n*u。</p>
+<p>以 u 为 1ms、n 为 3 的简单时间轮为例，可以包含的定时任务的最大到期间隔为 3ms。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191023174824.png" alt=""></p>
+<p>如上图所示，该简单时间轮的运行原理如下：</p>
+<ol>
+<li>初始时，假设当前时间（蓝色箭头）指向第 1 格（此时：到期间隔为 [0ms, 1ms) 的定时任务放第 1 格，[1ms, 2ms) 的放第 2 格，[2ms, 3ms) 的放第 3 格）。</li>
+<li>此时我们创建一个到期间隔为 1ms 的定时任务 task1，按规则该任务会被插入到第 2 格。</li>
+<li>随着时间的流逝，过了 1ms 后当前时间指向第 2 格，这一格包含的定时任务 task1 会被删除并执行。</li>
+<li>当前时间指向第 2 格（此时：到期间隔为 [0ms, 1ms) 的定时任务放第 2 格，[1ms, 2ms) 的放第 3 格，[2ms, 3ms) 的放第 1 格），我们继续创建一个到期间隔为 2ms 的定时任务 task2，按规则该任务被插入到第 1 格。</li>
+</ol>
+<p>简单时间轮的优点是实现简单，缺点是：</p>
+<ul>
+<li>一旦选定 n，就不能包含到期间隔超过 n*u 的定时任务。</li>
+<li>如果定时任务的到期时间跨度较大，就会选择较大的 n，在定时任务较少时会造成很大的空间浪费。</li>
+</ul>
+<p>有一些简单时间轮的变体实现，它们通过在定时任务中增加记录 round 轮次信息，可以有效弥补上述两个缺点。同样以上面 u 为 1ms、n 为 3 的简单时间轮为例，初始时间指向第 1 格；此时如果要创建到期时间为 4ms 的定时任务，可以在该任务中设置 round 为 1（4/3 取整），剩余到期时间用 4ms 减去 round*3ms 等于 1ms，因此放到第 2 格；等到当前时间指向第 2 格时，判断任务中的 round 大于 0，所以不会删除并执行该任务，而是对其 round 减一（于是 round 变为 0）；等到再过 3ms 后，当前时间再次指向第 2 格，判断任务中的 round 为 0，进而删除并执行该任务。</p>
+<p>然而，这些变体实现因为只使用了一个时间轮，所以仍然存在一个缺点：处理每一格的定时任务列表的时间复杂度是 O(n)，如果定时任务数量很大，分摊到每一格的定时任务列表就会很长，这样的处理性能显然是让人无法接受的。</p>
+<h3 id="层级时间轮">层级时间轮</h3>
+<p><strong>层级时间轮</strong> 通过使用多个时间轮，并且对每个时间轮采用不同的 u，可以有效地解决简单时间轮及其变体实现的问题。</p>
+<p>参考 Kafka 的 Purgatory中的层级时间轮实现：</p>
+<ul>
+<li>每一层时间轮的大小都固定为 n，第一层时间轮的时间单位为 u，那么第二层时间轮（我们称之为第一层时间轮的溢出时间轮 Overflow Wheel）的时间单位就为 n*u，以此类推。</li>
+<li>除了第一层时间轮是固定创建的，其他层的时间轮（均为溢出时间轮）都是按需创建的。</li>
+<li>原先插入到高层时间轮（溢出时间轮）的定时任务，随着时间的流逝，会被降级重新插入到低层时间轮中。</li>
+</ul>
+<p>以 u 为 1ms、n 为 3 的层级时间轮为例，第一层时间轮的时间单位为 1ms、大小为 3，第二层时间轮的时间单位为 3ms、大小为 3，以此类推。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191023174857.png" alt=""></p>
+<p>如上图所示，该层级时间轮的运行原理如下：</p>
+<ol>
+<li>初始时，只有第一层（Level 1）时间轮，假设当前时间（蓝色箭头）指向第 1 格（此时：到期间隔为 [0ms, 1ms) 的定时任务放第 1 格，[1ms, 2ms) 的放第 2 格，[2ms, 3ms) 的放第 3 格）。</li>
+<li>此时我们创建一个到期间隔为 2ms 的定时任务 task1，按规则该任务会被插入到第一层时间轮的第 3 格。</li>
+<li>同一时刻，我们再次创建一个到期间隔为 4ms 的定时任务 task2，因为到期间隔超过了第一层时间轮的间隔范围，所以会创建第二层（Level 2）时间轮；第二层时间轮中的当前时间（蓝色箭头）也指向第 1 格，按规则该任务会被插入到第二层时间轮的第 2 格。</li>
+<li>随着时间的流逝，过了 2ms 后，第一层时间轮中的当前时间指向第 3 格，这一格包含的任务 task1 会被删除并执行；此时，第二层时间轮的当前时间没有变化，依然指向第 1 格。</li>
+<li>随着时间的流逝，又过了 1ms 后，第一层时间轮中的当期时间指向第 1 格，这一格中没有任务；此时，第二层当前时间指向第 2 格，这一格包含的任务 task2 会被删除并重新插入时间轮，因为剩余到期时间为 1ms，所以 task2 会被插入到第一层时间轮的第 2 格。</li>
+<li>随着时间的流逝，又过了 1ms 后，第一层时间轮中的当前时间指向第 2 格，这一格包含的定时任务 task2 会被删除并执行；此时，第二层时间轮的当前时间没有变化，依然指向第 2 格。</li>
+</ol>
+<h3 id="kafka-的变体实现">Kafka 的变体实现</h3>
+<p>在具体实现层面 Kafka Timer 实现源码，Kafka 的层级时间轮与上面描述的原理有一些差别。</p>
+<h4 id="时间轮表示">时间轮表示</h4>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191023174920.png" alt=""></p>
+<p>如上图所示，在时间轮的表示上面：</p>
+<ul>
+<li>使用大小为 wheelSize 的数组来表示一层时间轮，其中每一格是一个 bucket，每个 bucket 的时间单位为 tick。</li>
+<li>这个时间轮数组并没有模拟循环列表的行为（如图左所示），而是模拟了哈希表的行为。</li>
+</ul>
+<p>我们用数组模拟时间轮（数组的每个元素是一个列表头，添加任务就是往列表头后面挂任务而已），数组的大小代表时间的格子数，添加过程中我们会通过 过期时间/时间轮格子代表时间 % 时间轮格子总数 算出的格子位置，然后通过挂链的方法添加到时间轮格子当中。</p>
+<p>在这个过程中我们需要注意的是任务首先需要判断当前时间轮是否放的下，判断放得下的标准就是时间轮当前时间 + 一圈时间轮时间是否大于任务过期时间，如果大于就代表放的下，如果小于就代表无法放置那么就需要往上一层时间轮放置。</p>
+<h4 id="时钟驱动方式">时钟驱动方式</h4>
+<p>常规的时间轮实现中，会在一个线程中每隔一个时间单位 tick 就醒来一次，并驱动时钟走向下一格，然后检查这一格中是否包含定时任务。如果时间单位 tick 很小（比如 Kafka 中 tick 为 1ms）并且（在最低层时间轮的）定时任务很少，那么这种驱动方式将会非常低效。</p>
+<p>Kafka 的层级时间轮实现中，利用了 Java 内置的 DelayQueue 结构，将每一层时间轮中所有 “包含有定时任务的 bucket” 都加入到同一个 DelayQueue 中，然后 <strong>等到有 bucket 到期后再驱动时钟往前走</strong>，并逐个处理该 bucket 中的定时任务。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191023174942.png" alt=""></p>
+<p>如上图所示：</p>
+<ol>
+<li>往层级时间轮中添加一个定时任务 task1 后，会将该任务所属的 bucket2 的到期时间设置为 task1 的到期时间 expiration（= 当前时间 currentTime + 定时任务到期间隔 duration），并将这个 bucket2 添加（Offer）到 DelayQueue 中。</li>
+<li>DelayQueue（内部有一个线程）会等待 “到期时间最早（earliest）的 bucket” 到期，图中等到的是排在队首的 bucket2，于是经由 poll 返回并删除这个 bucket2；随后，时间轮会将当前时间 currentTime 往前移动到 bucket2 的 expiration 所指向的时间（图中是 1ms 所在的位置）；最后，bucket2 中包含的 task1 会被删除并执行。</li>
+</ol>
+<p>上述 Kafka 层级时间轮的驱动方式是非常高效的。虽然 DelayQueue 中 offer（添加）和 poll（获取并删除）操作的时间复杂度为 O(log n)，但是相比定时任务的个数而言，bucket 的个数其实是非常小的（也就是 O(log n) 中的 n 很小），因此性能也是没有问题的。</p>
+<h2 id="源码分析">源码分析</h2>
+<p>因为我们这个Go语言版本的时间轮代码是仿照Kafka写的，所以在具体实现时间轮 TimingWheel 时还有一些小细节：</p>
+<ul>
+<li>时间轮的时间格中每个链表会有一个root节点用于简化边界条件。它是一个附加的链表节点，该节点作为第一个节点，它的值域中并不存储任何东西，只是为了操作的方便而引入的；</li>
+<li>除了第一层时间轮，其余高层时间轮的起始时间（startMs）都设置为创建此层时间轮时前面第一轮的 currentTime。每一层的 currentTime 都必须是 tickMs 的整数倍，如果不满足则会将 currentTime 修剪为 tickMs 的整数倍。修剪方法为：currentTime = startMs – (startMs % tickMs)；</li>
+<li>Kafka 中的定时器只需持有 TimingWheel 的第一层时间轮的引用，并不会直接持有其他高层的时间轮，但每一层时间轮都会有一个引用（overflowWheel）指向更高一层的应用；</li>
+<li>Kafka 中的定时器使用了 DelayQueue 来协助推进时间轮。在操作中会将每个使用到的时间格中每个链表都加入 DelayQueue，DelayQueue 会根据时间轮对应的过期时间 expiration 来排序，最短 expiration 的任务会被排在 DelayQueue 的队头，通过单独线程来获取 DelayQueue 中到期的任务；</li>
+</ul>
+<h3 id="结构体">结构体</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">TimingWheel</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="c1">// 时间跨度,单位是毫秒
+</span><span class="c1"></span>    <span class="nx">tick</span>      <span class="kt">int64</span> <span class="c1">// in milliseconds
+</span><span class="c1"></span>    <span class="c1">// 时间轮个数
+</span><span class="c1"></span>    <span class="nx">wheelSize</span> <span class="kt">int64</span>
+    <span class="c1">// 总跨度
+</span><span class="c1"></span>    <span class="nx">interval</span>    <span class="kt">int64</span> <span class="c1">// in milliseconds
+</span><span class="c1"></span>    <span class="c1">// 当前指针指向时间
+</span><span class="c1"></span>    <span class="nx">currentTime</span> <span class="kt">int64</span> <span class="c1">// in milliseconds
+</span><span class="c1"></span>    <span class="c1">// 时间格列表
+</span><span class="c1"></span>    <span class="nx">buckets</span>     <span class="p">[]</span><span class="o">*</span><span class="nx">bucket</span>
+    <span class="c1">// 延迟队列
+</span><span class="c1"></span>    <span class="nx">queue</span>       <span class="o">*</span><span class="nx">delayqueue</span><span class="p">.</span><span class="nx">DelayQueue</span>
+    <span class="c1">// 上级的时间轮引用
+</span><span class="c1"></span>    <span class="nx">overflowWheel</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// type: *TimingWheel
+</span><span class="c1"></span>
+    <span class="nx">exitC</span>     <span class="kd">chan</span> <span class="kd">struct</span><span class="p">{}</span>
+    <span class="nx">waitGroup</span> <span class="nx">waitGroupWrapper</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>tick、wheelSize、interval、currentTime都比较好理解，buckets字段代表的是时间格列表，queue是一个延迟队列，所有的任务都是通过延迟队列来进行触发，overflowWheel是上层时间轮的引用。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">bucket</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="c1">// 任务的过期时间
+</span><span class="c1"></span>    <span class="nx">expiration</span> <span class="kt">int64</span>
+
+    <span class="nx">mu</span>     <span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
+    <span class="c1">// 相同过期时间的任务队列
+</span><span class="c1"></span>    <span class="nx">timers</span> <span class="o">*</span><span class="nx">list</span><span class="p">.</span><span class="nx">List</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>bucket里面实际上封装的是时间格里面的任务队列，里面放入的是相同过期时间的任务，到期后会将队列timers拿出来进行处理。这里有个有意思的地方是由于会有多个线程并发的访问bucket，所以需要用到原子类来获取int64位的值，为了保证32位系统上面读取64位数据的一致性，需要进行64位对齐。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Timer</span> <span class="kd">struct</span> <span class="p">{</span>
+  <span class="c1">// 到期时间
+</span><span class="c1"></span>    <span class="nx">expiration</span> <span class="kt">int64</span> <span class="c1">// in milliseconds
+</span><span class="c1"></span>  <span class="c1">// 要被执行的具体任务
+</span><span class="c1"></span>    <span class="nx">task</span>       <span class="kd">func</span><span class="p">()</span>
+    <span class="c1">// Timer所在bucket的指针
+</span><span class="c1"></span>    <span class="nx">b</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// type: *bucket
+</span><span class="c1"></span>    <span class="c1">// bucket列表中对应的元素
+</span><span class="c1"></span>    <span class="nx">element</span> <span class="o">*</span><span class="nx">list</span><span class="p">.</span><span class="nx">Element</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Timer是时间轮的最小执行单元，是定时任务的封装，到期后会调用task来执行任务。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210707212004.png" alt=""></p>
+<h3 id="初始化时间轮">初始化时间轮</h3>
+<p>例如现在初始化一个tick是1s，wheelSize是10的时间轮：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">tw</span> <span class="o">:=</span> <span class="nx">timingwheel</span><span class="p">.</span><span class="nf">NewTimingWheel</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+    <span class="nx">tw</span><span class="p">.</span><span class="nf">Start</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">NewTimingWheel</span><span class="p">(</span><span class="nx">tick</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">,</span> <span class="nx">wheelSize</span> <span class="kt">int64</span><span class="p">)</span> <span class="o">*</span><span class="nx">TimingWheel</span> <span class="p">{</span>
+  <span class="c1">// 将传入的tick转化成毫秒
+</span><span class="c1"></span>    <span class="nx">tickMs</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">tick</span> <span class="o">/</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span><span class="p">)</span>
+  <span class="c1">// 如果小于零，那么panic
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">tickMs</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="s">&#34;tick must be greater than or equal to 1ms&#34;</span><span class="p">))</span>
+    <span class="p">}</span>
+    <span class="c1">// 设置开始时间
+</span><span class="c1"></span>    <span class="nx">startMs</span> <span class="o">:=</span> <span class="nf">timeToMs</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">().</span><span class="nf">UTC</span><span class="p">())</span>
+    <span class="c1">// 初始化TimingWheel
+</span><span class="c1"></span>    <span class="k">return</span> <span class="nf">newTimingWheel</span><span class="p">(</span>
+        <span class="nx">tickMs</span><span class="p">,</span>
+        <span class="nx">wheelSize</span><span class="p">,</span>
+        <span class="nx">startMs</span><span class="p">,</span>
+        <span class="nx">delayqueue</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="nx">wheelSize</span><span class="p">)),</span>
+    <span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">newTimingWheel</span><span class="p">(</span><span class="nx">tickMs</span> <span class="kt">int64</span><span class="p">,</span> <span class="nx">wheelSize</span> <span class="kt">int64</span><span class="p">,</span> <span class="nx">startMs</span> <span class="kt">int64</span><span class="p">,</span> <span class="nx">queue</span> <span class="o">*</span><span class="nx">delayqueue</span><span class="p">.</span><span class="nx">DelayQueue</span><span class="p">)</span> <span class="o">*</span><span class="nx">TimingWheel</span> <span class="p">{</span>
+  <span class="c1">// 初始化buckets的大小
+</span><span class="c1"></span>    <span class="nx">buckets</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="o">*</span><span class="nx">bucket</span><span class="p">,</span> <span class="nx">wheelSize</span><span class="p">)</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">buckets</span> <span class="p">{</span>
+        <span class="nx">buckets</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nf">newBucket</span><span class="p">()</span>
+    <span class="p">}</span>
+  <span class="c1">// 实例化TimingWheel
+</span><span class="c1"></span>    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">TimingWheel</span><span class="p">{</span>
+        <span class="nx">tick</span><span class="p">:</span>        <span class="nx">tickMs</span><span class="p">,</span>
+        <span class="nx">wheelSize</span><span class="p">:</span>   <span class="nx">wheelSize</span><span class="p">,</span>
+    <span class="c1">// currentTime必须是tickMs的倍数，所以这里使用truncate进行修剪
+</span><span class="c1"></span>        <span class="nx">currentTime</span><span class="p">:</span> <span class="nf">truncate</span><span class="p">(</span><span class="nx">startMs</span><span class="p">,</span> <span class="nx">tickMs</span><span class="p">),</span>
+        <span class="nx">interval</span><span class="p">:</span>    <span class="nx">tickMs</span> <span class="o">*</span> <span class="nx">wheelSize</span><span class="p">,</span>
+        <span class="nx">buckets</span><span class="p">:</span>     <span class="nx">buckets</span><span class="p">,</span>
+        <span class="nx">queue</span><span class="p">:</span>       <span class="nx">queue</span><span class="p">,</span>
+        <span class="nx">exitC</span><span class="p">:</span>       <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{}),</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>初始化十分简单，大家可以看看上面的代码注释即可。</p>
+<h3 id="启动时间轮">启动时间轮</h3>
+<p>下面我们看看start方法：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">tw</span> <span class="o">*</span><span class="nx">TimingWheel</span><span class="p">)</span> <span class="nf">Start</span><span class="p">()</span> <span class="p">{</span>
+    <span class="c1">// Poll会执行一个无限循环，将到期的元素放入到queue的C管道中
+</span><span class="c1"></span>    <span class="nx">tw</span><span class="p">.</span><span class="nx">waitGroup</span><span class="p">.</span><span class="nf">Wrap</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nx">tw</span><span class="p">.</span><span class="nx">queue</span><span class="p">.</span><span class="nf">Poll</span><span class="p">(</span><span class="nx">tw</span><span class="p">.</span><span class="nx">exitC</span><span class="p">,</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">int64</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="nf">timeToMs</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">().</span><span class="nf">UTC</span><span class="p">())</span>
+        <span class="p">})</span>
+    <span class="p">})</span>
+    <span class="c1">// 开启无限循环获取queue中C的数据
+</span><span class="c1"></span>    <span class="nx">tw</span><span class="p">.</span><span class="nx">waitGroup</span><span class="p">.</span><span class="nf">Wrap</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="p">{</span>
+            <span class="k">select</span> <span class="p">{</span>
+            <span class="c1">// 从队列里面出来的数据都是到期的bucket
+</span><span class="c1"></span>            <span class="k">case</span> <span class="nx">elem</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">tw</span><span class="p">.</span><span class="nx">queue</span><span class="p">.</span><span class="nx">C</span><span class="p">:</span>
+                <span class="nx">b</span> <span class="o">:=</span> <span class="nx">elem</span><span class="p">.(</span><span class="o">*</span><span class="nx">bucket</span><span class="p">)</span>
+                <span class="c1">// 时间轮会将当前时间 currentTime 往前移动到 bucket的到期时间
+</span><span class="c1"></span>                <span class="nx">tw</span><span class="p">.</span><span class="nf">advanceClock</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nf">Expiration</span><span class="p">())</span>
+                <span class="c1">// 取出bucket队列的数据，并调用addOrRun方法执行
+</span><span class="c1"></span>                <span class="nx">b</span><span class="p">.</span><span class="nf">Flush</span><span class="p">(</span><span class="nx">tw</span><span class="p">.</span><span class="nx">addOrRun</span><span class="p">)</span>
+            <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">tw</span><span class="p">.</span><span class="nx">exitC</span><span class="p">:</span>
+                <span class="k">return</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">})</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这里使用了util封装的一个Wrap方法，这个方法会起一个goroutines异步执行传入的函数.</p>
+<p>Start方法会启动两个goroutines。第一个goroutines用来调用延迟队列的queue的Poll方法，这个方法会一直循环获取队列里面的数据，然后将到期的数据放入到queue的C管道中；第二个goroutines会无限循环获取queue中C的数据，如果C中有数据表示已经到期，那么会先调用advanceClock方法将当前时间 currentTime 往前移动到 bucket的到期时间，然后再调用Flush方法取出bucket中的队列，并调用addOrRun方法执行。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">tw</span> <span class="o">*</span><span class="nx">TimingWheel</span><span class="p">)</span> <span class="nf">advanceClock</span><span class="p">(</span><span class="nx">expiration</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">currentTime</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">tw</span><span class="p">.</span><span class="nx">currentTime</span><span class="p">)</span>
+    <span class="c1">// 过期时间大于等于（当前时间+tick）
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">expiration</span> <span class="o">&gt;=</span> <span class="nx">currentTime</span><span class="o">+</span><span class="nx">tw</span><span class="p">.</span><span class="nx">tick</span> <span class="p">{</span>
+        <span class="c1">// 将currentTime设置为expiration，从而推进currentTime
+</span><span class="c1"></span>        <span class="nx">currentTime</span> <span class="p">=</span> <span class="nf">truncate</span><span class="p">(</span><span class="nx">expiration</span><span class="p">,</span> <span class="nx">tw</span><span class="p">.</span><span class="nx">tick</span><span class="p">)</span>
+        <span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">tw</span><span class="p">.</span><span class="nx">currentTime</span><span class="p">,</span> <span class="nx">currentTime</span><span class="p">)</span>
+
+        <span class="c1">// Try to advance the clock of the overflow wheel if present
+</span><span class="c1"></span>        <span class="c1">// 如果有上层时间轮，那么递归调用上层时间轮的引用
+</span><span class="c1"></span>        <span class="nx">overflowWheel</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">tw</span><span class="p">.</span><span class="nx">overflowWheel</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">overflowWheel</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="p">(</span><span class="o">*</span><span class="nx">TimingWheel</span><span class="p">)(</span><span class="nx">overflowWheel</span><span class="p">).</span><span class="nf">advanceClock</span><span class="p">(</span><span class="nx">currentTime</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>advanceClock方法会根据到期时间来从新设置currentTime，从而推进时间轮前进。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">bucket</span><span class="p">)</span> <span class="nf">Flush</span><span class="p">(</span><span class="nx">reinsert</span> <span class="kd">func</span><span class="p">(</span><span class="o">*</span><span class="nx">Timer</span><span class="p">))</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">ts</span> <span class="p">[]</span><span class="o">*</span><span class="nx">Timer</span>
+
+    <span class="nx">b</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="c1">// 循环获取bucket队列节点
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">e</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">timers</span><span class="p">.</span><span class="nf">Front</span><span class="p">();</span> <span class="nx">e</span> <span class="o">!=</span> <span class="kc">nil</span><span class="p">;</span> <span class="p">{</span>
+        <span class="nx">next</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">Next</span><span class="p">()</span>
+
+        <span class="nx">t</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nx">Value</span><span class="p">.(</span><span class="o">*</span><span class="nx">Timer</span><span class="p">)</span>
+        <span class="c1">// 将头节点移除bucket队列
+</span><span class="c1"></span>        <span class="nx">b</span><span class="p">.</span><span class="nf">remove</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span>
+        <span class="nx">ts</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">ts</span><span class="p">,</span> <span class="nx">t</span><span class="p">)</span>
+
+        <span class="nx">e</span> <span class="p">=</span> <span class="nx">next</span>
+    <span class="p">}</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+    <span class="nx">b</span><span class="p">.</span><span class="nf">SetExpiration</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="c1">// TODO: Improve the coordination with b.Add()
+</span><span class="c1"></span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">t</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">ts</span> <span class="p">{</span>
+        <span class="nf">reinsert</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Flush方法会根据bucket里面timers列表进行遍历插入到ts数组中，然后调用reinsert方法，这里是调用的addOrRun方法。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">tw</span> <span class="o">*</span><span class="nx">TimingWheel</span><span class="p">)</span> <span class="nf">addOrRun</span><span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">Timer</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// 如果已经过期，那么直接执行
+</span><span class="c1"></span>    <span class="k">if</span> <span class="p">!</span><span class="nx">tw</span><span class="p">.</span><span class="nf">add</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c1">// 异步执行定时任务
+</span><span class="c1"></span>        <span class="k">go</span> <span class="nx">t</span><span class="p">.</span><span class="nf">task</span><span class="p">()</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>addOrRun会调用add方法检查传入的定时任务Timer是否已经到期，如果到期那么异步调用task方法直接执行。add方法我们下面会接着分析。</p>
+<p>整个start执行流程如图：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210707212238.png" alt=""></p>
+<ol>
+<li>start方法回启动一个goroutines调用poll来处理DelayQueue中到期的数据，并将数据放入到管道C中；</li>
+<li>start方法启动第二个goroutines方法会循环获取DelayQueue中管道C的数据，管道C中实际上存放的是一个bucket，然后遍历bucket的timers列表，如果任务已经到期，那么异步执行，没有到期则重新放入到DelayQueue中。</li>
+</ol>
+<h3 id="add-task">add task</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">tw</span> <span class="o">:=</span> <span class="nx">timingwheel</span><span class="p">.</span><span class="nf">NewTimingWheel</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+    <span class="nx">tw</span><span class="p">.</span><span class="nf">Start</span><span class="p">()</span>
+    <span class="c1">// 添加任务
+</span><span class="c1"></span>    <span class="nx">tw</span><span class="p">.</span><span class="nf">AfterFunc</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="o">*</span><span class="mi">15</span><span class="p">,</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;The timer fires&#34;</span><span class="p">)</span>
+        <span class="nx">exitC</span> <span class="o">&lt;-</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">().</span><span class="nf">UTC</span><span class="p">()</span>
+    <span class="p">})</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们通过AfterFunc方法添加一个15s的定时任务，如果到期了，那么执行传入的函数。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">tw</span> <span class="o">*</span><span class="nx">TimingWheel</span><span class="p">)</span> <span class="nf">AfterFunc</span><span class="p">(</span><span class="nx">d</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">,</span> <span class="nx">f</span> <span class="kd">func</span><span class="p">())</span> <span class="o">*</span><span class="nx">Timer</span> <span class="p">{</span>
+    <span class="nx">t</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Timer</span><span class="p">{</span>
+        <span class="nx">expiration</span><span class="p">:</span> <span class="nf">timeToMs</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">().</span><span class="nf">UTC</span><span class="p">().</span><span class="nf">Add</span><span class="p">(</span><span class="nx">d</span><span class="p">)),</span>
+        <span class="nx">task</span><span class="p">:</span>       <span class="nx">f</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="nx">tw</span><span class="p">.</span><span class="nf">addOrRun</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">t</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>AfterFunc方法回根据传入的任务到期时间，以及到期需要执行的函数封装成Timer，调用addOrRun方法。addOrRun方法我们上面已经看过了，会根据到期时间来决定是否需要执行定时任务。</p>
+<p>下面我们来看一下add方法：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">tw</span> <span class="o">*</span><span class="nx">TimingWheel</span><span class="p">)</span> <span class="nf">add</span><span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">Timer</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+    <span class="nx">currentTime</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">tw</span><span class="p">.</span><span class="nx">currentTime</span><span class="p">)</span>
+    <span class="c1">// 已经过期
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">t</span><span class="p">.</span><span class="nx">expiration</span> <span class="p">&lt;</span> <span class="nx">currentTime</span><span class="o">+</span><span class="nx">tw</span><span class="p">.</span><span class="nx">tick</span> <span class="p">{</span>
+        <span class="c1">// Already expired
+</span><span class="c1"></span>        <span class="k">return</span> <span class="kc">false</span>
+    <span class="c1">//  到期时间在第一层环内
+</span><span class="c1"></span>    <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">t</span><span class="p">.</span><span class="nx">expiration</span> <span class="p">&lt;</span> <span class="nx">currentTime</span><span class="o">+</span><span class="nx">tw</span><span class="p">.</span><span class="nx">interval</span> <span class="p">{</span>
+        <span class="c1">// Put it into its own bucket
+</span><span class="c1"></span>        <span class="c1">// 获取时间轮的位置
+</span><span class="c1"></span>        <span class="nx">virtualID</span> <span class="o">:=</span> <span class="nx">t</span><span class="p">.</span><span class="nx">expiration</span> <span class="o">/</span> <span class="nx">tw</span><span class="p">.</span><span class="nx">tick</span>
+        <span class="nx">b</span> <span class="o">:=</span> <span class="nx">tw</span><span class="p">.</span><span class="nx">buckets</span><span class="p">[</span><span class="nx">virtualID</span><span class="o">%</span><span class="nx">tw</span><span class="p">.</span><span class="nx">wheelSize</span><span class="p">]</span>
+        <span class="c1">// 将任务放入到bucket队列中
+</span><span class="c1"></span>        <span class="nx">b</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span>
+        <span class="c1">// 如果是相同的时间，那么返回false，防止被多次插入到队列中
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">b</span><span class="p">.</span><span class="nf">SetExpiration</span><span class="p">(</span><span class="nx">virtualID</span> <span class="o">*</span> <span class="nx">tw</span><span class="p">.</span><span class="nx">tick</span><span class="p">)</span> <span class="p">{</span>
+            <span class="c1">// 将该bucket加入到延迟队列中
+</span><span class="c1"></span>            <span class="nx">tw</span><span class="p">.</span><span class="nx">queue</span><span class="p">.</span><span class="nf">Offer</span><span class="p">(</span><span class="nx">b</span><span class="p">,</span> <span class="nx">b</span><span class="p">.</span><span class="nf">Expiration</span><span class="p">())</span>
+        <span class="p">}</span>
+
+        <span class="k">return</span> <span class="kc">true</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="c1">// Out of the interval. Put it into the overflow wheel
+</span><span class="c1"></span>        <span class="c1">// 如果放入的到期时间超过第一层时间轮，那么放到上一层中去
+</span><span class="c1"></span>        <span class="nx">overflowWheel</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">tw</span><span class="p">.</span><span class="nx">overflowWheel</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">overflowWheel</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapPointer</span><span class="p">(</span>
+                <span class="o">&amp;</span><span class="nx">tw</span><span class="p">.</span><span class="nx">overflowWheel</span><span class="p">,</span>
+                <span class="kc">nil</span><span class="p">,</span>
+                <span class="c1">// 需要注意的是，这里tick变成了interval
+</span><span class="c1"></span>                <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nf">newTimingWheel</span><span class="p">(</span>
+                    <span class="nx">tw</span><span class="p">.</span><span class="nx">interval</span><span class="p">,</span>
+                    <span class="nx">tw</span><span class="p">.</span><span class="nx">wheelSize</span><span class="p">,</span>
+                    <span class="nx">currentTime</span><span class="p">,</span>
+                    <span class="nx">tw</span><span class="p">.</span><span class="nx">queue</span><span class="p">,</span>
+                <span class="p">)),</span>
+            <span class="p">)</span>
+            <span class="nx">overflowWheel</span> <span class="p">=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">tw</span><span class="p">.</span><span class="nx">overflowWheel</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="c1">// 往上递归
+</span><span class="c1"></span>        <span class="k">return</span> <span class="p">(</span><span class="o">*</span><span class="nx">TimingWheel</span><span class="p">)(</span><span class="nx">overflowWheel</span><span class="p">).</span><span class="nf">add</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>add方法根据到期时间来分成了三部分，第一部分是小于当前时间+tick，表示已经到期，那么返回false执行任务即可；</p>
+<p>第二部分的判断会根据expiration是否小于时间轮的跨度，如果小于的话表示该定时任务可以放入到当前时间轮中，通过取模找到buckets对应的时间格并放入到bucket队列中，SetExpiration方法会根据传入的参数来判断是否已经执行过延迟队列的Offer方法，防止重复插入；</p>
+<p>第三部分表示该定时任务的时间跨度超过了当前时间轮，需要升级到上一层的时间轮中。需要注意的是，上一层的时间轮的tick是当前时间轮的interval，延迟队列还是同一个，然后设置为指针overflowWheel，并调用add方法往上层递归。</p>
+<p>到这里时间轮已经讲完了，不过还有需要注意的地方，我们在用上面的时间轮实现中，使用了DelayQueue加环形队列的方式实现了时间轮。对定时任务项的插入和删除操作而言，TimingWheel时间复杂度为 O(1)，在DelayQueue中的队列使用的是优先队列，时间复杂度是O(log n)，但是由于buckets列表实际上是非常小的，所以并不会影响性能。</p>
+<h2 id="与标准库比较">与标准库比较</h2>
+<p>自己就时间轮和 timer 也做了个 benchmark：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">goos</span><span class="o">:</span> <span class="n">darwin</span>
+<span class="n">goarch</span><span class="o">:</span> <span class="n">amd64</span>
+<span class="n">pkg</span><span class="o">:</span> <span class="n">gin</span><span class="o">-</span><span class="n">test</span><span class="o">/</span><span class="n">api</span><span class="o">/</span><span class="n">main</span>
+<span class="n">BenchmarkTimingWheel_StartStop</span><span class="o">/</span><span class="n">N</span><span class="m">-1</span><span class="n">m</span><span class="m">-12</span>   <span class="m">4582120</span>               <span class="m">254</span> <span class="n">ns</span><span class="o">/</span><span class="n">op</span>              <span class="m">85</span> <span class="n">B</span><span class="o">/</span><span class="n">op</span>          <span class="m">2</span> <span class="n">allocs</span><span class="o">/</span><span class="n">op</span>
+<span class="n">BenchmarkTimingWheel_StartStop</span><span class="o">/</span><span class="n">N</span><span class="m">-5</span><span class="n">m</span><span class="m">-12</span>   <span class="m">3356630</span>               <span class="m">427</span> <span class="n">ns</span><span class="o">/</span><span class="n">op</span>              <span class="m">46</span> <span class="n">B</span><span class="o">/</span><span class="n">op</span>          <span class="m">1</span> <span class="n">allocs</span><span class="o">/</span><span class="n">op</span>
+<span class="n">BenchmarkTimingWheel_StartStop</span><span class="o">/</span><span class="n">N</span><span class="m">-10</span><span class="n">m</span><span class="m">-12</span>                  <span class="m">2474842</span>               <span class="m">483</span> <span class="n">ns</span><span class="o">/</span><span class="n">op</span>              <span class="m">60</span> <span class="n">B</span><span class="o">/</span><span class="n">op</span>          <span class="m">1</span> <span class="n">allocs</span><span class="o">/</span><span class="n">op</span>
+<span class="n">BenchmarkStandardTimer_StartStop</span><span class="o">/</span><span class="n">N</span><span class="m">-1</span><span class="n">m</span><span class="m">-12</span>                 <span class="m">6777975</span>               <span class="m">179</span> <span class="n">ns</span><span class="o">/</span><span class="n">op</span>              <span class="m">84</span> <span class="n">B</span><span class="o">/</span><span class="n">op</span>          <span class="m">1</span> <span class="n">allocs</span><span class="o">/</span><span class="n">op</span>
+<span class="n">BenchmarkStandardTimer_StartStop</span><span class="o">/</span><span class="n">N</span><span class="m">-5</span><span class="n">m</span><span class="m">-12</span>                 <span class="m">6431217</span>               <span class="m">231</span> <span class="n">ns</span><span class="o">/</span><span class="n">op</span>              <span class="m">85</span> <span class="n">B</span><span class="o">/</span><span class="n">op</span>          <span class="m">1</span> <span class="n">allocs</span><span class="o">/</span><span class="n">op</span>
+<span class="n">BenchmarkStandardTimer_StartStop</span><span class="o">/</span><span class="n">N</span><span class="m">-10</span><span class="n">m</span><span class="m">-12</span>                <span class="m">5374492</span>               <span class="m">266</span> <span class="n">ns</span><span class="o">/</span><span class="n">op</span>              <span class="m">83</span> <span class="n">B</span><span class="o">/</span><span class="n">op</span>          <span class="m">1</span> <span class="n">allocs</span><span class="o">/</span><span class="n">op</span>
+<span class="n">PASS</span>
+<span class="n">ok</span>      <span class="n">gin</span><span class="o">-</span><span class="n">test</span><span class="o">/</span><span class="n">api</span><span class="o">/</span><span class="n">main</span>       <span class="m">60.414</span><span class="n">s</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>从上面可以直接看出，在添加了一千万个定时器后，时间轮的单次调用时间有明显的上涨，但是 timer 却依然很稳。</p>
+<p>从官方的一个数据显示：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">name</span>                      <span class="n">old</span> <span class="n">time</span><span class="o">/</span><span class="n">op</span>  <span class="n">new</span> <span class="n">time</span><span class="o">/</span><span class="n">op</span>  <span class="n">delta</span>
+<span class="n">AfterFunc</span><span class="m">-12</span>              <span class="m">1.57</span><span class="n">ms</span> ± <span class="m">1</span><span class="o">%  0.07ms ± 1%</span>  <span class="m">-95.42</span><span class="o">%  (p=0.000 n=10+8)
+</span><span class="o">After-12                  1.63ms ± 3%</span>  <span class="m">0.11</span><span class="n">ms</span> ± <span class="m">1</span><span class="o">%  -93.54%</span>  <span class="p">(</span><span class="n">p</span><span class="o">=</span><span class="m">0.000</span> <span class="n">n</span><span class="o">=</span><span class="m">9+10</span><span class="p">)</span>
+<span class="n">Stop</span><span class="m">-12</span>                   <span class="m">78.3</span>µ<span class="n">s</span> ± <span class="m">3</span><span class="o">%  73.6µs ± 3%</span>   <span class="m">-6.01</span><span class="o">%  (p=0.000 n=9+10)
+</span><span class="o">SimultaneousAfterFunc-12   138µs ± 1%</span>   <span class="m">111</span>µ<span class="n">s</span> ± <span class="m">1</span><span class="o">%  -19.57%</span>  <span class="p">(</span><span class="n">p</span><span class="o">=</span><span class="m">0.000</span> <span class="n">n</span><span class="o">=</span><span class="m">10+9</span><span class="p">)</span>
+<span class="n">StartStop</span><span class="m">-12</span>              <span class="m">28.7</span>µ<span class="n">s</span> ± <span class="m">1</span><span class="o">%  31.5µs ± 5%</span>   <span class="m">+9.64</span><span class="o">%  (p=0.000 n=10+7)
+</span><span class="o">Reset-12                  6.78µs ± 1%</span>  <span class="m">4.24</span>µ<span class="n">s</span> ± <span class="m">7</span><span class="o">%  -37.45%</span>  <span class="p">(</span><span class="n">p</span><span class="o">=</span><span class="m">0.000</span> <span class="n">n</span><span class="o">=</span><span class="m">9+10</span><span class="p">)</span>
+<span class="n">Sleep</span><span class="m">-12</span>                   <span class="m">183</span>µ<span class="n">s</span> ± <span class="m">1</span><span class="o">%   125µs ± 1%</span>  <span class="m">-31.67</span><span class="o">%  (p=0.000 n=10+9)
+</span><span class="o">Ticker-12                 5.40ms ± 2%</span>  <span class="m">0.03</span><span class="n">ms</span> ± <span class="m">1</span><span class="o">%  -99.43%</span>  <span class="p">(</span><span class="n">p</span><span class="o">=</span><span class="m">0.000</span> <span class="n">n</span><span class="o">=</span><span class="m">10+10</span><span class="p">)</span>
+<span class="kc">...</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在很多项测试中，性能确实得到了很大的增强。</p>
+<h2 id="参考">参考</h2>
+<p><a href="http://russellluo.com/2018/10/golang-implementation-of-hierarchical-timing-wheels.html">层级时间轮的 Golang 实现</a></p>
+<p><a href="https://www.jianshu.com/p/87240220097b">kafka时间轮解析</a></p>
+<p><a href="https://www.luozhiyun.com/archives/458">Go中定时器实现原理及源码解析</a></p>
+<p><a href="https://www.luozhiyun.com/archives/444">Go语言中时间轮的实现</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2019-10-23
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go/">Go</a>
+          <a href="/tags/%E6%97%B6%E9%97%B4%E8%BD%AE/">时间轮</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/container%E5%8C%85%E8%A7%A3%E6%9E%90-1-13/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">container包解析(1.13)</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/golang%E5%A6%82%E4%BD%95%E8%8E%B7%E5%8F%96mysql%E7%9A%84%E5%90%84%E7%B1%BB%E5%9E%8B%E6%95%B0%E6%8D%AE/">
+            <span class="next-text nav-default">Golang如何获取MySQL的各类型数据</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
