@@ -53,7 +53,7 @@
 <meta itemprop="name" content="并发原语Once源码剖析">
 <meta itemprop="description" content="Once 很多人认为实现一个 Once 一样的并发原语很简单,只需使用一个 flag 标记是否初始化过即可,最多是用 atomic 原子操作这个 flag,但是,这个实现有一个很大的问"><meta itemprop="datePublished" content="2021-05-21T14:36:14+00:00" />
 <meta itemprop="dateModified" content="2021-05-21T14:36:14+00:00" />
-<meta itemprop="wordCount" content="1417">
+<meta itemprop="wordCount" content="2897">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="并发原语Once源码剖析"/>
 <meta name="twitter:description" content="Once 很多人认为实现一个 Once 一样的并发原语很简单,只需使用一个 flag 标记是否初始化过即可,最多是用 atomic 原子操作这个 flag,但是,这个实现有一个很大的问"/>
@@ -164,8 +164,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 1417 字 </span>
-          <span class="more-meta"> 预计阅读 3 分钟 </span>
+          <span class="more-meta"> 约 2897 字 </span>
+          <span class="more-meta"> 预计阅读 6 分钟 </span>
         
       </div>
     </header>
@@ -355,7 +355,38 @@
 </span><span class="c1"></span><span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h2 id="参考">参考</h2>
+</div><p>有的同学不太理解为什么要使用Mutex。</p>
+<p>使用Mutex并不会影响这个数据结构的性能。因为Mutex的逻辑(也就是doSlow方法)只会在初始化时并发的情况下发生，一旦初始化完成，后续的goroutine在调用Do方法时并不会请求锁。</p>
+<p>所以，使用Mutex主要处理并发初始化的问题。</p>
+<p>假设Once对象的Do方法还没有被初次调用。这个时候有goroutine g2和goroutine g3同时调用Do方法。碰巧，g2和g3可能原子读取done变量会等于0,所以这两个goroutine可能都会同时进入doSlow方法(可能在同一个CPU上，也可能在不同的cpu上)。</p>
+<p>这个时候我们就需要Mutex限制只允许一个goroutine并发执行，也就是将并行变成了串行。假设g2运气好先执行，那么它就会进行初始化，并且执行完毕后把o.done设置为1,再释放锁。</p>
+<p>锁释放后，g3开始执行，这个时候还会执行double checking,再一次检查done字段。这一步是必须的，因为不双检查的话，它又会执行f一次。这里正确地使用了双检查，发现done已经被设置成了1,所以不需要初始化了，就直接返回。</p>
+<p>如果一个goroutine在双检查的时候如果发现done=0,说明还没有goroutine执行过初始化，这种重担压在了自己的身上，就像g2一样，它就会执行初始化函数f。</p>
+<p>所以，这里使用了Mutex,保护并发的初始化。</p>
+<p>我们知道，现代的CPU都是支持乱序执行的。那么最后两行<code>defer atomic.StoreUint32(&amp;o.done, 1)</code>和<code>f()</code>如果乱序了怎么办，那不也是还是没有初始化完毕就把done设置为1了吗？</p>
+<p>而且有些人，包括Russ Cox review这段代码的时候也提出，<code>defer atomic.StoreUint32(&amp;o.done, 1)</code> (源代码和此有所不同)能不能改成<code>o.done=1</code>。</p>
+<p>Go的标准库的代码质量是非常高的，而且都经过大神的仔细review,所以这样设计肯定是有它的用处的。</p>
+<p>首先，第15行的<code>defer atomic.StoreUint32(&amp;o.done, 1)</code>可以确保执行完第16行的f才将done设置为1。</p>
+<p>Ian Lance Taylor曾经在论坛中说:</p>
+<p>In C++ memory model terms I believe that the sync/atomic Load
+operations are memory_order_acquire, and I believe that the
+sync/atomic Store operations are memory_order_release. It&rsquo;s possible
+that if we ever document it we will go for stronger memory ordering,
+but I believe that these operations must at least carry those guarantees.</p>
+<p>I&rsquo;m somewhat less certain of the memory order guarantees of the Swap,
+CompareAndSwap, and Add functions. I guess that Swap and
+CompareAndSwap are probably at least memory_order_acq_rel, but Add may
+be memory_order_relaxed.</p>
+<p>Russ Cox曾经回答过问题,他把go的atomic 操作定位sequential consistency的，这是一个更严格的memory ordering。它们之前的读写操作,不会重排在Load/Store之后， 它们之后的读写操作也不会重排在Load/Store之前，所以建立了一个内存屏障(Memory barrier)。</p>
+<p>rsc
+2019年7月16日上午9:12:01</p>
+<p>Although there&rsquo;s been no official resolution to the issue, I think the actual path forward is what I posted a while back: &ldquo;Go&rsquo;s atomics guarantee sequential consistency among the atomic variables (behave like C/C++&rsquo;s seqconst atomics), and that you shouldn&rsquo;t mix atomic and non-atomic accesses for a given memory word.&rdquo;</p>
+<p>至少目前，我们可以按照他们的解答进行理解。</p>
+<p>这样的话，Go可以保证第15行<code>defer atomic.StoreUint32(&amp;o.done, 1)</code>肯定会在第16行f<code>()</code>之后执行，这样就不会出现未初始化完成就将done设置为1的问题。</p>
+<p>另一个问题，第14行为什么不使用atomic?</p>
+<p>因为Mutex的happend before关系， g2设置<code>o.done=1</code>之后才释放锁，这个时候g3才获取到锁，所以当g3获取到锁之后，<code>o.done</code>肯定就已经是1了，所以这个时候访问o.done肯定得到1的结果，不会在g2设置<code>o.done=1</code> g3看不到<code>o.done=1</code>这个write。</p>
+<p>第6行没有Mutex等的保护，所以通过atomic可以保证在o.done设置为1之后能看到这个设置的结果，避免总是落入到doSlow逻辑中。</p>
+<h2 id="参考">参考</h2>
 <p><a href="https://colobu.com/2017/07/11/dive-into-sync-Map">https://colobu.com/2017/07/11/dive-into-sync-Map</a></p>
 <p><a href="https://segmentfault.com/a/1190000015242373">https://segmentfault.com/a/1190000015242373</a></p>
 <p><a href="https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/">https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/</a></p>
@@ -369,6 +400,7 @@
 <p><a href="https://draveness.me/golang/docs/part3-runtime/ch06-concurrency/golang-context/">6.1 上下文 Context</a></p>
 <p><a href="https://juejin.cn/post/6844903741842259975">go context剖析之源码分析</a></p>
 <p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/atomic/">5.3 原子操作</a></p>
+<p><a href="https://colobu.com/2021/05/05/triple-gates-of-sync-Once/">Go sync.Once的三重门</a></p>
 
     </div>
 
