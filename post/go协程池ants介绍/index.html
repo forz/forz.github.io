@@ -53,7 +53,7 @@
 <meta itemprop="name" content="Go协程池ants介绍">
 <meta itemprop="description" content="简介 处理大量并发是 Go 语言的一大优势。语言内置了方便的并发语法，可以非常方便的创建很多个轻量级的 goroutine 并发处理任务。相比于创建多个线程，gorou"><meta itemprop="datePublished" content="2021-07-08T15:05:53+00:00" />
 <meta itemprop="dateModified" content="2021-07-08T15:05:53+00:00" />
-<meta itemprop="wordCount" content="4985">
+<meta itemprop="wordCount" content="13611">
 <meta itemprop="keywords" content="Go," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go协程池ants介绍"/>
 <meta name="twitter:description" content="简介 处理大量并发是 Go 语言的一大优势。语言内置了方便的并发语法，可以非常方便的创建很多个轻量级的 goroutine 并发处理任务。相比于创建多个线程，gorou"/>
@@ -164,8 +164,8 @@
         <div class="post-category">
             <a href="/categories/go/"> Go </a>
             </div>
-          <span class="more-meta"> 约 4985 字 </span>
-          <span class="more-meta"> 预计阅读 10 分钟 </span>
+          <span class="more-meta"> 约 13611 字 </span>
+          <span class="more-meta"> 预计阅读 28 分钟 </span>
         
       </div>
     </header>
@@ -178,6 +178,30 @@
     <li><a href="#简介">简介</a></li>
     <li><a href="#快速使用">快速使用</a></li>
     <li><a href="#函数作为任务">函数作为任务</a></li>
+    <li><a href="#执行流程">执行流程</a></li>
+    <li><a href="#选项">选项</a>
+      <ul>
+        <li><a href="#最大等待队列长度">最大等待队列长度</a></li>
+        <li><a href="#非阻塞">非阻塞</a></li>
+        <li><a href="#panic-处理器">panic 处理器</a></li>
+      </ul>
+    </li>
+    <li><a href="#默认池">默认池</a></li>
+    <li><a href="#源码剖析">源码剖析</a>
+      <ul>
+        <li><a href="#pool">Pool</a></li>
+        <li><a href="#再看pool创建">再看Pool创建</a></li>
+        <li><a href="#worker-结构">worker 结构</a></li>
+        <li><a href="#提交任务">提交任务</a></li>
+        <li><a href="#清理过期goworker">清理过期goWorker</a></li>
+        <li><a href="#容量动态修改">容量动态修改</a></li>
+        <li><a href="#关闭和重新启动pool">关闭和重新启动Pool</a></li>
+        <li><a href="#poolwithfunc和workwithfunc">PoolWithFunc和WorkWithFunc</a></li>
+        <li><a href="#其他细节">其他细节</a></li>
+      </ul>
+    </li>
+    <li><a href="#总结">总结</a></li>
+    <li><a href="#转载">转载</a></li>
   </ul>
 </nav>
   </div>
@@ -411,8 +435,7 @@
 <span class="n">finish</span> <span class="n">all</span> <span class="n">tasks</span><span class="p">,</span> <span class="n">result</span> <span class="n">is</span> <span class="m">5010172</span> <span class="n">expect</span><span class="o">:</span><span class="m">5010172</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>确实，任务完成之后，正在运行的 goroutine 数量变为 0。而且我们验证了，结果没有偏差。另外需要注意，goroutine 池中任务的执行顺序是随机的，与提交任务的先后没有关系。由上面运行打印的任务标识我们也能发现这一点。
-k8s-jiaoxuegongju-inner</p>
+</div><p>确实，任务完成之后，正在运行的 goroutine 数量变为 0。而且我们验证了，结果没有偏差。另外需要注意，goroutine 池中任务的执行顺序是随机的，与提交任务的先后没有关系。由上面运行打印的任务标识我们也能发现这一点。</p>
 <h2 id="函数作为任务">函数作为任务</h2>
 <p>ants支持将一个不接受任何参数的函数作为任务提交给 goroutine 运行。由于不接受参数，我们提交的函数要么不需要外部数据，只需要处理自身逻辑，否则就必须用某种方式将需要的数据传递进去，例如闭包。</p>
 <p>提交函数作为任务的 goroutine 池使用<code>ants.NewPool()</code>创建，它只接受一个参数表示池子的容量。调用池子对象的<code>Submit()</code>方法来提交任务，将一个不接受任何参数的函数传入。</p>
@@ -458,7 +481,7 @@ k8s-jiaoxuegongju-inner</p>
 <span class="k">defer</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Release</span><span class="p">()</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>生成模拟数据，切分任务。提交任务给ants池执行，这里使用<code>taskFuncWrapper()</code>包装函数生成具体的任务，然后调用p.Submit()提交：</p>
+</div><p>生成模拟数据，切分任务。提交任务给ants池执行，这里使用<code>taskFuncWrapper()</code>包装函数生成具体的任务，然后调用<code>p.Submit()</code>提交：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt"> 1
@@ -519,224 +542,1768 @@ k8s-jiaoxuegongju-inner</p>
 </code></pre></td></tr></table>
 </div>
 </div><p>这个程序的功能与最开始的完全相同。</p>
-<p>执行流程
-GitHub 仓库中有个执行流程图，我重新绘制了一下：</p>
-<p>图片
-执行流程如下：</p>
-<p>初始化 goroutine 池；
-提交任务给 goroutine 池，检查是否有空闲的 goroutine：
-已到上限，检查 goroutine 池是否是非阻塞的：
-未到上限，创建一个新的 goroutine 处理任务
-非阻塞，直接返回nil表示执行失败
-阻塞，等待 goroutine 空闲
-有，获取空闲 goroutine
-无，检查池中的 goroutine 数量是否已到池容量上限：
-任务处理完成，将 goroutine 交还给池，以待处理下一个任务
-选项
-ants提供了一些选项可以定制 goroutine 池的行为。选项使用Options结构定义：</p>
-<p>// src/github.com/panjf2000/ants/options.go
-type Options struct {
-ExpiryDuration time.Duration
-PreAlloc bool
-MaxBlockingTasks int
-Nonblocking bool
-PanicHandler func(interface{})
-Logger Logger
-}
-各个选项含义如下：</p>
-<p>ExpiryDuration：过期时间。表示 goroutine 空闲多长时间之后会被ants池回收
-PreAlloc：预分配。调用NewPool()/NewPoolWithFunc()之后预分配worker（管理一个工作 goroutine 的结构体）切片。而且使用预分配与否会直接影响池中管理worker的结构。见下面源码
-MaxBlockingTasks：最大阻塞任务数量。即池中 goroutine 数量已到池容量，且所有 goroutine 都处理繁忙状态，这时到来的任务会在阻塞列表等待。这个选项设置的是列表的最大长度。阻塞的任务数量达到这个值后，后续任务提交直接返回失败
-Nonblocking：池是否阻塞，默认阻塞。提交任务时，如果ants池中 goroutine 已到上限且全部繁忙，阻塞的池会将任务添加的阻塞列表等待（当然受限于阻塞列表长度，见上一个选项）。非阻塞的池直接返回失败
-PanicHandler：panic 处理。遇到 panic 会调用这里设置的处理函数
-Logger：指定日志记录器
-NewPool()部分源码：</p>
-<p>if p.options.PreAlloc {
-if size == -1 {
-return nil, ErrInvalidPreAllocSize
-}
-p.workers = newWorkerArray(loopQueueType, size)
-} else {
-p.workers = newWorkerArray(stackType, 0)
-}
-使用预分配时，创建loopQueueType类型的结构，反之创建stackType类型。这是ants定义的两种管理worker的数据结构。</p>
+<h2 id="执行流程">执行流程</h2>
+<p>GitHub 仓库中有个执行流程图，我重新绘制了一下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210715134151.png" alt=""></p>
+<p>执行流程如下：</p>
+<ul>
+<li>初始化 goroutine 池；</li>
+<li>提交任务给 goroutine 池，检查是否有空闲的 goroutine：</li>
+<li>已到上限，检查 goroutine 池是否是非阻塞的：</li>
+<li>未到上限，创建一个新的 goroutine 处理任务</li>
+<li>非阻塞，直接返回nil表示执行失败</li>
+<li>阻塞，等待 goroutine 空闲</li>
+<li>有，获取空闲 goroutine</li>
+<li>无，检查池中的 goroutine 数量是否已到池容量上限：</li>
+<li>任务处理完成，将 goroutine 交还给池，以待处理下一个任务</li>
+</ul>
+<h2 id="选项">选项</h2>
+<p>ants提供了一些选项可以定制 goroutine 池的行为。选项使用Options结构定义：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// src/github.com/panjf2000/ants/options.go
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Options</span> <span class="kd">struct</span> <span class="p">{</span>
+  <span class="nx">ExpiryDuration</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span>
+  <span class="nx">PreAlloc</span> <span class="kt">bool</span>
+  <span class="nx">MaxBlockingTasks</span> <span class="kt">int</span>
+  <span class="nx">Nonblocking</span> <span class="kt">bool</span>
+  <span class="nx">PanicHandler</span> <span class="kd">func</span><span class="p">(</span><span class="kd">interface</span><span class="p">{})</span>
+  <span class="nx">Logger</span> <span class="nx">Logger</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>各个选项含义如下：</p>
+<ul>
+<li>ExpiryDuration：过期时间。表示 goroutine 空闲多长时间之后会被ants池回收</li>
+<li>PreAlloc：预分配。调用<code>NewPool()/NewPoolWithFunc()</code>之后预分配worker（管理一个工作 goroutine 的结构体）切片。而且使用预分配与否会直接影响池中管理worker的结构。见下面源码</li>
+<li>MaxBlockingTasks：最大阻塞任务数量。即池中 goroutine 数量已到池容量，且所有 goroutine 都处理繁忙状态，这时到来的任务会在阻塞列表等待。这个选项设置的是列表的最大长度。阻塞的任务数量达到这个值后，后续任务提交直接返回失败</li>
+<li>Nonblocking：池是否阻塞，默认阻塞。提交任务时，如果ants池中 goroutine 已到上限且全部繁忙，阻塞的池会将任务添加的阻塞列表等待（当然受限于阻塞列表长度，见上一个选项）。非阻塞的池直接返回失败</li>
+<li>PanicHandler：panic 处理。遇到 panic 会调用这里设置的处理函数</li>
+<li>Logger：指定日志记录器</li>
+</ul>
+<p>NewPool()部分源码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">options</span><span class="p">.</span><span class="nx">PreAlloc</span> <span class="p">{</span>
+  <span class="k">if</span> <span class="nx">size</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">ErrInvalidPreAllocSize</span>
+  <span class="p">}</span>
+  <span class="nx">p</span><span class="p">.</span><span class="nx">workers</span> <span class="p">=</span> <span class="nf">newWorkerArray</span><span class="p">(</span><span class="nx">loopQueueType</span><span class="p">,</span> <span class="nx">size</span><span class="p">)</span>
+<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+  <span class="nx">p</span><span class="p">.</span><span class="nx">workers</span> <span class="p">=</span> <span class="nf">newWorkerArray</span><span class="p">(</span><span class="nx">stackType</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>使用预分配时，创建loopQueueType类型的结构，反之创建stackType类型。这是ants定义的两种管理worker的数据结构。</p>
 <p>ants定义了一些With*函数来设置这些选项：</p>
-<p>func WithOptions(options Options) Option {
-return func(opts *Options) {
-*opts = options
-}
-}</p>
-<p>func WithExpiryDuration(expiryDuration time.Duration) Option {
-return func(opts *Options) {
-opts.ExpiryDuration = expiryDuration
-}
-}</p>
-<p>func WithPreAlloc(preAlloc bool) Option {
-return func(opts *Options) {
-opts.PreAlloc = preAlloc
-}
-}</p>
-<p>func WithMaxBlockingTasks(maxBlockingTasks int) Option {
-return func(opts *Options) {
-opts.MaxBlockingTasks = maxBlockingTasks
-}
-}</p>
-<p>func WithNonblocking(nonblocking bool) Option {
-return func(opts *Options) {
-opts.Nonblocking = nonblocking
-}
-}</p>
-<p>func WithPanicHandler(panicHandler func(interface{})) Option {
-return func(opts *Options) {
-opts.PanicHandler = panicHandler
-}
-}</p>
-<p>func WithLogger(logger Logger) Option {
-return func(opts *Options) {
-opts.Logger = logger
-}
-}
-这里使用了 Go 语言中非常常见的一种模式，我称之为选项模式，非常方便地构造有大量参数，且大部分有默认值或一般不需要显式设置的对象。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">WithOptions</span><span class="p">(</span><span class="nx">options</span> <span class="nx">Options</span><span class="p">)</span> <span class="nx">Option</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="kd">func</span><span class="p">(</span><span class="nx">opts</span> <span class="o">*</span><span class="nx">Options</span><span class="p">)</span> <span class="p">{</span>
+    <span class="o">*</span><span class="nx">opts</span> <span class="p">=</span> <span class="nx">options</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">WithExpiryDuration</span><span class="p">(</span><span class="nx">expiryDuration</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">)</span> <span class="nx">Option</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="kd">func</span><span class="p">(</span><span class="nx">opts</span> <span class="o">*</span><span class="nx">Options</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">opts</span><span class="p">.</span><span class="nx">ExpiryDuration</span> <span class="p">=</span> <span class="nx">expiryDuration</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">WithPreAlloc</span><span class="p">(</span><span class="nx">preAlloc</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">Option</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="kd">func</span><span class="p">(</span><span class="nx">opts</span> <span class="o">*</span><span class="nx">Options</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">opts</span><span class="p">.</span><span class="nx">PreAlloc</span> <span class="p">=</span> <span class="nx">preAlloc</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">WithMaxBlockingTasks</span><span class="p">(</span><span class="nx">maxBlockingTasks</span> <span class="kt">int</span><span class="p">)</span> <span class="nx">Option</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="kd">func</span><span class="p">(</span><span class="nx">opts</span> <span class="o">*</span><span class="nx">Options</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">opts</span><span class="p">.</span><span class="nx">MaxBlockingTasks</span> <span class="p">=</span> <span class="nx">maxBlockingTasks</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">WithNonblocking</span><span class="p">(</span><span class="nx">nonblocking</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">Option</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="kd">func</span><span class="p">(</span><span class="nx">opts</span> <span class="o">*</span><span class="nx">Options</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">opts</span><span class="p">.</span><span class="nx">Nonblocking</span> <span class="p">=</span> <span class="nx">nonblocking</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">WithPanicHandler</span><span class="p">(</span><span class="nx">panicHandler</span> <span class="kd">func</span><span class="p">(</span><span class="kd">interface</span><span class="p">{}))</span> <span class="nx">Option</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="kd">func</span><span class="p">(</span><span class="nx">opts</span> <span class="o">*</span><span class="nx">Options</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">opts</span><span class="p">.</span><span class="nx">PanicHandler</span> <span class="p">=</span> <span class="nx">panicHandler</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">WithLogger</span><span class="p">(</span><span class="nx">logger</span> <span class="nx">Logger</span><span class="p">)</span> <span class="nx">Option</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="kd">func</span><span class="p">(</span><span class="nx">opts</span> <span class="o">*</span><span class="nx">Options</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">opts</span><span class="p">.</span><span class="nx">Logger</span> <span class="p">=</span> <span class="nx">logger</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这里使用了 Go 语言中非常常见的一种模式，我称之为选项模式，非常方便地构造有大量参数，且大部分有默认值或一般不需要显式设置的对象。</p>
 <p>我们来验证几个选项。</p>
-<p>最大等待队列长度
-ants池设置容量之后，如果所有的 goroutine 都在处理任务。这时提交的任务默认会进入等待队列，WithMaxBlockingTasks(maxBlockingTasks int)可以设置等待队列的最大长度。超过这个长度，提交任务直接返回错误：</p>
-<p>func wrapper(i int, wg <em>sync.WaitGroup) func() {
-return func() {
-fmt.Printf(&ldquo;hello from task:%d\n&rdquo;, i)
-time.Sleep(1</em> time.Second)
-wg.Done()
-}
-}</p>
-<p>func main() {
-p, _ := ants.NewPool(4, ants.WithMaxBlockingTasks(2))
-defer p.Release()</p>
-<p>var wg sync.WaitGroup
-wg.Add(8)
-for i := 1; i &lt;= 8; i++ {
-go func(i int) {
-err := p.Submit(wrapper(i, &amp;wg))
-if err != nil {
-fmt.Printf(&ldquo;task:%d err:%v\n&rdquo;, i, err)
-wg.Done()
-}
-}(i)
-}</p>
-<p>wg.Wait()
-}
-上面代码中，我们设置 goroutine 池的容量为 4，最大阻塞队列长度为 2。然后一个 for 提交 8 个任务，期望结果是：4 个任务在执行，2 个任务在等待，2 个任务提交失败。运行结果：</p>
-<p>hello from task:8
-hello from task:5
-hello from task:4
-hello from task:6
-task:7 err:too many goroutines blocked on submit or Nonblocking is set
-task:3 err:too many goroutines blocked on submit or Nonblocking is set
-hello from task:1
-hello from task:2
-我们看到提交任务失败，打印too many goroutines blocked &hellip;。</p>
+<h3 id="最大等待队列长度">最大等待队列长度</h3>
+<p>ants池设置容量之后，如果所有的 goroutine 都在处理任务。这时提交的任务默认会进入等待队列，<code>WithMaxBlockingTasks(maxBlockingTasks int)</code>可以设置等待队列的最大长度。超过这个长度，提交任务直接返回错误：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">wrapper</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">wg</span> <span class="o">*</span><span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">)</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;hello from task:%d\n&#34;</span><span class="p">,</span> <span class="nx">i</span><span class="p">)</span>
+<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="mi">1</span><span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+    <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">p</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">ants</span><span class="p">.</span><span class="nf">NewPool</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="nx">ants</span><span class="p">.</span><span class="nf">WithMaxBlockingTasks</span><span class="p">(</span><span class="mi">2</span><span class="p">))</span>
+  <span class="k">defer</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Release</span><span class="p">()</span>
+
+  <span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+  <span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span>
+  <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">1</span><span class="p">;</span> <span class="nx">i</span> <span class="o">&lt;=</span> <span class="mi">8</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+    <span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+      <span class="nx">err</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Submit</span><span class="p">(</span><span class="nf">wrapper</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">wg</span><span class="p">))</span>
+      <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;task:%d err:%v\n&#34;</span><span class="p">,</span> <span class="nx">i</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+        <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+      <span class="p">}</span>
+    <span class="p">}(</span><span class="nx">i</span><span class="p">)</span>
+  <span class="p">}</span>
+
+  <span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>上面代码中，我们设置 goroutine 池的容量为 4，最大阻塞队列长度为 2。然后一个 for 提交 8 个任务，期望结果是：4 个任务在执行，2 个任务在等待，2 个任务提交失败。运行结果：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">hello</span> <span class="n">from</span> <span class="n">task</span><span class="o">:</span><span class="m">8</span>
+<span class="n">hello</span> <span class="n">from</span> <span class="n">task</span><span class="o">:</span><span class="m">5</span>
+<span class="n">hello</span> <span class="n">from</span> <span class="n">task</span><span class="o">:</span><span class="m">4</span>
+<span class="n">hello</span> <span class="n">from</span> <span class="n">task</span><span class="o">:</span><span class="m">6</span>
+<span class="n">task</span><span class="o">:</span><span class="m">7</span> <span class="n">err</span><span class="o">:</span><span class="n">too</span> <span class="n">many</span> <span class="n">goroutines</span> <span class="n">blocked</span> <span class="n">on</span> <span class="n">submit</span> <span class="n">or</span> <span class="n">Nonblocking</span> <span class="n">is</span> <span class="n">set</span>
+<span class="n">task</span><span class="o">:</span><span class="m">3</span> <span class="n">err</span><span class="o">:</span><span class="n">too</span> <span class="n">many</span> <span class="n">goroutines</span> <span class="n">blocked</span> <span class="n">on</span> <span class="n">submit</span> <span class="n">or</span> <span class="n">Nonblocking</span> <span class="n">is</span> <span class="n">set</span>
+<span class="n">hello</span> <span class="n">from</span> <span class="n">task</span><span class="o">:</span><span class="m">1</span>
+<span class="n">hello</span> <span class="n">from</span> <span class="n">task</span><span class="o">:</span><span class="m">2</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们看到提交任务失败，打印too many goroutines blocked &hellip;。</p>
 <p>代码中有 4 点需要注意：</p>
-<p>提交任务必须并行进行。如果是串行提交，第 5 个任务提交时由于池中没有空闲的 goroutine 处理该任务，Submit()方法会被阻塞，后续任务就都不能提交了。也就达不到验证的目的了
-由于任务可能提交失败，失败的任务不会实际执行，所以实际上wg.Done()次数会小于 8。因而在err != nil分支中我们需要调用一次wg.Done()。否则wg.Wait()会永远阻塞
-为了避免任务执行过快，空出了 goroutine，观察不到现象，每个任务中我使用time.Sleep(1 * time.Second)休眠 1s
-由于 goroutine 之间的执行顺序未显式同步，故每次执行的顺序不确定
-由于简单起见，前面的例子中Submit()方法的返回值都被我们忽略了。实际开发中一定不要忽略。</p>
-<p>非阻塞
-ants池默认是阻塞的，我们可以使用WithNonblocking(nonblocking bool)设置其为非阻塞。非阻塞的ants池中，在所有 goroutine 都在处理任务时，提交新任务会直接返回错误：</p>
-<p>func main() {
-p, _ := ants.NewPool(2, ants.WithNonblocking(true))
-defer p.Release()</p>
-<p>var wg sync.WaitGroup
-wg.Add(3)
-for i := 1; i &lt;= 3; i++ {
-err := p.Submit(wrapper(i, &amp;wg))
-if err != nil {
-fmt.Printf(&ldquo;task:%d err:%v\n&rdquo;, i, err)
-wg.Done()
-}
-}</p>
-<p>wg.Wait()
-}
-使用上个例子中的wrapper()函数，ants池容量设置为 2。连续提交 3 个任务，期望结果前两个任务正常执行，第 3 个任务提交时返回错误：</p>
-<p>hello from task:2
-task:3 err:too many goroutines blocked on submit or Nonblocking is set
-hello from task:1
-panic 处理器
-一个鲁棒性强的库一定不会忽视错误的处理，特别是宕机相关的错误。在 Go 语言中就是 panic，也被称为运行时恐慌，在程序运行的过程中产生的严重性错误，例如索引越界，空指针解引用等，都会触发 panic。如果不处理 panic，程序会直接意外退出，可能造成数据丢失的严重后果。</p>
+<ul>
+<li>提交任务必须并行进行。如果是串行提交，第 5 个任务提交时由于池中没有空闲的 goroutine 处理该任务，Submit()方法会被阻塞，后续任务就都不能提交了。也就达不到验证的目的了</li>
+<li>由于任务可能提交失败，失败的任务不会实际执行，所以实际上wg.Done()次数会小于 8。因而在err != nil分支中我们需要调用一次<code>wg.Done()</code>。否则<code>wg.Wait()</code>会永远阻塞</li>
+<li>为了避免任务执行过快，空出了 goroutine，观察不到现象，每个任务中我使用time.Sleep(1 * time.Second)休眠 1s</li>
+<li>由于 goroutine 之间的执行顺序未显式同步，故每次执行的顺序不确定</li>
+</ul>
+<p>由于简单起见，前面的例子中<code>Submit()</code>方法的返回值都被我们忽略了。实际开发中一定不要忽略。</p>
+<h3 id="非阻塞">非阻塞</h3>
+<p>ants池默认是阻塞的，我们可以使用<code>WithNonblocking(nonblocking bool)</code>设置其为非阻塞。非阻塞的ants池中，在所有 goroutine 都在处理任务时，提交新任务会直接返回错误：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">p</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">ants</span><span class="p">.</span><span class="nf">NewPool</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="nx">ants</span><span class="p">.</span><span class="nf">WithNonblocking</span><span class="p">(</span><span class="kc">true</span><span class="p">))</span>
+  <span class="k">defer</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Release</span><span class="p">()</span>
+
+  <span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+  <span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
+  <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">1</span><span class="p">;</span> <span class="nx">i</span> <span class="o">&lt;=</span> <span class="mi">3</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+    <span class="nx">err</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Submit</span><span class="p">(</span><span class="nf">wrapper</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">wg</span><span class="p">))</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;task:%d err:%v\n&#34;</span><span class="p">,</span> <span class="nx">i</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+      <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+    <span class="p">}</span>
+  <span class="p">}</span>
+
+  <span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>使用上个例子中的wrapper()函数，ants池容量设置为 2。连续提交 3 个任务，期望结果前两个任务正常执行，第 3 个任务提交时返回错误：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">hello</span> <span class="n">from</span> <span class="n">task</span><span class="o">:</span><span class="m">2</span>
+<span class="n">task</span><span class="o">:</span><span class="m">3</span> <span class="n">err</span><span class="o">:</span><span class="n">too</span> <span class="n">many</span> <span class="n">goroutines</span> <span class="n">blocked</span> <span class="n">on</span> <span class="n">submit</span> <span class="n">or</span> <span class="n">Nonblocking</span> <span class="n">is</span> <span class="n">set</span>
+<span class="n">hello</span> <span class="n">from</span> <span class="n">task</span><span class="o">:</span><span class="m">1</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="panic-处理器">panic 处理器</h3>
+<p>一个鲁棒性强的库一定不会忽视错误的处理，特别是宕机相关的错误。在 Go 语言中就是 panic，也被称为运行时恐慌，在程序运行的过程中产生的严重性错误，例如索引越界，空指针解引用等，都会触发 panic。如果不处理 panic，程序会直接意外退出，可能造成数据丢失的严重后果。</p>
 <p>ants中如果 goroutine 在执行任务时发生panic，会终止当前任务的执行，将发生错误的堆栈输出到os.Stderr。注意，该 goroutine 还是会被放回池中，下次可以取出执行新的任务。</p>
-<p>func wrapper(i int, wg *sync.WaitGroup) func() {
-return func() {
-fmt.Printf(&ldquo;hello from task:%d\n&rdquo;, i)
-if i%2 == 0 {
-panic(fmt.Sprintf(&ldquo;panic from task:%d&rdquo;, i))
-}
-wg.Done()
-}
-}</p>
-<p>func main() {
-p, _ := ants.NewPool(2)
-defer p.Release()</p>
-<p>var wg sync.WaitGroup
-wg.Add(3)
-for i := 1; i &lt;= 2; i++ {
-p.Submit(wrapper(i, &amp;wg))
-}</p>
-<p>time.Sleep(1 * time.Second)
-p.Submit(wrapper(3, &amp;wg))
-p.Submit(wrapper(5, &amp;wg))
-wg.Wait()
-}
-我们让偶数个任务触发panic。提交两个任务，第二个任务一定会触发panic。触发panic之后，我们还可以继续提交任务 3、5。注意这里没有 4，提交任务 4 还是会触发panic。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">wrapper</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">wg</span> <span class="o">*</span><span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">)</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;hello from task:%d\n&#34;</span><span class="p">,</span> <span class="nx">i</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">i</span><span class="o">%</span><span class="mi">2</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+      <span class="nb">panic</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;panic from task:%d&#34;</span><span class="p">,</span> <span class="nx">i</span><span class="p">))</span>
+    <span class="p">}</span>
+    <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">p</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">ants</span><span class="p">.</span><span class="nf">NewPool</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+  <span class="k">defer</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Release</span><span class="p">()</span>
+
+  <span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+  <span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
+  <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">1</span><span class="p">;</span> <span class="nx">i</span> <span class="o">&lt;=</span> <span class="mi">2</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nf">Submit</span><span class="p">(</span><span class="nf">wrapper</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">wg</span><span class="p">))</span>
+  <span class="p">}</span>
+
+  <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="mi">1</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+  <span class="nx">p</span><span class="p">.</span><span class="nf">Submit</span><span class="p">(</span><span class="nf">wrapper</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">wg</span><span class="p">))</span>
+  <span class="nx">p</span><span class="p">.</span><span class="nf">Submit</span><span class="p">(</span><span class="nf">wrapper</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">wg</span><span class="p">))</span>
+  <span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们让偶数个任务触发panic。提交两个任务，第二个任务一定会触发panic。触发panic之后，我们还可以继续提交任务 3、5。注意这里没有 4，提交任务 4 还是会触发panic。</p>
 <p>上面的程序需要注意 2 点：</p>
-<p>任务函数中wg.Done()是在panic方法之后，如果触发了panic，函数中的其他正常逻辑就不会再继续执行了。所以我们虽然wg.Add(3)，但是一共提交了 4 个任务，其中一个任务触发了panic，wg.Done()没有正确执行。实际开发中，我们一般使用defer语句来确保wg.Done()一定会执行
-在 for 循环之后，我添加了一行代码time.Sleep(1 * time.Second)。如果没有这一行，后续的两条Submit()方法可以直接执行，可能会导致任务很快就完成了，wg.Wait()直接返回了，这时panic的堆栈还没有输出。你可以尝试注释掉这行代码运行看看结果
-除了ants提供的默认 panic 处理器，我们还可以使用WithPanicHandler(paincHandler func(interface{}))指定我们自己编写的 panic 处理器。处理器的参数就是传给panic的值：</p>
-<p>func panicHandler(err interface{}) {
-fmt.Fprintln(os.Stderr, err)
-}</p>
-<p>p, _ := ants.NewPool(2, ants.WithPanicHandler(panicHandler))
-defer p.Release()
-其余代码与上面的完全相同，指定了panicHandler后触发panic就会执行它。运行：</p>
-<p>hello from task:2
-panic from task:2
-hello from task:1
-hello from task:5
-hello from task:3
-看到输出了传给panic函数的字符串（第二行输出）。</p>
-<p>默认池
-为了方便使用，很多 Go 库都喜欢提供其核心功能类型的一个默认实现。可以直接通过库提供的接口调用。例如net/http，例如ants。ants库中定义了一个默认的池，默认容量为MaxInt32。goroutine 池的各个方法都可以直接通过ants包直接访问：</p>
-<p>// src/github.com/panjf2000/ants/ants.go
-defaultAntsPool, _ = NewPool(DefaultAntsPoolSize)</p>
-<p>func Submit(task func()) error {
-return defaultAntsPool.Submit(task)
-}</p>
-<p>func Running() int {
-return defaultAntsPool.Running()
-}</p>
-<p>func Cap() int {
-return defaultAntsPool.Cap()
-}</p>
-<p>func Free() int {
-return defaultAntsPool.Free()
-}</p>
-<p>func Release() {
-defaultAntsPool.Release()
-}</p>
-<p>func Reboot() {
-defaultAntsPool.Reboot()
-}
-直接使用：</p>
-<p>func main() {
-defer ants.Release()</p>
-<p>var wg sync.WaitGroup
-wg.Add(2)
-for i := 1; i &lt;= 2; i++ {
-ants.Submit(wrapper(i, &amp;wg))
-}
-wg.Wait()
-}
-默认池也需要Release()。</p>
-<p>总结
-本文介绍了 goroutine 池的由来，并借由ants库介绍了基本的使用方法，和一些细节。ants源码不多，去掉测试的核心代码只有 1k 行左右，建议有时间、感兴趣的童鞋深入阅读。</p>
-<p>大家如果发现好玩、好用的 Go 语言库，欢迎到 Go 每日一库 GitHub 上提交 issue😄</p>
+<ul>
+<li>任务函数中wg.Done()是在panic方法之后，如果触发了panic，函数中的其他正常逻辑就不会再继续执行了。所以我们虽然wg.Add(3)，但是一共提交了 4 个任务，其中一个任务触发了panic，wg.Done()没有正确执行。实际开发中，我们一般使用defer语句来确保wg.Done()一定会执行</li>
+<li>在 for 循环之后，我添加了一行代码time.Sleep(1 * time.Second)。如果没有这一行，后续的两条Submit()方法可以直接执行，可能会导致任务很快就完成了，wg.Wait()直接返回了，这时panic的堆栈还没有输出。你可以尝试注释掉这行代码运行看看结果</li>
+</ul>
+<p>除了ants提供的默认 panic 处理器，我们还可以使用<code>WithPanicHandler(paincHandler func(interface{}))</code>指定我们自己编写的 panic 处理器。处理器的参数就是传给panic的值：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">panicHandler</span><span class="p">(</span><span class="nx">err</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+  <span class="nx">fmt</span><span class="p">.</span><span class="nf">Fprintln</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="nx">p</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">ants</span><span class="p">.</span><span class="nf">NewPool</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="nx">ants</span><span class="p">.</span><span class="nf">WithPanicHandler</span><span class="p">(</span><span class="nx">panicHandler</span><span class="p">))</span>
+<span class="k">defer</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Release</span><span class="p">()</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>其余代码与上面的完全相同，指定了panicHandler后触发panic就会执行它。运行：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">hello</span> <span class="n">from</span> <span class="n">task</span><span class="o">:</span><span class="m">2</span>
+<span class="n">panic</span> <span class="n">from</span> <span class="n">task</span><span class="o">:</span><span class="m">2</span>
+<span class="n">hello</span> <span class="n">from</span> <span class="n">task</span><span class="o">:</span><span class="m">1</span>
+<span class="n">hello</span> <span class="n">from</span> <span class="n">task</span><span class="o">:</span><span class="m">5</span>
+<span class="n">hello</span> <span class="n">from</span> <span class="n">task</span><span class="o">:</span><span class="m">3</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>看到输出了传给panic函数的字符串（第二行输出）。</p>
+<h2 id="默认池">默认池</h2>
+<p>为了方便使用，很多 Go 库都喜欢提供其核心功能类型的一个默认实现。可以直接通过库提供的接口调用。例如net/http，例如ants。ants库中定义了一个默认的池，默认容量为MaxInt32。goroutine 池的各个方法都可以直接通过ants包直接访问：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// src/github.com/panjf2000/ants/ants.go
+</span><span class="c1"></span><span class="nx">defaultAntsPool</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nf">NewPool</span><span class="p">(</span><span class="nx">DefaultAntsPoolSize</span><span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">Submit</span><span class="p">(</span><span class="nx">task</span> <span class="kd">func</span><span class="p">())</span> <span class="kt">error</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="nx">defaultAntsPool</span><span class="p">.</span><span class="nf">Submit</span><span class="p">(</span><span class="nx">task</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">Running</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="nx">defaultAntsPool</span><span class="p">.</span><span class="nf">Running</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">Cap</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="nx">defaultAntsPool</span><span class="p">.</span><span class="nf">Cap</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">Free</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="nx">defaultAntsPool</span><span class="p">.</span><span class="nf">Free</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">Release</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">defaultAntsPool</span><span class="p">.</span><span class="nf">Release</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">Reboot</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">defaultAntsPool</span><span class="p">.</span><span class="nf">Reboot</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>直接使用：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+  <span class="k">defer</span> <span class="nx">ants</span><span class="p">.</span><span class="nf">Release</span><span class="p">()</span>
+
+  <span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+  <span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+  <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">1</span><span class="p">;</span> <span class="nx">i</span> <span class="o">&lt;=</span> <span class="mi">2</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+    <span class="nx">ants</span><span class="p">.</span><span class="nf">Submit</span><span class="p">(</span><span class="nf">wrapper</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">wg</span><span class="p">))</span>
+  <span class="p">}</span>
+  <span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>默认池也需要Release()。</p>
+<h2 id="源码剖析">源码剖析</h2>
+<h3 id="pool">Pool</h3>
+<p>通过上篇文章，我们知道ants池有两种创建方式：</p>
+<ul>
+<li><code>p, _:= ants.NewPool(cap)</code>：这种方式创建的池子对象需要调用<code>p.Submit(task)</code>提交任务，任务是一个无参数无返回值的函数；</li>
+<li><code>p,_ := ants.NewPoolWithFunc(cap, func(interface{}))</code>：这种方式创建的池子对象需要指定池函数，并且使用<code>p.Invoke(arg)</code>调用池函数。arg就是传给池函数<code>func(interface{})</code>的参数。</li>
+</ul>
+<p>在ants中这两种池子使用不同的结构来表示：<code>ants.Pool</code>和<code>ants.PoolWithFunc</code>。我们先来介绍<code>Pool。PoolWithFunc</code>结构也是类似的，介绍完Pool之后，我们再简单比较一下它们。</p>
+<p>Pool结构定义在文件pool.go中：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// src/github.com/panjf2000/ants/pool.go
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Pool</span> <span class="kd">struct</span> <span class="p">{</span>
+  <span class="nx">capacity</span> <span class="kt">int32</span>
+  <span class="nx">running</span> <span class="kt">int32</span>
+  <span class="nx">workers</span> <span class="nx">workerArray</span>
+  <span class="nx">state</span> <span class="kt">int32</span>
+  <span class="nx">lock</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Locker</span>
+  <span class="nx">cond</span> <span class="o">*</span><span class="nx">sync</span><span class="p">.</span><span class="nx">Cond</span>
+  <span class="nx">workerCache</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Pool</span>
+  <span class="nx">blockingNum</span> <span class="kt">int</span>
+  <span class="nx">options</span> <span class="o">*</span><span class="nx">Options</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>各个字段含义如下：</p>
+<ul>
+<li>capacity：池容量，表示ants最多能创建的 goroutine 数量。如果为负数，表示容量无限制；</li>
+<li>running：已经创建的 worker goroutine 的数量；</li>
+<li>workers：存放一组 worker 对象，workerArray只是一个接口，表示一个 worker 容器，后面详述；</li>
+<li>state：记录池子当前的状态，是否已关闭（CLOSED）；</li>
+<li>lock：锁。ants自己实现了一个自旋锁。用于同步并发操作；</li>
+<li>cond：条件变量。处理任务等待和唤醒；</li>
+<li>workerCache：使用sync.Pool对象池管理和创建worker对象，提升性能；</li>
+<li>blockingNum：阻塞等待的任务数量；</li>
+<li>options：选项。上一篇文章已经详细介绍过了。</li>
+</ul>
+<p>这里明确一个概念，ants中为每个任务都是由 worker 对象来处理的，每个 worker 对象会对应创建一个 goroutine 来处理任务。ants中使用goWorker表示 worker：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// src/github.com/panjf2000/ants/worker.go
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">goWorker</span> <span class="kd">struct</span> <span class="p">{</span>
+  <span class="nx">pool</span> <span class="o">*</span><span class="nx">Pool</span>
+  <span class="nx">task</span> <span class="kd">chan</span> <span class="kd">func</span><span class="p">()</span>
+  <span class="nx">recycleTime</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>后文详细介绍这一块内容，现在我们只需要知道Pool.workers字段就是存放goWorker对象的容器。</p>
+<h4 id="pool创建">Pool创建</h4>
+<p>创建Pool对象需调用ants.NewPool(size, options)函数。省略了一些处理选项的代码，最终代码如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// src/github.com/panjf2000/ants/pool.go
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewPool</span><span class="p">(</span><span class="nx">size</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">options</span> <span class="o">...</span><span class="nx">Option</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">Pool</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+  <span class="c1">// ...
+</span><span class="c1"></span>  <span class="nx">p</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Pool</span><span class="p">{</span>
+    <span class="nx">capacity</span><span class="p">:</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">size</span><span class="p">),</span>
+    <span class="nx">lock</span><span class="p">:</span>     <span class="nx">internal</span><span class="p">.</span><span class="nf">NewSpinLock</span><span class="p">(),</span>
+    <span class="nx">options</span><span class="p">:</span>  <span class="nx">opts</span><span class="p">,</span>
+  <span class="p">}</span>
+  <span class="nx">p</span><span class="p">.</span><span class="nx">workerCache</span><span class="p">.</span><span class="nx">New</span> <span class="p">=</span> <span class="kd">func</span><span class="p">()</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">goWorker</span><span class="p">{</span>
+      <span class="nx">pool</span><span class="p">:</span> <span class="nx">p</span><span class="p">,</span>
+      <span class="nx">task</span><span class="p">:</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">func</span><span class="p">(),</span> <span class="nx">workerChanCap</span><span class="p">),</span>
+    <span class="p">}</span>
+  <span class="p">}</span>
+  <span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">options</span><span class="p">.</span><span class="nx">PreAlloc</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">size</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span> <span class="p">{</span>
+      <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">ErrInvalidPreAllocSize</span>
+    <span class="p">}</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nx">workers</span> <span class="p">=</span> <span class="nf">newWorkerArray</span><span class="p">(</span><span class="nx">loopQueueType</span><span class="p">,</span> <span class="nx">size</span><span class="p">)</span>
+  <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nx">workers</span> <span class="p">=</span> <span class="nf">newWorkerArray</span><span class="p">(</span><span class="nx">stackType</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+  <span class="p">}</span>
+
+  <span class="nx">p</span><span class="p">.</span><span class="nx">cond</span> <span class="p">=</span> <span class="nx">sync</span><span class="p">.</span><span class="nf">NewCond</span><span class="p">(</span><span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+
+  <span class="k">go</span> <span class="nx">p</span><span class="p">.</span><span class="nf">purgePeriodically</span><span class="p">()</span>
+  <span class="k">return</span> <span class="nx">p</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>代码不难理解：</p>
+<ul>
+<li>创建Pool对象，设置容量，创建一个自旋锁来初始化lock字段，设置选项；</li>
+<li>设置workerCache这个sync.Pool对象的New方法，在调用sync.Pool对象的Get()方法时，如果它没有缓存的 worker 对象了，则调用这个方法创建一个；</li>
+<li>根据是否设置了预分配选项，创建不同类型的 workers；</li>
+<li>使用p.lock锁创建一个条件变量；</li>
+<li>最后启动一个 goroutine 用于定期清理过期的 worker。</li>
+</ul>
+<p>Pool.workers字段为workerArray类型，这实际上是一个接口，表示一个 worker 容器：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">workerArray</span> <span class="kd">interface</span> <span class="p">{</span>
+  <span class="nb">len</span><span class="p">()</span> <span class="kt">int</span>
+  <span class="nf">isEmpty</span><span class="p">()</span> <span class="kt">bool</span>
+  <span class="nf">insert</span><span class="p">(</span><span class="nx">worker</span> <span class="o">*</span><span class="nx">goWorker</span><span class="p">)</span> <span class="kt">error</span>
+  <span class="nf">detach</span><span class="p">()</span><span class="o">*</span><span class="nx">goWorker</span>
+  <span class="nf">retrieveExpiry</span><span class="p">(</span><span class="nx">duration</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">)</span> <span class="p">[]</span><span class="o">*</span><span class="nx">goWorker</span>
+  <span class="nf">reset</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>每个方法从名字上很好理解含义：</p>
+<ul>
+<li>len() int：worker 数量；</li>
+<li>isEmpty() bool：worker 数量是否为 0；</li>
+<li>insert(worker *goWorker) error：goroutine 任务执行结束后，将相应的 worker 放回workerArray中；</li>
+<li>detach()*goWorker：从workerArray中取出一个 worker；</li>
+<li>retrieveExpiry(duration time.Duration) []*goWorker：取出所有的过期 worker；</li>
+<li>reset()：重置容器。</li>
+</ul>
+<p>workerArray在ants中有两种实现，即workerStack和loopQueue。</p>
+<h4 id="workerstack">workerStack</h4>
+<p>我们先来介绍一下workerStack，它位于文件worker_stack.go中：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// src/github.com/panjf2000/ants/worker_stack.go
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">workerStack</span> <span class="kd">struct</span> <span class="p">{</span>
+  <span class="nx">items</span>  <span class="p">[]</span><span class="o">*</span><span class="nx">goWorker</span>
+  <span class="nx">expiry</span> <span class="p">[]</span><span class="o">*</span><span class="nx">goWorker</span>
+  <span class="nx">size</span>   <span class="kt">int</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">newWorkerStack</span><span class="p">(</span><span class="nx">size</span> <span class="kt">int</span><span class="p">)</span> <span class="o">*</span><span class="nx">workerStack</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="o">&amp;</span><span class="nx">workerStack</span><span class="p">{</span>
+    <span class="nx">items</span><span class="p">:</span> <span class="nb">make</span><span class="p">([]</span><span class="o">*</span><span class="nx">goWorker</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">size</span><span class="p">),</span>
+    <span class="nx">size</span><span class="p">:</span>  <span class="nx">size</span><span class="p">,</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>items：空闲的worker；</li>
+<li>expiry：过期的worker。</li>
+</ul>
+<p>goroutine 完成任务之后，Pool池会将相应的 worker 放回workerStack，调用<code>workerStack.insert()</code>直接append到items中即可：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">wq</span> <span class="o">*</span><span class="nx">workerStack</span><span class="p">)</span> <span class="nf">insert</span><span class="p">(</span><span class="nx">worker</span><span class="o">*</span><span class="nx">goWorker</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+  <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">,</span> <span class="nx">worker</span><span class="p">)</span>
+  <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>新任务到来时，会调用<code>workerStack.detach()</code>从容器中取出一个空闲的 worker：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">wq</span> <span class="o">*</span><span class="nx">workerStack</span><span class="p">)</span> <span class="nf">detach</span><span class="p">()</span><span class="o">*</span><span class="nx">goWorker</span> <span class="p">{</span>
+  <span class="nx">l</span> <span class="o">:=</span> <span class="nx">wq</span><span class="p">.</span><span class="nb">len</span><span class="p">()</span>
+  <span class="k">if</span> <span class="nx">l</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="kc">nil</span>
+  <span class="p">}</span>
+
+  <span class="nx">w</span> <span class="o">:=</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">l</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+  <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">l</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="p">=</span> <span class="kc">nil</span> <span class="c1">// avoid memory leaks
+</span><span class="c1"></span>  <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span> <span class="p">=</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">[:</span><span class="nx">l</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+
+  <span class="k">return</span> <span class="nx">w</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这里总是返回最后一个 worker，每次insert()也是append到最后，符合栈后进先出的特点，故称为workerStack。</p>
+<p>这里有一个细节，由于切片的底层结构是数组，只要有引用数组的指针，数组中的元素就不会释放。这里取出切片最后一个元素后，将对应数组元素的指针设置为nil，主动释放这个引用。</p>
+<p>上面说过新建Pool对象时会创建一个 goroutine 定期检查和清理过期的 worker。通过调用<code>workerArray.retrieveExpiry()</code>获取过期的 worker 列表。workerStack实现如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">wq</span> <span class="o">*</span><span class="nx">workerStack</span><span class="p">)</span> <span class="nf">retrieveExpiry</span><span class="p">(</span><span class="nx">duration</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">)</span> <span class="p">[]</span><span class="o">*</span><span class="nx">goWorker</span> <span class="p">{</span>
+  <span class="nx">n</span> <span class="o">:=</span> <span class="nx">wq</span><span class="p">.</span><span class="nb">len</span><span class="p">()</span>
+  <span class="k">if</span> <span class="nx">n</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="kc">nil</span>
+  <span class="p">}</span>
+
+  <span class="nx">expiryTime</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">().</span><span class="nf">Add</span><span class="p">(</span><span class="o">-</span><span class="nx">duration</span><span class="p">)</span>
+  <span class="nx">index</span> <span class="o">:=</span> <span class="nx">wq</span><span class="p">.</span><span class="nf">binarySearch</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nx">n</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="nx">expiryTime</span><span class="p">)</span>
+
+  <span class="nx">wq</span><span class="p">.</span><span class="nx">expiry</span> <span class="p">=</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">expiry</span><span class="p">[:</span><span class="mi">0</span><span class="p">]</span>
+  <span class="k">if</span> <span class="nx">index</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span> <span class="p">{</span>
+    <span class="nx">wq</span><span class="p">.</span><span class="nx">expiry</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">wq</span><span class="p">.</span><span class="nx">expiry</span><span class="p">,</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">[:</span><span class="nx">index</span><span class="o">+</span><span class="mi">1</span><span class="p">]</span><span class="o">...</span><span class="p">)</span>
+    <span class="nx">m</span> <span class="o">:=</span> <span class="nb">copy</span><span class="p">(</span><span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">,</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">index</span><span class="o">+</span><span class="mi">1</span><span class="p">:])</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">n</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+      <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="kc">nil</span>
+    <span class="p">}</span>
+    <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span> <span class="p">=</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">[:</span><span class="nx">m</span><span class="p">]</span>
+  <span class="p">}</span>
+  <span class="k">return</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">expiry</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>实现使用二分查找法找到已过期的最近一个 worker。由于过期时间是按照 goroutine 执行任务后的空闲时间计算的，而<code>workerStack.insert()</code>入队顺序决定了，它们的过期时间是从早到晚的。所以可以使用二分查找：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">wq</span> <span class="o">*</span><span class="nx">workerStack</span><span class="p">)</span> <span class="nf">binarySearch</span><span class="p">(</span><span class="nx">l</span><span class="p">,</span> <span class="nx">r</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">expiryTime</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
+  <span class="kd">var</span> <span class="nx">mid</span> <span class="kt">int</span>
+  <span class="k">for</span> <span class="nx">l</span> <span class="o">&lt;=</span> <span class="nx">r</span> <span class="p">{</span>
+    <span class="nx">mid</span> <span class="p">=</span> <span class="p">(</span><span class="nx">l</span> <span class="o">+</span> <span class="nx">r</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+    <span class="k">if</span> <span class="nx">expiryTime</span><span class="p">.</span><span class="nf">Before</span><span class="p">(</span><span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">mid</span><span class="p">].</span><span class="nx">recycleTime</span><span class="p">)</span> <span class="p">{</span>
+      <span class="nx">r</span> <span class="p">=</span> <span class="nx">mid</span> <span class="o">-</span> <span class="mi">1</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+      <span class="nx">l</span> <span class="p">=</span> <span class="nx">mid</span> <span class="o">+</span> <span class="mi">1</span>
+    <span class="p">}</span>
+  <span class="p">}</span>
+  <span class="k">return</span> <span class="nx">r</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>二分查找的是最近过期的 worker，即将过期的 worker 的前一个。它和在它之前的 worker 已经全部过期了。</p>
+<p>如果找到索引index，将items从开头到index（包括）的所有 worker 复制到expiry字段中。然后将index之后的所有未过期 worker 复制到切片头部，这里使用了copy函数。copy返回实际复制的数量，即未过期的 worker 数量m。然后将切片items从m开始所有的元素置为nil，避免内存泄漏，因为它们已经被复制到头部了。最后裁剪items切片，返回过期 worker 切片。</p>
+<h4 id="loopqueue">loopQueue</h4>
+<p>loopQueue实现基于循环队列，结构定义在文件worker_loop_queue中：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">loopQueue</span> <span class="kd">struct</span> <span class="p">{</span>
+  <span class="nx">items</span>  <span class="p">[]</span><span class="o">*</span><span class="nx">goWorker</span>
+  <span class="nx">expiry</span> <span class="p">[]</span><span class="o">*</span><span class="nx">goWorker</span>
+  <span class="nx">head</span>   <span class="kt">int</span>
+  <span class="nx">tail</span>   <span class="kt">int</span>
+  <span class="nx">size</span>   <span class="kt">int</span>
+  <span class="nx">isFull</span> <span class="kt">bool</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">newWorkerLoopQueue</span><span class="p">(</span><span class="nx">size</span> <span class="kt">int</span><span class="p">)</span> <span class="o">*</span><span class="nx">loopQueue</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="o">&amp;</span><span class="nx">loopQueue</span><span class="p">{</span>
+    <span class="nx">items</span><span class="p">:</span> <span class="nb">make</span><span class="p">([]</span><span class="o">*</span><span class="nx">goWorker</span><span class="p">,</span> <span class="nx">size</span><span class="p">),</span>
+    <span class="nx">size</span><span class="p">:</span>  <span class="nx">size</span><span class="p">,</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>由于是循环队列，这里先创建好了一个长度为size的切片。循环队列有一个队列头指针head，指向第一个有元素的位置，一个队列尾指针tail，指向下一个可以存放元素的位置。所以一开始状态如下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210720114007.png" alt=""></p>
+<p>在tail处添加元素，添加后tail指针后移。在head处取出元素，取出后head指针也后移。进行一段时间操作后，队列状态如下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210720114015.png" alt=""></p>
+<p>head或tail指针到队列尾了，需要回绕。所以可能出现这种情况：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210720114021.png" alt=""></p>
+<p>当tail指针赶上head指针了，说明队列就满了：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210720114026.png" alt="">
+当head指针赶上tail指针了，队列再次为空：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210720114032.png" alt=""></p>
+<p>根据示意图，我们再来看loopQueue的操作方法就很简单了。</p>
+<p>由于head和tail相等的情况有可能是队列空，也有可能是队列满，所以loopQueue中增加一个isFull字段以示区分。goroutine 完成任务之后，会将对应的 worker 对象放回loopQueue，执行的是insert()方法：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">wq</span> <span class="o">*</span><span class="nx">loopQueue</span><span class="p">)</span> <span class="nf">insert</span><span class="p">(</span><span class="nx">worker</span><span class="o">*</span><span class="nx">goWorker</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+  <span class="k">if</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">size</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nx">errQueueIsReleased</span>
+  <span class="p">}</span>
+
+  <span class="k">if</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">isFull</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nx">errQueueIsFull</span>
+  <span class="p">}</span>
+  <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">wq</span><span class="p">.</span><span class="nx">tail</span><span class="p">]</span> <span class="p">=</span> <span class="nx">worker</span>
+  <span class="nx">wq</span><span class="p">.</span><span class="nx">tail</span><span class="o">++</span>
+
+  <span class="k">if</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">tail</span> <span class="o">==</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">size</span> <span class="p">{</span>
+    <span class="nx">wq</span><span class="p">.</span><span class="nx">tail</span> <span class="p">=</span> <span class="mi">0</span>
+  <span class="p">}</span>
+  <span class="k">if</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">tail</span> <span class="o">==</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">head</span> <span class="p">{</span>
+    <span class="nx">wq</span><span class="p">.</span><span class="nx">isFull</span> <span class="p">=</span> <span class="kc">true</span>
+  <span class="p">}</span>
+
+  <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这个方法执行的就是循环队列的入队流程，注意如果插入后<code>tail==head</code>了，说明队列满了，设置isFull字段。</p>
+<p>新任务到来调用<code>loopQueeue.detach()</code>方法获取一个空闲的 worker 结构：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">wq</span> <span class="o">*</span><span class="nx">loopQueue</span><span class="p">)</span> <span class="nf">detach</span><span class="p">()</span><span class="o">*</span><span class="nx">goWorker</span> <span class="p">{</span>
+  <span class="k">if</span> <span class="nx">wq</span><span class="p">.</span><span class="nf">isEmpty</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="kc">nil</span>
+  <span class="p">}</span>
+
+  <span class="nx">w</span> <span class="o">:=</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">wq</span><span class="p">.</span><span class="nx">head</span><span class="p">]</span>
+  <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">wq</span><span class="p">.</span><span class="nx">head</span><span class="p">]</span> <span class="p">=</span> <span class="kc">nil</span>
+  <span class="nx">wq</span><span class="p">.</span><span class="nx">head</span><span class="o">++</span>
+  <span class="k">if</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">head</span> <span class="o">==</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">size</span> <span class="p">{</span>
+    <span class="nx">wq</span><span class="p">.</span><span class="nx">head</span> <span class="p">=</span> <span class="mi">0</span>
+  <span class="p">}</span>
+  <span class="nx">wq</span><span class="p">.</span><span class="nx">isFull</span> <span class="p">=</span> <span class="kc">false</span>
+
+  <span class="k">return</span> <span class="nx">w</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这个方法对应的是循环队列的出队流程，注意每次出队后，队列肯定不满了，isFull要重置为false。</p>
+<p>与workerStack结构一样，先入的 worker 对象过期时间早，后入的晚，获取过期 worker 的方法与workerStack中类似，只是没有使用二分查找了。这里就不赘述了。</p>
+<h3 id="再看pool创建">再看Pool创建</h3>
+<p>介绍完两种workerArray的实现之后，再来看Pool的创建函数中workers字段的设置：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">options</span><span class="p">.</span><span class="nx">PreAlloc</span> <span class="p">{</span>
+  <span class="k">if</span> <span class="nx">size</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">ErrInvalidPreAllocSize</span>
+  <span class="p">}</span>
+  <span class="nx">p</span><span class="p">.</span><span class="nx">workers</span> <span class="p">=</span> <span class="nf">newWorkerArray</span><span class="p">(</span><span class="nx">loopQueueType</span><span class="p">,</span> <span class="nx">size</span><span class="p">)</span>
+<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+  <span class="nx">p</span><span class="p">.</span><span class="nx">workers</span> <span class="p">=</span> <span class="nf">newWorkerArray</span><span class="p">(</span><span class="nx">stackType</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="nf">newWorkerArray</span><span class="p">()</span><span class="nx">定义在文件worker_array</span><span class="p">.</span><span class="nx">go中</span><span class="err">：</span>
+
+<span class="kd">type</span> <span class="nx">arrayType</span> <span class="kt">int</span>
+
+<span class="kd">const</span> <span class="p">(</span>
+  <span class="nx">stackType</span> <span class="nx">arrayType</span> <span class="p">=</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="kc">iota</span>
+  <span class="nx">loopQueueType</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">newWorkerArray</span><span class="p">(</span><span class="nx">aType</span> <span class="nx">arrayType</span><span class="p">,</span> <span class="nx">size</span> <span class="kt">int</span><span class="p">)</span> <span class="nx">workerArray</span> <span class="p">{</span>
+  <span class="k">switch</span> <span class="nx">aType</span> <span class="p">{</span>
+  <span class="k">case</span> <span class="nx">stackType</span><span class="p">:</span>
+    <span class="k">return</span> <span class="nf">newWorkerStack</span><span class="p">(</span><span class="nx">size</span><span class="p">)</span>
+  <span class="k">case</span> <span class="nx">loopQueueType</span><span class="p">:</span>
+    <span class="k">return</span> <span class="nf">newWorkerLoopQueue</span><span class="p">(</span><span class="nx">size</span><span class="p">)</span>
+  <span class="k">default</span><span class="p">:</span>
+    <span class="k">return</span> <span class="nf">newWorkerStack</span><span class="p">(</span><span class="nx">size</span><span class="p">)</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>即如果设置了预分配选项，就采用loopQueue结构。否则就采用stack的结构。</p>
+<h3 id="worker-结构">worker 结构</h3>
+<p>介绍完Pool的创建和结构，我们来看看 worker 的结构。在ants中 worker 用结构体goWorker表示，定义在文件worker.go中。它的结构非常简单：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// src/github.com/panjf2000/ants/worker.go
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">goWorker</span> <span class="kd">struct</span> <span class="p">{</span>
+  <span class="nx">pool</span> <span class="o">*</span><span class="nx">Pool</span>
+  <span class="nx">task</span> <span class="kd">chan</span> <span class="kd">func</span><span class="p">()</span>
+  <span class="nx">recycleTime</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>具体字段含义很明显：</p>
+<ul>
+<li>pool：持有 goroutine 池的引用；</li>
+<li>task：任务通道，通过这个通道将类型为func ()的函数作为任务发送给goWorker；</li>
+<li>recyleTime：这个字段记录goWorker什么时候被放回池中（即什么时候开始空闲）。其完成任务后，在将其放回 goroutine 池的时候设置。</li>
+</ul>
+<p>goWorker创建时会调用run()方法，run()方法中启动一个新 goroutine 处理任务。run()主体流程非常简单：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">w</span> <span class="o">*</span><span class="nx">goWorker</span><span class="p">)</span> <span class="nf">run</span><span class="p">()</span> <span class="p">{</span>
+  <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">for</span> <span class="nx">f</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">w</span><span class="p">.</span><span class="nx">task</span> <span class="p">{</span>
+      <span class="k">if</span> <span class="nx">f</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">return</span>
+      <span class="p">}</span>
+      <span class="nf">f</span><span class="p">()</span>
+      <span class="k">if</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">w</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nf">revertWorker</span><span class="p">(</span><span class="nx">w</span><span class="p">);</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+        <span class="k">return</span>
+      <span class="p">}</span>
+    <span class="p">}</span>
+  <span class="p">}()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这个方法启动一个新的 goroutine，然后不停地从task通道中接收任务，然后执行任务，任务执行完成之后调用池对象的<code>revertWorker()</code>方法将该goWorker对象放回池中，以便下次取出处理新的任务。<code>revertWorker()</code>方法后面会详细分析。</p>
+<p>这里注意，实际上<code>for f := range w.task</code>这个循环直到通道task关闭或取出为nil的任务才会终止。所以这个 goroutine 一直在运行，这正是ants高性能的关键所在。每个goWorker只会启动一次 goroutine， 后续重复利用这个 goroutine。goroutine 每次只执行一个任务就会被放回池中。</p>
+<p>还有一个细节，如果放回操作失败，则会调用return，这会让 goroutine 运行结束，防止 goroutine 泄漏。</p>
+<p>这里<code>f == nil</code>为 true 时return，也是一个细节点，我们后面讲池关闭的时候会详细介绍。</p>
+<p>下面我们看看run()方法的异常处理：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">w</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nx">workerCache</span><span class="p">.</span><span class="nf">Put</span><span class="p">(</span><span class="nx">w</span><span class="p">)</span>
+  <span class="k">if</span> <span class="nx">p</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">p</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">ph</span> <span class="o">:=</span> <span class="nx">w</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nx">options</span><span class="p">.</span><span class="nx">PanicHandler</span><span class="p">;</span> <span class="nx">ph</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nf">ph</span><span class="p">(</span><span class="nx">p</span><span class="p">)</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+      <span class="nx">w</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nx">options</span><span class="p">.</span><span class="nx">Logger</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;worker exits from a panic: %v\n&#34;</span><span class="p">,</span> <span class="nx">p</span><span class="p">)</span>
+      <span class="kd">var</span> <span class="nx">buf</span> <span class="p">[</span><span class="mi">4096</span><span class="p">]</span><span class="kt">byte</span>
+      <span class="nx">n</span> <span class="o">:=</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">Stack</span><span class="p">(</span><span class="nx">buf</span><span class="p">[:],</span> <span class="kc">false</span><span class="p">)</span>
+      <span class="nx">w</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nx">options</span><span class="p">.</span><span class="nx">Logger</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;worker exits from panic: %s\n&#34;</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nx">buf</span><span class="p">[:</span><span class="nx">n</span><span class="p">]))</span>
+    <span class="p">}</span>
+  <span class="p">}</span>
+  <span class="nx">w</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nx">cond</span><span class="p">.</span><span class="nf">Signal</span><span class="p">()</span>
+<span class="p">}()</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>简单来说，就是在defer中通过recover()函数捕获任务执行过程中抛出的panic。这时任务执行失败，goroutine 也结束了。但是goWorker对象还是可以重复利用，所以defer函数一开始调用<code>w.pool.workerCache.Put(w)</code>将goWorker对象放回sync.Pool池中。</p>
+<p>接着就是处理panic，如果选项中指定了panic处理器，直接调用这个处理器。否则，ants调用选项中设置的Logger记录一些日志，如堆栈，panic信息等。</p>
+<p>最后需要调用<code>w.pool.cond.Signal()</code>通知现在有空闲的goWorker了。因为我们实际运行的goWorker数量由于panic少了一个，而池中可能有其他任务在等待处理。</p>
+<h3 id="提交任务">提交任务</h3>
+<p>接下来，通过提交任务就可以串起整个流程。由上一篇文章我们知道，可以调用池对象的Submit()方法提交任务：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Pool</span><span class="p">)</span> <span class="nf">Submit</span><span class="p">(</span><span class="nx">task</span> <span class="kd">func</span><span class="p">())</span> <span class="kt">error</span> <span class="p">{</span>
+  <span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nf">IsClosed</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nx">ErrPoolClosed</span>
+  <span class="p">}</span>
+<span class="kd">var</span> <span class="nx">w</span><span class="o">*</span><span class="nx">goWorker</span>
+  <span class="k">if</span> <span class="nx">w</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">retrieveWorker</span><span class="p">();</span> <span class="nx">w</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nx">ErrPoolOverload</span>
+  <span class="p">}</span>
+  <span class="nx">w</span><span class="p">.</span><span class="nx">task</span> <span class="o">&lt;-</span> <span class="nx">task</span>
+  <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>首先判断池是否已关闭，然后调用<code>retrieveWorker()</code>方法获取一个空闲的 worker，然后将任务task发送到 worker 的任务通道。下面是<code>retrieveWorker()</code>实现：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Pool</span><span class="p">)</span> <span class="nf">retrieveWorker</span><span class="p">()</span> <span class="p">(</span><span class="nx">w</span><span class="o">*</span><span class="nx">goWorker</span><span class="p">)</span> <span class="p">{</span>
+  <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+
+  <span class="nx">w</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">workers</span><span class="p">.</span><span class="nf">detach</span><span class="p">()</span>
+  <span class="k">if</span> <span class="nx">w</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+  <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">capacity</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Cap</span><span class="p">();</span> <span class="nx">capacity</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span> <span class="o">||</span> <span class="nx">capacity</span> <span class="p">&gt;</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Running</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+    <span class="nf">spawnWorker</span><span class="p">()</span>
+  <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">options</span><span class="p">.</span><span class="nx">Nonblocking</span> <span class="p">{</span>
+      <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+      <span class="k">return</span>
+    <span class="p">}</span>
+  <span class="nx">Reentry</span><span class="p">:</span>
+    <span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">options</span><span class="p">.</span><span class="nx">MaxBlockingTasks</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">p</span><span class="p">.</span><span class="nx">blockingNum</span> <span class="o">&gt;=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">options</span><span class="p">.</span><span class="nx">MaxBlockingTasks</span> <span class="p">{</span>
+      <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+      <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nx">blockingNum</span><span class="o">++</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nx">cond</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nx">blockingNum</span><span class="o">--</span>
+    <span class="kd">var</span> <span class="nx">nw</span> <span class="kt">int</span>
+    <span class="k">if</span> <span class="nx">nw</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Running</span><span class="p">();</span> <span class="nx">nw</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+      <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+      <span class="k">if</span> <span class="p">!</span><span class="nx">p</span><span class="p">.</span><span class="nf">IsClosed</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nf">spawnWorker</span><span class="p">()</span>
+      <span class="p">}</span>
+      <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="nx">w</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">workers</span><span class="p">.</span><span class="nf">detach</span><span class="p">();</span> <span class="nx">w</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="k">if</span> <span class="nx">nw</span> <span class="p">&lt;</span> <span class="nx">capacity</span> <span class="p">{</span>
+        <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+        <span class="nf">spawnWorker</span><span class="p">()</span>
+        <span class="k">return</span>
+      <span class="p">}</span>
+      <span class="k">goto</span> <span class="nx">Reentry</span>
+    <span class="p">}</span>
+
+    <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+  <span class="p">}</span>
+  <span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这个方法稍微有点复杂，我们一点点来看。首先调用<code>p.workers.detach(</code>)获取goWorker对象。p.workers是loopQueue或者workerStack对象，它们都实现了detach()方法，前面已经介绍过了。</p>
+<p>如果返回了一个goWorker对象，说明有空闲 goroutine，直接返回。</p>
+<p>否则，池容量还没用完（即容量大于正在工作的goWorker数量），则调用spawnWorker()新建一个goWorker，执行其run()方法：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">spawnWorker</span> <span class="o">:=</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">w</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">workerCache</span><span class="p">.</span><span class="nf">Get</span><span class="p">().(</span><span class="o">*</span><span class="nx">goWorker</span><span class="p">)</span>
+  <span class="nx">w</span><span class="p">.</span><span class="nf">run</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>否则，池容量已用完。如果设置了非阻塞选项，则直接返回。否则，如果设置了最大阻塞队列长度上限，且当前阻塞等待的任务数量已经达到这个上限，直接返回。否则，阻塞等待数量 +1，调用p.cond.Wait()等待。</p>
+<p>然后goWorker.run()完成一个任务后，调用池的revertWorker()方法放回goWorker：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Pool</span><span class="p">)</span> <span class="nf">revertWorker</span><span class="p">(</span><span class="nx">worker</span><span class="o">*</span><span class="nx">goWorker</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+  <span class="k">if</span> <span class="nx">capacity</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Cap</span><span class="p">();</span> <span class="p">(</span><span class="nx">capacity</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Running</span><span class="p">()</span> <span class="p">&gt;</span> <span class="nx">capacity</span><span class="p">)</span> <span class="o">||</span> <span class="nx">p</span><span class="p">.</span><span class="nf">IsClosed</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="kc">false</span>
+  <span class="p">}</span>
+  <span class="nx">worker</span><span class="p">.</span><span class="nx">recycleTime</span> <span class="p">=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">()</span>
+  <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+
+  <span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nf">IsClosed</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+    <span class="k">return</span> <span class="kc">false</span>
+  <span class="p">}</span>
+
+  <span class="nx">err</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">workers</span><span class="p">.</span><span class="nf">insert</span><span class="p">(</span><span class="nx">worker</span><span class="p">)</span>
+  <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+    <span class="k">return</span> <span class="kc">false</span>
+  <span class="p">}</span>
+
+  <span class="nx">p</span><span class="p">.</span><span class="nx">cond</span><span class="p">.</span><span class="nf">Signal</span><span class="p">()</span>
+  <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+  <span class="k">return</span> <span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这里设置了goWorker的recycleTime字段，用于判定过期。然后将goWorker放回池。workers的insert()方法前面也已经分析过了。</p>
+<p>接着调用<code>p.cond.Signal()</code>唤醒之前<code>retrieveWorker()</code>方法中的等待。retrieveWorker()方法继续执行，阻塞等待数量 -1，这里判断当前goWorker的数量（也即 goroutine 数量）。如果数量等于 0，很有可能池子刚刚执行了Release()关闭，这时需要判断池是否处于关闭状态，如果是则直接返回。否则，调用spawnWorker()创建一个新的goWorker并执行其run()方法。</p>
+<p>如果当前goWorker数量不为 0，则调用<code>p.workers.detach()</code>取出一个空闲的goWorker返回。这个操作有可能失败，因为可能同时有多个 goroutine 在等待，唤醒的时候只有部分 goroutine 能获取到goWorker。如果失败了，其容量还未用完，直接创建新的goWorker，反之重新执行阻塞等待逻辑。</p>
+<p>这里有很多加锁和解锁的逻辑，再加上和信号量混在一起很难看明白。其实只需要知道一点就很简单了，那就是<code>p.cond.Wait()</code>内部会将当前 goroutine 挂起，然后解开它持有的锁，即会调用<code>p.lock.Unlock()</code>。这也是为什么r<code>evertWorker()中p.lock.Lock()</code>加锁能成功的原因。然后<code>p.cond.Signal()</code>或<code>p.cond.Broadcast()</code>会唤醒因为<code>p.cond.Wait()</code>而挂起的 goroutine，但是需要<code>Signal()/Broadcast()</code>所在 goroutine 调用解锁方法。</p>
+<p>最后，放上整体流程图：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210720141733.png" alt=""></p>
+<h3 id="清理过期goworker">清理过期goWorker</h3>
+<p>在NewPool()函数中会启动一个 goroutine 定期清理过期的goWorker：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Pool</span><span class="p">)</span> <span class="nf">purgePeriodically</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">heartbeat</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTicker</span><span class="p">(</span><span class="nx">p</span><span class="p">.</span><span class="nx">options</span><span class="p">.</span><span class="nx">ExpiryDuration</span><span class="p">)</span>
+  <span class="k">defer</span> <span class="nx">heartbeat</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+
+  <span class="k">for</span> <span class="k">range</span> <span class="nx">heartbeat</span><span class="p">.</span><span class="nx">C</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nf">IsClosed</span><span class="p">()</span> <span class="p">{</span>
+      <span class="k">break</span>
+    <span class="p">}</span>
+
+    <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="nx">expiredWorkers</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">workers</span><span class="p">.</span><span class="nf">retrieveExpiry</span><span class="p">(</span><span class="nx">p</span><span class="p">.</span><span class="nx">options</span><span class="p">.</span><span class="nx">ExpiryDuration</span><span class="p">)</span>
+    <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">expiredWorkers</span> <span class="p">{</span>
+      <span class="nx">expiredWorkers</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">task</span> <span class="o">&lt;-</span> <span class="kc">nil</span>
+      <span class="nx">expiredWorkers</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="kc">nil</span>
+    <span class="p">}</span>
+
+    <span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Running</span><span class="p">()</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+      <span class="nx">p</span><span class="p">.</span><span class="nx">cond</span><span class="p">.</span><span class="nf">Broadcast</span><span class="p">()</span>
+    <span class="p">}</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>如果池子已关闭，直接退出 goroutine。由选项ExpiryDuration来设置清理的间隔，如果没有设置该选项，采用默认值 1s：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// src/github.com/panjf2000/ants/pool.go
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewPool</span><span class="p">(</span><span class="nx">size</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">options</span> <span class="o">...</span><span class="nx">Option</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">Pool</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+  <span class="k">if</span> <span class="nx">expiry</span> <span class="o">:=</span> <span class="nx">opts</span><span class="p">.</span><span class="nx">ExpiryDuration</span><span class="p">;</span> <span class="nx">expiry</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">ErrInvalidPoolExpiry</span>
+  <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">expiry</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+    <span class="nx">opts</span><span class="p">.</span><span class="nx">ExpiryDuration</span> <span class="p">=</span> <span class="nx">DefaultCleanIntervalTime</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// src/github.com/panjf2000/ants/pool.go
+</span><span class="c1"></span><span class="kd">const</span> <span class="p">(</span>
+  <span class="nx">DefaultCleanIntervalTime</span> <span class="p">=</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span>
+<span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>然后就是每个清理周期，调用<code>p.workers.retrieveExpiry()</code>方法，取出过期的goWorker。因为由这些goWorker启动的 goroutine 还阻塞在通道task上，所以要向该通道发送一个nil值，而<code>goWorker.run()</code>方法中接收到一个值为nil的任务会return，结束 goroutine，避免了 goroutine 泄漏。</p>
+<p>如果所有goWorker都被清理掉了，可能这时还有 goroutine 阻塞在retrieveWorker()方法中的p.cond.Wait()上，所以这里需要调用p.cond.Broadcast()唤醒这些 goroutine。</p>
+<h3 id="容量动态修改">容量动态修改</h3>
+<p>在运行过程中，可以动态修改池的容量。调用p.Tune(size int)方法：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Pool</span><span class="p">)</span> <span class="nf">Tune</span><span class="p">(</span><span class="nx">size</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+  <span class="k">if</span> <span class="nx">capacity</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Cap</span><span class="p">();</span> <span class="nx">capacity</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span> <span class="o">||</span> <span class="nx">size</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">size</span> <span class="o">==</span> <span class="nx">capacity</span> <span class="o">||</span> <span class="nx">p</span><span class="p">.</span><span class="nx">options</span><span class="p">.</span><span class="nx">PreAlloc</span> <span class="p">{</span>
+    <span class="k">return</span>
+  <span class="p">}</span>
+  <span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">capacity</span><span class="p">,</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">size</span><span class="p">))</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这里只是简单设置了一下新的容量，不影响当前正在执行的goWorker，而且如果设置了预分配选项，容量不能再次设置。</p>
+<p>下次执行revertWorker()的时候就会以新的容量判断是否能放回，下次执行retrieveWorker()的时候也会以新容量判断是否能创建新goWorker。</p>
+<h3 id="关闭和重新启动pool">关闭和重新启动Pool</h3>
+<p>使用完成之后，需要关闭Pool，避免 goroutine 泄漏。调用池对象的Release()方法关闭：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Pool</span><span class="p">)</span> <span class="nf">Release</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">state</span><span class="p">,</span> <span class="nx">CLOSED</span><span class="p">)</span>
+  <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+  <span class="nx">p</span><span class="p">.</span><span class="nx">workers</span><span class="p">.</span><span class="nf">reset</span><span class="p">()</span>
+  <span class="nx">p</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+  <span class="nx">p</span><span class="p">.</span><span class="nx">cond</span><span class="p">.</span><span class="nf">Broadcast</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>调用<code>p.workers.reset()</code>结束loopQueue或wokerStack中的 goroutine，做一些清理工作，同时为了防止有 goroutine 阻塞在<code>p.cond.Wait()</code>上，执行一次<code>p.cond.Broadcast()</code>。</p>
+<p>workerStack与loopQueue的reset()基本相同，即发送nil到task通道从而结束 goroutine，然后重置各个字段：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// loopQueue 版本
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">wq</span> <span class="o">*</span><span class="nx">loopQueue</span><span class="p">)</span> <span class="nf">reset</span><span class="p">()</span> <span class="p">{</span>
+  <span class="k">if</span> <span class="nx">wq</span><span class="p">.</span><span class="nf">isEmpty</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">return</span>
+  <span class="p">}</span>
+
+<span class="nx">Releasing</span><span class="p">:</span>
+  <span class="k">if</span> <span class="nx">w</span> <span class="o">:=</span> <span class="nx">wq</span><span class="p">.</span><span class="nf">detach</span><span class="p">();</span> <span class="nx">w</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">w</span><span class="p">.</span><span class="nx">task</span> <span class="o">&lt;-</span> <span class="kc">nil</span>
+    <span class="k">goto</span> <span class="nx">Releasing</span>
+  <span class="p">}</span>
+  <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span> <span class="p">=</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">[:</span><span class="mi">0</span><span class="p">]</span>
+  <span class="nx">wq</span><span class="p">.</span><span class="nx">size</span> <span class="p">=</span> <span class="mi">0</span>
+  <span class="nx">wq</span><span class="p">.</span><span class="nx">head</span> <span class="p">=</span> <span class="mi">0</span>
+  <span class="nx">wq</span><span class="p">.</span><span class="nx">tail</span> <span class="p">=</span> <span class="mi">0</span>
+<span class="p">}</span>
+
+<span class="c1">// stack 版本
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">wq</span> <span class="o">*</span><span class="nx">workerStack</span><span class="p">)</span> <span class="nf">reset</span><span class="p">()</span> <span class="p">{</span>
+  <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">wq</span><span class="p">.</span><span class="nb">len</span><span class="p">();</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+    <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">task</span> <span class="o">&lt;-</span> <span class="kc">nil</span>
+    <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="kc">nil</span>
+  <span class="p">}</span>
+  <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span> <span class="p">=</span> <span class="nx">wq</span><span class="p">.</span><span class="nx">items</span><span class="p">[:</span><span class="mi">0</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>池关闭后还可以调用Reboot()重启：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Pool</span><span class="p">)</span> <span class="nf">Reboot</span><span class="p">()</span> <span class="p">{</span>
+  <span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">state</span><span class="p">,</span> <span class="nx">CLOSED</span><span class="p">,</span> <span class="nx">OPENED</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">go</span> <span class="nx">p</span><span class="p">.</span><span class="nf">purgePeriodically</span><span class="p">()</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>由于<code>p.purgePeriodically(</code>)在<code>p.Release()</code>之后检测到池关闭就直接退出了，这里需要重新开启一个 goroutine 定期清理。</p>
+<h3 id="poolwithfunc和workwithfunc">PoolWithFunc和WorkWithFunc</h3>
+<p>上一篇文章中我们还介绍了另一种方式创建Pool，即<code>NewPoolWithFunc()</code>，指定一个函数。后面提交任务时调用p.Invoke()提供参数就可以执行该函数了。这种方式创建的 Pool 和 Woker 结构如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">PoolWithFunc</span> <span class="kd">struct</span> <span class="p">{</span>
+  <span class="nx">workers</span> <span class="p">[]</span><span class="o">*</span><span class="nx">goWorkerWithFunc</span>
+  <span class="nx">poolFunc</span> <span class="kd">func</span><span class="p">(</span><span class="kd">interface</span><span class="p">{})</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">goWorkerWithFunc</span> <span class="kd">struct</span> <span class="p">{</span>
+  <span class="nx">pool</span> <span class="o">*</span><span class="nx">PoolWithFunc</span>
+  <span class="nx">args</span> <span class="kd">chan</span> <span class="kd">interface</span><span class="p">{}</span>
+  <span class="nx">recycleTime</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>与前面介绍的Pool和goWorker大体相似，只是PoolWithFunc保存了传入的函数对象，使用数组保存 worker。<code>goWorkerWithFunc</code>以<code>interface{}</code>为args通道的数据类型，其实也好理解，因为已经有函数了，只需要传入数据作为参数就可以运行了：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">w</span> <span class="o">*</span><span class="nx">goWorkerWithFunc</span><span class="p">)</span> <span class="nf">run</span><span class="p">()</span> <span class="p">{</span>
+  <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">for</span> <span class="nx">args</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">w</span><span class="p">.</span><span class="nx">args</span> <span class="p">{</span>
+      <span class="k">if</span> <span class="nx">args</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">return</span>
+      <span class="p">}</span>
+      <span class="nx">w</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nf">poolFunc</span><span class="p">(</span><span class="nx">args</span><span class="p">)</span>
+      <span class="k">if</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">w</span><span class="p">.</span><span class="nx">pool</span><span class="p">.</span><span class="nf">revertWorker</span><span class="p">(</span><span class="nx">w</span><span class="p">);</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+        <span class="k">return</span>
+      <span class="p">}</span>
+    <span class="p">}</span>
+  <span class="p">}()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>从通道接收函数参数，执行池中保存的函数对象。</p>
+<h3 id="其他细节">其他细节</h3>
+<h4 id="task缓冲通道">task缓冲通道</h4>
+<p>还记得创建p.workerCache这个sync.Pool对象的代码么：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">p</span><span class="p">.</span><span class="nx">workerCache</span><span class="p">.</span><span class="nx">New</span> <span class="p">=</span> <span class="kd">func</span><span class="p">()</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="o">&amp;</span><span class="nx">goWorker</span><span class="p">{</span>
+    <span class="nx">pool</span><span class="p">:</span> <span class="nx">p</span><span class="p">,</span>
+    <span class="nx">task</span><span class="p">:</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">func</span><span class="p">(),</span> <span class="nx">workerChanCap</span><span class="p">),</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在sync.Pool中没有goWorker对象时，调用New()方法创建一个，注意到这里创建的task通道使用workerChanCap作为容量。这个变量定义在ants.go文件中：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="p">(</span>
+  <span class="c1">// workerChanCap determines whether the channel of a worker should be a buffered channel
+</span><span class="c1"></span>  <span class="c1">// to get the best performance. Inspired by fasthttp at
+</span><span class="c1"></span>  <span class="c1">// &lt;https://github.com/valyala/fasthttp/blob/master/workerpool.go#L139&gt;
+</span><span class="c1"></span>  <span class="nx">workerChanCap</span> <span class="p">=</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
+    <span class="c1">// Use blocking channel if GOMAXPROCS=1.
+</span><span class="c1"></span>    <span class="c1">// This switches context from sender to receiver immediately,
+</span><span class="c1"></span>    <span class="c1">// which results in higher performance (under go1.5 at least).
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="p">{</span>
+      <span class="k">return</span> <span class="mi">0</span>
+    <span class="p">}</span>
+
+    <span class="c1">// Use non-blocking workerChan if GOMAXPROCS&gt;1,
+</span><span class="c1"></span>    <span class="c1">// since otherwise the sender might be dragged down if the receiver is CPU-bound.
+</span><span class="c1"></span>    <span class="k">return</span> <span class="mi">1</span>
+  <span class="p">}()</span>
+<span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>为了方便对照，我把注释也放上来了。ants参考了著名的 Web 框架fasthttp的实现。当GOMAXPROCS为 1 时（即操作系统线程数为 1），向通道task发送会挂起发送 goroutine，将执行流程转向接收 goroutine，这能提升接收处理性能。如果GOMAXPROCS大于 1，ants使用带缓冲的通道，为了防止接收 goroutine 是 CPU 密集的，导致发送 goroutine 被阻塞。下面是fasthttp中的相关代码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// src/github.com/valyala/fasthttp/workerpool.go
+</span><span class="c1"></span><span class="kd">var</span> <span class="nx">workerChanCap</span> <span class="p">=</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
+  <span class="c1">// Use blocking workerChan if GOMAXPROCS=1.
+</span><span class="c1"></span>  <span class="c1">// This immediately switches Serve to WorkerFunc, which results
+</span><span class="c1"></span>  <span class="c1">// in higher performance (under go1.5 at least).
+</span><span class="c1"></span>  <span class="k">if</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="mi">0</span>
+  <span class="p">}</span>
+
+  <span class="c1">// Use non-blocking workerChan if GOMAXPROCS&gt;1,
+</span><span class="c1"></span>  <span class="c1">// since otherwise the Serve caller (Acceptor) may lag accepting
+</span><span class="c1"></span>  <span class="c1">// new connections if WorkerFunc is CPU-bound.
+</span><span class="c1"></span>  <span class="k">return</span> <span class="mi">1</span>
+<span class="p">}()</span>
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="自旋锁">自旋锁</h4>
+<p>ants利用atomic.CompareAndSwapUint32()这个原子操作实现了一个自旋锁。与其他类型的锁不同，自旋锁在加锁失败之后不会立刻进入等待，而是会继续尝试。这对于很快就能获得锁的应用来说能极大提升性能，因为能避免加锁和解锁导致的线程切换：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">spinLock</span> <span class="kt">uint32</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">sl</span> <span class="o">*</span><span class="nx">spinLock</span><span class="p">)</span> <span class="nf">Lock</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">backoff</span> <span class="o">:=</span> <span class="mi">1</span>
+  <span class="k">for</span> <span class="p">!</span><span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapUint32</span><span class="p">((</span><span class="o">*</span><span class="kt">uint32</span><span class="p">)(</span><span class="nx">sl</span><span class="p">),</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">backoff</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+      <span class="nx">runtime</span><span class="p">.</span><span class="nf">Gosched</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="nx">backoff</span> <span class="o">&lt;&lt;=</span> <span class="mi">1</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">sl</span> <span class="o">*</span><span class="nx">spinLock</span><span class="p">)</span> <span class="nf">Unlock</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreUint32</span><span class="p">((</span><span class="o">*</span><span class="kt">uint32</span><span class="p">)(</span><span class="nx">sl</span><span class="p">),</span> <span class="mi">0</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">// NewSpinLock instantiates a spin-lock.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewSpinLock</span><span class="p">()</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Locker</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="nb">new</span><span class="p">(</span><span class="nx">spinLock</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>另外这里使用了指数退避，先等 1 个循环周期，通过<code>runtime.Gosched()</code>告诉运行时切换其他 goroutine 运行。如果还是获取不到锁，就再等 2 个周期。如果还是不行，再等 4，8，16&hellip;以此类推。这可以防止短时间内获取不到锁，导致 CPU 时间的浪费。</p>
+<h2 id="总结">总结</h2>
+<p>ants源码短小精悍，没有引用其他任何第三方库。各种细节处理，各种性能优化的点都是值得我们细细品味的。强烈建议大家读一读源码。阅读优秀的源码，能极大地提高自身的编码素养。</p>
+<h2 id="转载">转载</h2>
+<p><a href="https://mp.weixin.qq.com/s?__biz=MzAxMTA4Njc0OQ==&amp;mid=2651448555&amp;idx=3&amp;sn=122de0f56cbeb668d97188901c426986&amp;chksm=80bb3a19b7ccb30f8860d2bb4cc00fdfba5e78cd988ef0a082b5b1126bcd5a20f27f876e284d&amp;scene=21#wechat_redirect">Go 每日一库之 ants</a></p>
+<p><a href="https://mp.weixin.qq.com/s/bs0ayyio--xCZZI0paY-Lw">Go 每日一库之 ants 源码赏析</a></p>
 
     </div>
 
