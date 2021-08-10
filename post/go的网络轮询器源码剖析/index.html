@@ -53,7 +53,7 @@
 <meta itemprop="name" content="Go的网络轮询器源码剖析">
 <meta itemprop="description" content="导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的"><meta itemprop="datePublished" content="2020-11-14T22:52:29+00:00" />
 <meta itemprop="dateModified" content="2020-11-14T22:52:29+00:00" />
-<meta itemprop="wordCount" content="15360">
+<meta itemprop="wordCount" content="14088">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的网络轮询器源码剖析"/>
 <meta name="twitter:description" content="导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的"/>
@@ -164,8 +164,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 15360 字 </span>
-          <span class="more-meta"> 预计阅读 31 分钟 </span>
+          <span class="more-meta"> 约 14088 字 </span>
+          <span class="more-meta"> 预计阅读 29 分钟 </span>
         
       </div>
     </header>
@@ -196,8 +196,7 @@
       </ul>
     </li>
     <li><a href="#价值">价值</a></li>
-    <li><a href="#问题">问题</a></li>
-    <li><a href="#reactor-网络模型">Reactor 网络模型</a></li>
+    <li><a href="#参考">参考</a></li>
   </ul>
 </nav>
   </div>
@@ -2738,29 +2737,8 @@
 <p>就是为了避免让操作网络 I/O 的 goroutine 陷入到系统调用从而进入内核态，因为一旦进入内核态，整个程序的控制权就会发生转移(到内核)，不再属于用户进程了，那么也就无法借助于 Go 强大的 runtime scheduler 来调度业务程序的并发了.</p>
 <p>而有了 netpoll 之后，借助于非阻塞 I/O ，G 就再也不会因为系统调用的读写而 (长时间) 陷入内核态，当 G 被阻塞在某个 network I/O 操作上时，实际上它不是因为陷入内核态被阻塞住了，而是被 Go runtime 调用 gopark 给 park 住了，此时 G 会被放置到某个 wait queue 中，而 M 会尝试运行下一个 _Grunnable 的 G，如果此时没有_Grunnable 的 G 供 M 运行，那么 M 将解绑 P，并进入 sleep 状态。</p>
 <p>当 I/O available，在 epoll 的 eventpoll.rdr 中等待的 G 会被放到 eventpoll.rdllist 链表里并通过 netpoll 中的 epoll_wait 系统调用返回放置到全局调度队列或者 P 的本地调度队列，标记为_Grunnable ，等待 P 绑定 M 恢复执行。</p>
-<h2 id="问题">问题</h2>
-<p>Go netpoller 的设计不可谓不精巧、性能也不可谓不高，配合 goroutine 开发网络应用的时候就一个字：爽。因此 Go 的网络编程模式是及其简洁高效的，然而，没有任何一种设计和架构是完美的.</p>
-<p>goroutine-per-connection 这种模式虽然简单高效，但是在某些极端的场景下也会暴露出问题：goroutine 虽然非常轻量，它的自定义栈内存初始值仅为 2KB，后面按需扩容；海量连接的业务场景下， goroutine-per-connection ，此时 goroutine 数量以及消耗的资源就会呈线性趋势暴涨.</p>
-<p>虽然 Go scheduler 内部做了 g 的缓存链表，可以一定程度上缓解高频创建销毁 goroutine 的压力，但是对于瞬时性暴涨的长连接场景就无能为力了，大量的 goroutines 会被不断创建出来，从而对 Go runtime scheduler 造成极大的调度压力和侵占系统资源，然后资源被侵占又反过来影响 Go scheduler 的调度，进而导致性能下降。</p>
-<h2 id="reactor-网络模型">Reactor 网络模型</h2>
-<p>目前 Linux 平台上主流的高性能网络库/框架中，大都采用 Reactor 模式，比如 netty、libevent、libev、ACE，POE(Perl)、Twisted(Python)等。</p>
-<p>Reactor 模式本质上指的是使用 I/O 多路复用(I/O multiplexing) + 非阻塞 I/O(non-blocking I/O) 的模式。</p>
-<p>通常设置一个主线程负责做 event-loop 事件循环和 I/O 读写，通过 select/poll/epoll_wait 等系统调用监听 I/O 事件，业务逻辑提交给其他工作线程去做。而所谓『非阻塞 I/O』的核心思想是指避免阻塞在 read() 或者 write() 或者其他的 I/O 系统调用上，这样可以最大限度的复用 event-loop 线程，让一个线程能服务于多个 sockets。在 Reactor 模式中，I/O 线程只能阻塞在 I/O multiplexing 函数上（select/poll/epoll_wait）。</p>
-<p>Reactor 模式的基本工作流程如下：</p>
-<ol>
-<li>Server 端完成在 bind&amp;listen 之后，将 listenfd 注册到 epollfd 中，最后进入 event-loop 事件循环。循环过程中会调用 select/poll/epoll_wait 阻塞等待，若有在 listenfd 上的新连接事件则解除阻塞返回，并调用 socket.accept 接收新连接 connfd，并将 connfd 加入到 epollfd 的 I/O 复用（监听）队列。</li>
-<li>当 connfd 上发生可读/可写事件也会解除 select/poll/epoll_wait 的阻塞等待，然后进行 I/O 读写操作，这里读写 I/O 都是非阻塞 I/O，这样才不会阻塞 event-loop 的下一个循环。然而，这样容易割裂业务逻辑，不易理解和维护。</li>
-<li>调用 read 读取数据之后进行解码并放入队列中，等待工作线程处理。</li>
-<li>工作线程处理完数据之后，返回到 event-loop 线程，由这个线程负责调用 write 把数据写回 client。</li>
-</ol>
-<p>accept 连接以及 conn 上的读写操作若是在主线程完成，则要求是非阻塞 I/O，因为 Reactor 模式一条最重要的原则就是：I/O 操作不能阻塞 event-loop 事件循环。实际上 event loop 可能也可以是多线程的，只是一个线程里只有一个 select/poll/epoll_wait。</p>
-<p>上面提到了 Go netpoller 在某些场景下可能因为创建太多的 goroutine 而过多地消耗系统资源，而在现实世界的网络业务中，服务器持有的海量连接中在极短的时间窗口内只有极少数是 active 而大多数则是 idle，就像这样（非真实数据，仅仅是为了比喻）：</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201119165211.png" alt=""></p>
-<p>那么为每一个连接指派一个 goroutine 就显得太过奢侈了，而 Reactor 模式这种利用 I/O 多路复用进而只需要使用少量线程即可管理海量连接的设计就可以在这样网络业务中大显身手了：</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201119165231.png" alt=""></p>
-<p>在绝大部分应用场景下，我推荐大家还是遵循 Go 的 best practices，使用原生的 Go 网络库来构建自己的网络应用。然而，在某些极度追求性能、压榨系统资源以及技术栈必须是原生 Go （不考虑 C/C++ 写中间层而 Go 写业务层）的业务场景下，我们可以考虑自己构建 Reactor 网络模型。</p>
-<p>参考:
-<a href="https://draveness.me/golang/docs/part3-runtime/ch06-concurrency/golang-netpoller/">6.6 网络轮询器</a>
+<h2 id="参考">参考</h2>
+<p><a href="https://draveness.me/golang/docs/part3-runtime/ch06-concurrency/golang-netpoller/">6.6 网络轮询器</a>
 <a href="https://strikefreedom.top/go-netpoll-io-multiplexing-reactor#b3_solo_h2_16%EF%BC%8C%E4%BB%8E%E5%85%A8%E9%9D%A2%E6%80%A7%E5%92%8C%E5%8F%AF%E9%9D%A0%E6%80%A7%E6%9D%A5%E8%AF%B4%E6%88%91%E8%BF%98%E6%98%AF%E5%BB%BA%E8%AE%AE%E4%BD%BF%E7%94%A8">go netpoller 原生网络模型之源码全面解析</a></p>
 
     </div>

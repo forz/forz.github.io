@@ -53,7 +53,7 @@
 <meta itemprop="name" content="Go的调度器源码剖析">
 <meta itemprop="description" content="协程 进程时代 最初的计算机上面没有操作系统，更别提进程、线程和协程了。 后来，现代化的计算机有了操作系统，每个程序都是一个进程，但是操作系统在一"><meta itemprop="datePublished" content="2019-07-12T13:29:52+00:00" />
 <meta itemprop="dateModified" content="2019-07-12T13:29:52+00:00" />
-<meta itemprop="wordCount" content="68392">
+<meta itemprop="wordCount" content="69322">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的调度器源码剖析"/>
 <meta name="twitter:description" content="协程 进程时代 最初的计算机上面没有操作系统，更别提进程、线程和协程了。 后来，现代化的计算机有了操作系统，每个程序都是一个进程，但是操作系统在一"/>
@@ -164,8 +164,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 68392 字 </span>
-          <span class="more-meta"> 预计阅读 137 分钟 </span>
+          <span class="more-meta"> 约 69322 字 </span>
+          <span class="more-meta"> 预计阅读 139 分钟 </span>
         
       </div>
     </header>
@@ -192,7 +192,7 @@
         <li><a href="#schedt">schedt</a></li>
       </ul>
     </li>
-    <li><a href="#调度流程">调度流程</a></li>
+    <li><a href="#调度组件与调度循环">调度组件与调度循环</a></li>
     <li><a href="#调度器初始化">调度器初始化</a>
       <ul>
         <li><a href="#schedinit">schedinit</a></li>
@@ -258,13 +258,15 @@
     <li><a href="#m的死亡">M的死亡</a></li>
     <li><a href="#触发调度">触发调度</a>
       <ul>
-        <li><a href="#主动阻塞锁定g">主动阻塞(锁定G)</a></li>
-        <li><a href="#用户态的阻塞唤醒锁定g">用户态的阻塞/唤醒(锁定G)</a></li>
+        <li><a href="#主动让出gosched锁定g">主动让出:Gosched(锁定G)</a></li>
+        <li><a href="#用户层阻塞唤醒gopark锁定g">用户层阻塞/唤醒:gopark(锁定G)</a></li>
         <li><a href="#系统态的阻塞唤醒锁定gm">系统态的阻塞/唤醒(锁定GM)</a></li>
       </ul>
     </li>
     <li><a href="#gomaxprocs">GOMAXPROCS</a></li>
     <li><a href="#模板线程">模板线程</a></li>
+    <li><a href="#gpm的缺陷">GPM的缺陷</a></li>
+    <li><a href="#参考">参考</a></li>
   </ul>
 </nav>
   </div>
@@ -307,24 +309,9 @@
 <p>Go采用了用户层轻量级thread或者说是类coroutine的概念来解决这些问题，Go将之称为”goroutine“。goroutine占用的资源非常小(Go 1.4将每个goroutine stack的size默认设置为2k)，goroutine调度的切换也不用陷入(trap)操作系统内核层完成，代价很低。因此，一个Go程序中可以创建成千上万个并发的goroutine。所有的Go代码都在goroutine中执行，哪怕是go的runtime也不例外。将这些goroutines按照一定算法放到“CPU”上执行的程序就称为goroutine调度器或goroutine scheduler。</p>
 <p>不过，一个Go程序对于操作系统来说只是一个用户层程序，对于操作系统而言，它的眼中只有thread，它甚至不知道有什么叫Goroutine的东西的存在。goroutine的调度全要靠Go自己完成，实现Go程序内goroutine之间“公平”的竞争“CPU”资源，这个任务就落到了Go runtime头上，要知道在一个Go程序中，除了用户代码，剩下的就是go runtime了。</p>
 <p>于是Goroutine的调度问题就演变为go runtime如何将程序内的众多goroutine按照一定算法调度到“CPU”资源上运行了。在操作系统层面，Thread竞争的“CPU”资源是真实的物理CPU，但在Go程序层面，各个Goroutine要竞争的”CPU”资源是什么呢？Go程序是用户层程序，它本身整体是运行在一个或多个操作系统线程上的，因此goroutine们要竞争的所谓“CPU”资源就是操作系统线程。这样Go scheduler的任务就明确了：将goroutines按照一定算法放到不同的操作系统线程中去执行。这种在语言层面自带调度器的，我们称之为原生支持并发。</p>
-<p>当我们每次写下:</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code><span class="lnt">1
-</span><span class="lnt">2
-</span><span class="lnt">3
-</span></code></pre></td>
-<td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="k">go</span> <span class="kd">func</span><span class="p">(){</span>
-	<span class="nb">println</span><span class="p">(</span><span class="err">&#34;</span><span class="nx">hello</span> <span class="nx">world</span><span class="p">)</span>
-<span class="p">}()</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>的时候,到底发生了什么?其实是向runtime提交了一个计算任务.<code>func(){xxxxx}</code>里包裹的代码就是这个计算任务的内容.</p>
-<p>Go 的调度流程本质上是一个生产-消费流程</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210808224533.png" alt=""></p>
 <h3 id="goroutine和线程的区别">goroutine和线程的区别</h3>
 <p>我们可以从三个角度区别：内存消耗、创建与销毀、切换。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810194505.png" alt=""></p>
 <h4 id="内存占用">内存占用</h4>
 <p>创建一个 goroutine 的栈内存消耗为 2 KB，实际运行过程中，如果栈空间不够用，会自动进行扩容。创建一个 thread 则需要消耗 1 MB 栈内存，而且还需要一个被称为 “a guard page” 的区域用于和其他 thread 的栈空间进行隔离。</p>
 <p>对于一个用 Go 构建的 HTTP Server 而言，对到来的每个请求，创建一个 goroutine 用来处理是非常轻松的一件事。而如果用一个使用线程作为并发原语的语言构建的服务，例如 Java 来说，每个请求对应一个线程则太浪费资源了，很快就会出 OOM 错误（OutOfMermoryError）。</p>
@@ -334,6 +321,45 @@
 <p>当 threads 切换时，需要保存各种寄存器，以便将来恢复：</p>
 <p>16 general purpose registers, PC (Program Counter), SP (Stack Pointer), segment registers, 16 XMM registers, FP coprocessor state, 16 AVX registers, all MSRs etc.</p>
 <p>而 goroutines 切换只需保存三个寄存器：Program Counter, Stack Pointer and BP。</p>
+<p>gobuf 描述一个 goroutine 所有现 场，从一个 g 切换到另一个 g，只要把这几个现场字段保存下来 再把 g 往队列里一扔，m 就可以执行其它 g 了 无需进入内核态</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">gobuf</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="c1">// 存储 rsp 寄存器的值
+</span><span class="c1"></span>    <span class="nx">sp</span>   <span class="kt">uintptr</span>
+    <span class="c1">// 存储 rip 寄存器的值
+</span><span class="c1"></span>    <span class="nx">pc</span>   <span class="kt">uintptr</span>
+    <span class="c1">// 指向 goroutine
+</span><span class="c1"></span>    <span class="nx">g</span>    <span class="nx">guintptr</span>
+    <span class="nx">ctxt</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// this has to be a pointer so that gc scans it
+</span><span class="c1"></span>    <span class="c1">// 保存系统调用的返回值
+</span><span class="c1"></span>    <span class="nx">ret</span>  <span class="nx">sys</span><span class="p">.</span><span class="nx">Uintreg</span>
+    <span class="nx">lr</span>   <span class="kt">uintptr</span>
+    <span class="nx">bp</span>   <span class="kt">uintptr</span> <span class="c1">// for GOEXPERIMENT=framepointer
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>sp — 栈指针（Stack Pointer）；</li>
+<li>pc — 程序计数器（Program Counter）；</li>
+<li>g — 持有 runtime.gobuf 的 Goroutine；</li>
+<li>ret — 系统调用的返回值；</li>
+</ul>
 <p>一般而言，线程切换会消耗 1000-1500 纳秒，一个纳秒平均可以执行 12-18 条指令。所以由于线程切换，执行指令的条数会减少 12000-18000。</p>
 <p>Goroutine 的切换约为 200 ns，相当于 2400-3600 条指令。</p>
 <p>因此，goroutines 切换成本比 threads 要小得多。</p>
@@ -363,6 +389,7 @@
 <li>M线程想运行任务就得获取P，从P的本地队列获取G，P队列为空时，M也会尝试从全局队列拿一批G放到P的本地队列，或从其他P的本地队列偷一半放到自己P的本地队列。M运行G，G执行之后，M会从P获取下一个G，不断重复下去。</li>
 </ol>
 <h3 id="g">G</h3>
+<p>G:goroutine，一个计算任务。由需要执行的代码和其上下文组成，上下文包括:当前代码位置，栈顶、栈底地址，状态等。</p>
 <p>Goroutine 就是 Go 语言调度器中待执行的任务，它在运行时调度器中的地位与线程在操作系统中差不多，但是它占用了更小的内存空间，也降低了上下文切换的开销。</p>
 <p>Goroutine 只存在于 Go 语言的运行时，它是 Go 语言在用户态提供的线程，作为一种粒度更细的资源调度单元，如果使用得当能够在高并发的场景下更高效地利用机器的 CPU。</p>
 <p>当 goroutine 被调离 CPU 时，调度器负责把 CPU 寄存器的值保存在 g 对象的成员变量之中。</p>
@@ -732,6 +759,7 @@ golang-goroutine-state-transition</li>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201126172549.png" alt=""></p>
 <p>说明一下，上图省略了一些垃圾回收的状态。</p>
 <h3 id="m">M</h3>
+<p>M:machine，系统线程，执行实体，想要在 CPU 上执行代码，必须有线 程，与 C 语言中的线程相同，通过系统调用 clone 来创建。</p>
 <p>Go 语言并发模型中的 M 是操作系统线程。调度器最多可以创建 10000 个线程，但是其中大多数的线程都不会执行用户代码（可能陷入系统调用），最多只会有 GOMAXPROCS 个活跃线程能够正常运行。</p>
 <p>在默认情况下，运行时会将 GOMAXPROCS 设置成当前机器的核数，我们也可以使用 runtime.GOMAXPROCS 来改变程序中最大的线程数。</p>
 <p>在默认情况下，一个四核机器上会创建四个活跃的操作系统线程，每一个线程都对应一个运行时中的 runtime.m 结构体。</p>
@@ -982,6 +1010,7 @@ golang-goroutine-state-transition</li>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201116140605.png" alt=""></p>
 <p>M 只有自旋和非自旋两种状态。自旋的时候，会努力找工作；找不到的时候会进入非自旋状态，之后会休眠，直到有工作需要处理时，被其他工作线程唤醒，又进入自旋状态。</p>
 <h3 id="p">P</h3>
+<p>P:processor，虚拟处理器，M 必须获得 P 才能执行代码，否则必须陷入休 眠(后台监控线程除外)，你也可以将其理解为一种 token，有这个 token，才 有在物理 CPU 核心上执行的权力。</p>
 <p>调度器中的处理器 P 是线程和 Goroutine 的中间层，它能提供线程需要的上下文环境，也会负责调度线程上的等待队列，通过处理器 P 的调度，每一个内核线程都能够执行多个 Goroutine，它能在 Goroutine 进行一些 I/O 操作时及时切换，提高线程的利用率。</p>
 <p>因为调度器在启动时就会创建 GOMAXPROCS 个处理器，所以 Go 语言程序的处理器数量一定会等于 GOMAXPROCS，这些处理器会绑定到不同的内核线程上并利用线程的计算资源运行 Goroutine。</p>
 <p>P 只是处理器的抽象，而非处理器本身，它存在的意义在于实现工作窃取（work stealing）算法。 简单来说，每个 P 持有一个 G 的本地队列。</p>
@@ -1474,8 +1503,134 @@ golang-goroutine-state-transition</li>
 <li>一旦发现调度停止（gcwaiting的值不为0或所有P都已闲置），就会把sysmonwait字段的值设置为1，并利用sysmonnote字段暂停自身。</li>
 <li>恢复调度之前，调度器若发现sysmonwait的值不为0，就把它置为0，并利用sysmonnote字段恢复系统监测任务的执行。</li>
 </ol>
-<h2 id="调度流程">调度流程</h2>
-<p>下面流程图，画出了主要的调度流程,现在我们根据流程图分析相关源码</p>
+<h2 id="调度组件与调度循环">调度组件与调度循环</h2>
+<p>当我们每次写下:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="k">go</span> <span class="kd">func</span><span class="p">(){</span>
+	<span class="nb">println</span><span class="p">(</span><span class="err">&#34;</span><span class="nx">hello</span> <span class="nx">world</span><span class="p">)</span>
+<span class="p">}()</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>的时候,到底发生了什么?其实是向runtime提交了一个计算任务.<code>func(){xxxxx}</code>里包裹的代码就是这个计算任务的内容.</p>
+<p>Go 的调度流程本质上是一个生产-消费流程</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210808224533.png" alt=""></p>
+<p>G-P-M调度模型如下:</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210808225207.png" alt=""></p>
+<p>goroutine 的生产端:</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210809163035.png" alt=""></p>
+<p>goroutine 的消费端:</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810180307.png" alt=""></p>
+<p>M 执行调度循环时， 必须与一个 P 绑定.</p>
+<p>Work stealing 就是说的 runqsteal -&gt; runqgrab 这个流程</p>
+<p>考虑如下代码输出:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;runtime&#34;</span>
+	<span class="s">&#34;time&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">10</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">i</span> <span class="o">:=</span> <span class="nx">i</span>
+		<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+			<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span>
+		<span class="p">}()</span>
+	<span class="p">}</span>
+	<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Hour</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="m">9</span>
+<span class="m">0</span>
+<span class="m">1</span>
+<span class="m">2</span>
+<span class="m">3</span>
+<span class="m">4</span>
+<span class="m">5</span>
+<span class="m">6</span>
+<span class="m">7</span>
+<span class="m">8</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>考虑下面代码:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">i</span> <span class="o">:=</span> <span class="mi">1</span>
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="c1">// 这个goroutine会导致进程在gc时hang 死
+</span><span class="c1"></span>		<span class="c1">// GC时需要停止所有goroutine.而老版本的Go的g停止需要主动让出
+</span><span class="c1"></span>		<span class="c1">// 1.14增加基于信号的抢占之后，该问题被解决
+</span><span class="c1"></span>		<span class="k">for</span> <span class="p">{</span>
+			<span class="nx">i</span><span class="o">++</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>下面流程图，画出了主要的调度流程,现在我们根据流程图分析相关源码</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190706222545.png" alt=""></p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201126205229.png" alt=""></p>
 <h2 id="调度器初始化">调度器初始化</h2>
@@ -3624,6 +3779,7 @@ golang-goroutine-state-transition</li>
 <li>当 next 为 false 并且本地运行队列还有剩余空间时，将 Goroutine 加入处理器持有的本地运行队列；</li>
 <li>当处理器的本地运行队列已经没有剩余空间时就会把本地队列中的一部分 Goroutine 和待加入的 Goroutine 通过 runqputslow 添加到调度器持有的全局运行队列上；</li>
 </ol>
+<p>因为代码的局部性原理,新创建的goroutine所需要的变量,极大概率在当前CPU的Cache中,所以调用runqput时,next为true.</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt"> 1
@@ -8184,8 +8340,7 @@ golang-goroutine-state-transition</li>
 <li>系统监控 — runtime.sysmon -&gt; runtime.retake -&gt; runtime.preemptone</li>
 </ul>
 <p>我们在这里介绍的调度时间点不是直接将线程的运行权交给其他任务，而是通过调度器的 runtime.schedule 重新调度。</p>
-<h3 id="主动阻塞锁定g">主动阻塞(锁定G)</h3>
-<h4 id="gosched">Gosched</h4>
+<h3 id="主动让出gosched锁定g">主动让出:Gosched(锁定G)</h3>
 <p>用户调用runtime.Gosched可将当前G任务暂停,重新放回全局队列,让出当前M去执行其他任务.我们无须对G做唤醒操作,因为它总归被某个M重新拿到,并从&quot;断点&quot;恢复.</p>
 <p>协作式调度即使用该方式。runtime.Gosched 就是主动让出处理器，允许其他 Goroutine 运行。该函数无法挂起 Goroutine，调度器会在自动调度当前 Goroutine：</p>
 <div class="highlight"><div class="chroma">
@@ -8300,14 +8455,14 @@ golang-goroutine-state-transition</li>
 <p>实现&quot;断点恢复&quot;的关键由mcall实现,它将当前执行状态,包括SP,PC寄存器等值保存到G.sched区域.</p>
 <p>当execute/gogo再次执行该任务时,自然可从中恢复状态.反正执行栈是G自带的,不用担心执行数据丢失.</p>
 <h4 id="触发时机">触发时机</h4>
-<h5 id="用户主动调用">用户主动调用</h5>
-<p>主动用户让权：通过 runtime.Gosched 调用主动让出执行机会</p>
-<h5 id="sysymonretake抢占">sysymon.retake抢占</h5>
-<p>主动调度弃权：当发生执行栈分段时，检查自身的抢占标记，决定是否继续执行.</p>
-<h3 id="用户态的阻塞唤醒锁定g">用户态的阻塞/唤醒(锁定G)</h3>
+<ul>
+<li>用户主动调用：通过 runtime.Gosched 调用主动让出执行机会</li>
+<li>sysymon.retake抢占:当发生执行栈分段时，检查自身的抢占标记，决定是否继续执行.</li>
+<li>GC:调用 runtime.sweepone 清理全部待处理的内存管理单元并等待所有的清理工作完成，等待期间会调用 runtime.Gosched 让出处理器</li>
+</ul>
+<h3 id="用户层阻塞唤醒gopark锁定g">用户层阻塞/唤醒:gopark(锁定G)</h3>
 <p>当 G 在用户态阻塞的时候(例如从 channel 读/写)，会将当前 G 的状态从 Running 改为 Wait，同时将 G 放入到一个 wait 队列中(例如 channel 的 wait 队列)。</p>
-<p>当 G 被另外一个 G2 唤醒时(通过 goready 函数)，那么 G 就会尝试加入到 G2 所在 P 的 runnext 中，如果不成的话，会依次尝试 本地g队列 和 全局g队列。</p>
-<h4 id="gopark">gopark</h4>
+<p>这些情况不会阻塞调度循环，而是会把 goroutine 挂起 所谓的挂起，其实让 g 先进某个数据结构，待 ready 后再继续执行 不会占用线程.这时候，线程会进入 schedule，继续消费队列，执行其它的 g</p>
 <p>与Gosched最大的区别在于,gopark并没将G放回待运行队列.也就是说,必须主动恢复,否则该任务会遗失.</p>
 <p>应用层阻塞通常使用这种方式。runtime.gopark 是触发调度最常见的方法，该函数会将当前 Goroutine 暂停，被暂停的任务不会放回运行队列.</p>
 <p>gopark函数做的主要事情分为两点：</p>
@@ -8493,6 +8648,7 @@ golang-goroutine-state-transition</li>
 </div>
 </div><p>该函数会将当前 Goroutine 的状态从 _Grunning 切换至_Gwaiting，调用 runtime.dropg 移除线程和 Goroutine 之间的关联，在这之后就可以调用 runtime.schedule 触发新一轮的调度了。</p>
 <p>当 Goroutine 等待的特定条件满足后，运行时会调用 runtime.goready 将因为调用 runtime.gopark 而陷入休眠的 Goroutine 唤醒。</p>
+<p>当 G 被另外一个 G2 唤醒时(通过 goready 函数)，那么 G 就会尝试加入到 G2 所在 P 的 runnext 中，如果不成的话，会依次尝试 本地g队列 和 全局g队列。</p>
 <p>与之配套,goready用于恢复执行,G被放回优先级最高的P.runnext</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -8576,6 +8732,8 @@ golang-goroutine-state-transition</li>
 </div>
 </div><p>runtime.ready 会将准备就绪的 Goroutine 的状态切换至 _Grunnable 并将其加入处理器的运行队列中，等待调度器的调度。</p>
 <h4 id="触发时机-1">触发时机</h4>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810185626.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810185738.png" alt=""></p>
 <h5 id="time定时操作">time定时操作</h5>
 <p>time.Sleep举例:</p>
 <div class="highlight"><div class="chroma">
@@ -8632,7 +8790,7 @@ golang-goroutine-state-transition</li>
 </div><p>调用gopark</p>
 <h5 id="使用关键字-go">使用关键字 go</h5>
 <p>新开一个协程，g状态会变为_GIdle，触发调度。</p>
-<h5 id="内存同步访问">内存同步访问</h5>
+<h5 id="atomicmutexchannel">atomic,mutex,channel</h5>
 <p>atomic，mutex，channel 操作等会使 goroutine 阻塞，因此会被调度走。等条件满足后（例如其他 goroutine 解锁了）还会被调度上来继续运行</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -8762,10 +8920,24 @@ golang-goroutine-state-transition</li>
 </div>
 </div><p>可以看到，还是调用ggopark，来进行调度。</p>
 <h5 id="网络读写">网络读写</h5>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810184736.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810184748.png" alt=""></p>
 <h5 id="垃圾回收">垃圾回收</h5>
 <p>由于进行 GC 的 goroutine 也需要在 M 上运行，因此肯定会发生调度。当然，Go scheduler 还会做很多其他的调度，例如调度不涉及堆访问的 goroutine 来运行。GC 不管栈上的内存，只会回收堆上的内存</p>
 <h3 id="系统态的阻塞唤醒锁定gm">系统态的阻塞/唤醒(锁定GM)</h3>
 <h4 id="同异步系统调用">同/异步系统调用</h4>
+<p>同异步系统调用可以用函数注释来区分:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">//sysnb: syscall nonblocking
+</span><span class="c1">//sys: syscall blocking
+</span></code></pre></td></tr></table>
+</div>
+</div><p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810193045.png" alt=""></p>
 <p>当OS有能力去处理异步的系统调用时候，使用网络轮询器(network poller)去处理系统调用会更加高效。不同的操作系统分别使用了kqueue (MacOS)、epoll (Linux) 、 iocp (Windows) 对此作了实现。</p>
 <p>今天许多操作系统都能处理基于网络(Networking-based)的系统调用。这也是网络轮询器(network poller)这一名字的由来，因为它的主要用途就是处理网络操作。网络系统上通过使用network poller，调度器可以防止Goroutines在系统调用的时候阻塞M。这可以让M能够去执行P的本地G队列上面的其他Goroutines，而不是再去新建一个M。这可以减少OS上的调度加载。</p>
 <p>最好的方式就是给一个例子看看这些东西是如何工作的。</p>
@@ -10335,8 +10507,12 @@ golang-goroutine-state-transition</li>
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>参考:
-<a href="https://tonybai.com/2017/06/23/an-intro-about-goroutine-scheduler/">https://tonybai.com/2017/06/23/an-intro-about-goroutine-scheduler/</a>
+</div><h2 id="gpm的缺陷">GPM的缺陷</h2>
+<p>创建的 M 正常情况下是无法被回收</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810200647.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810200700.png" alt=""></p>
+<h2 id="参考">参考</h2>
+<p><a href="https://tonybai.com/2017/06/23/an-intro-about-goroutine-scheduler/">https://tonybai.com/2017/06/23/an-intro-about-goroutine-scheduler/</a>
 <a href="https://wudaijun.com/2018/01/go-scheduler/">https://wudaijun.com/2018/01/go-scheduler/</a>
 <a href="https://github.com/qyuhen/book/blob/master/Go%201.5%20%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90%20%EF%BC%88%E4%B9%A6%E7%AD%BE%E7%89%88%EF%BC%89.pdf">https://github.com/qyuhen/book/blob/master/Go%201.5%20%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90%20%EF%BC%88%E4%B9%A6%E7%AD%BE%E7%89%88%EF%BC%89.pdf</a>
 <a href="https://draveness.me/golang/docs/part3-runtime/ch06-concurrency/golang-goroutine/#657-%E7%BA%BF%E7%A8%8B%E7%AE%A1%E7%90%86">6.5 调度器</a>
