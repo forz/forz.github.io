@@ -53,7 +53,7 @@
 <meta itemprop="name" content="基本数据结构map源码剖析">
 <meta itemprop="description" content="前言 本节会介绍 Go 语言的哈希的实现原理，哈希是除了数组之外，最常见的数据结构。几乎所有的语言都会有数组和哈希表两种集合元素，有的语言将数组实现"><meta itemprop="datePublished" content="2021-07-01T20:22:12+00:00" />
 <meta itemprop="dateModified" content="2021-07-01T20:22:12+00:00" />
-<meta itemprop="wordCount" content="29886">
+<meta itemprop="wordCount" content="30062">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="基本数据结构map源码剖析"/>
 <meta name="twitter:description" content="前言 本节会介绍 Go 语言的哈希的实现原理，哈希是除了数组之外，最常见的数据结构。几乎所有的语言都会有数组和哈希表两种集合元素，有的语言将数组实现"/>
@@ -164,8 +164,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 29886 字 </span>
-          <span class="more-meta"> 预计阅读 60 分钟 </span>
+          <span class="more-meta"> 约 30062 字 </span>
+          <span class="more-meta"> 预计阅读 61 分钟 </span>
         
       </div>
     </header>
@@ -211,6 +211,7 @@
     </li>
     <li><a href="#遍历">遍历</a></li>
     <li><a href="#小结">小结</a></li>
+    <li><a href="#缺陷">缺陷</a></li>
     <li><a href="#参考">参考</a></li>
   </ul>
 </nav>
@@ -362,6 +363,7 @@
 </div>
 </div><p>Map的最大桶的数量为2^255个，因为hmap.B为uint8类型，最大值为255.</p>
 <p>桶的数量是2^B个</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810214123.png" alt=""></p>
 <h3 id="bmap">bmap</h3>
 <p>哈希表 <code>runtime.hmap</code> 的桶是 <code>runtime.bmap</code>。每一个 <code>runtime.bmap</code> 都能存储 8 个键值对，当哈希表中存储的数据过多，单个桶已经装满时就会使用 <code>extra.nextOverflow</code> 中桶存储溢出的数据。</p>
 <p>上述两种不同的桶在内存中是连续存储的，我们在这里将它们分别称为正常桶和溢出桶，上图中黄色的 <code>runtime.bmap</code> 就是正常桶，绿色的 <code>runtime.bmap</code> 是溢出桶，溢出桶是在 Go 语言还使用 C 语言实现时使用的设计，由于它能够减少扩容的频率所以一直使用至今。</p>
@@ -2363,8 +2365,14 @@
 <p>再来说触发 map 扩容的时机：在向 map 插入新 key 的时候，会进行条件检测，符合下面这 2 个条件，就会触发扩容：</p>
 <ol>
 <li>装载因子超过阈值，源码里定义的阈值是 6.5。</li>
-<li>overflow 的 bucket 数量过多：当 B 小于 15，也就是 bucket 总数 2^B 小于 2^15 时，如果 overflow 的 bucket 数量超过 2^B；当 B &gt;= 15，也就是 bucket 总数 2^B 大于等于 2^15，如果 overflow 的 bucket 数量超过 2^15。</li>
+<li>overflow 的 bucket 数量过多：
+<ol>
+<li>当 B &lt; 15，也就是 bucket 总数 2^B 小于 2^15 时，如果 overflow 的 bucket 数量超过 2^B；</li>
+<li>当 B &gt;= 15，也就是 bucket 总数 2^B 大于等于 2^15，如果 overflow 的 bucket 数量超过 2^15。</li>
 </ol>
+</li>
+</ol>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810220350.png" alt=""></p>
 <p>不过因为 Go 语言哈希的扩容不是一个原子的过程，所以 runtime.mapassign 还需要判断当前哈希是否已经处于扩容状态，避免二次扩容造成混乱。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2448,6 +2456,13 @@
 </ol>
 </li>
 </ol>
+<p>扩容中:</p>
+<ul>
+<li>mapasssign:将命中的 bucket 从 oldbuckets 顺手搬运到buckets 中，顺便再多搬运一个 bucket</li>
+<li>mapdelete:将命中的 bucket 从 oldbuckets 顺手搬运到buckets 中，顺便再多搬运一个 bucket</li>
+<li>mapaccess: 优先在 oldbuckets 中找，如果命中，则说明这个 bucket 没有被搬运</li>
+<li>搬运 bucket x 时，会被该桶的 overflow 桶也一并搬完</li>
+</ul>
 <h4 id="hashgrow">hashGrow</h4>
 <p>我们先看 hashGrow() 函数所做的工作，再来看具体的搬迁 buckets 是如何进行的。</p>
 <div class="highlight"><div class="chroma">
@@ -3826,6 +3841,14 @@
 </div><h2 id="小结">小结</h2>
 <p>Go 语言使用拉链法来解决哈希碰撞的问题实现了哈希表，它的访问、写入和删除等操作都在编译期间转换成了运行时的函数或者方法。哈希在每一个桶中存储键对应哈希的前 8 位，当对哈希进行操作时，这些 tophash 就成为可以帮助哈希快速遍历桶中元素的缓存。</p>
 <p>哈希表的每个桶都只能存储 8 个键值对，一旦当前哈希的某个桶超出 8 个，新的键值对就会存储到哈希的溢出桶中。随着键值对数量的增加，溢出桶的数量和哈希的装载因子也会逐渐升高，超过一定范围就会触发扩容，扩容会将桶的数量翻倍，元素再分配的过程也是在调用写操作时增量进行的，不会造成性能的瞬时巨大抖动。</p>
+<h2 id="缺陷">缺陷</h2>
+<p>已经扩容的 map，无法收缩</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810215452.png" alt=""></p>
+<p>保证并发安全时，要手动读写锁，易出错,多核心下表现差</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810215520.png" alt=""></p>
+<p>难以使用 sync.Pool 进行重用</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810215537.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810215544.png" alt=""></p>
 <h2 id="参考">参考</h2>
 <p><a href="https://draveness.me/golang/docs/part2-foundation/ch03-datastructure/golang-hashmap/#%E6%89%A9%E5%AE%B9">3.3 哈希表</a></p>
 <p><a href="https://www.jianshu.com/p/241583eb8158">Go-Map源码解读</a></p>

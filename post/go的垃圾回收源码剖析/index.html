@@ -17,7 +17,7 @@
 
 
 <meta name="author"
-  content="Forz" /><meta name="description" content="设计理念 Go 实现的垃圾回收器是无分代（对象没有代际之分）、不整理（回收过程中不对对象进行移动与整理）、并发（与用户代码并发执行）的三色标记清扫" /><meta name="keywords"
+  content="Forz" /><meta name="description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage)—有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引" /><meta name="keywords"
   content="Hugo, theme, even" />
 
 
@@ -44,19 +44,19 @@
 
 
 <meta property="og:title" content="Go的垃圾回收源码剖析" />
-<meta property="og:description" content="设计理念 Go 实现的垃圾回收器是无分代（对象没有代际之分）、不整理（回收过程中不对对象进行移动与整理）、并发（与用户代码并发执行）的三色标记清扫" />
+<meta property="og:description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage)—有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/go%E7%9A%84%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
 <meta property="article:published_time" content="2020-11-30T14:52:24+00:00" />
 <meta property="article:modified_time" content="2020-11-30T14:52:24+00:00" />
 
 <meta itemprop="name" content="Go的垃圾回收源码剖析">
-<meta itemprop="description" content="设计理念 Go 实现的垃圾回收器是无分代（对象没有代际之分）、不整理（回收过程中不对对象进行移动与整理）、并发（与用户代码并发执行）的三色标记清扫"><meta itemprop="datePublished" content="2020-11-30T14:52:24+00:00" />
+<meta itemprop="description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage)—有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引"><meta itemprop="datePublished" content="2020-11-30T14:52:24+00:00" />
 <meta itemprop="dateModified" content="2020-11-30T14:52:24+00:00" />
-<meta itemprop="wordCount" content="47469">
+<meta itemprop="wordCount" content="47652">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的垃圾回收源码剖析"/>
-<meta name="twitter:description" content="设计理念 Go 实现的垃圾回收器是无分代（对象没有代际之分）、不整理（回收过程中不对对象进行移动与整理）、并发（与用户代码并发执行）的三色标记清扫"/>
+<meta name="twitter:description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage)—有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引"/>
 
 <!--[if lte IE 9]>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
@@ -164,8 +164,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 47469 字 </span>
-          <span class="more-meta"> 预计阅读 95 分钟 </span>
+          <span class="more-meta"> 约 47652 字 </span>
+          <span class="more-meta"> 预计阅读 96 分钟 </span>
         
       </div>
     </header>
@@ -175,6 +175,7 @@
   <div class="post-toc-content always-active">
     <nav id="TableOfContents">
   <ul>
+    <li><a href="#垃圾分类">垃圾分类</a></li>
     <li><a href="#设计理念">设计理念</a></li>
     <li><a href="#三色抽象">三色抽象</a></li>
     <li><a href="#屏障技术">屏障技术</a>
@@ -210,7 +211,16 @@
   </div>
 </div>
     <div class="post-content">
-      <h2 id="设计理念">设计理念</h2>
+      <h2 id="垃圾分类">垃圾分类</h2>
+<p>垃圾分为以下两类:</p>
+<ul>
+<li>语义垃圾(semantic garbage)—有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引用 得到)的对象，但从语义上来讲他们是垃圾，垃圾回收器对此 无能为力。</li>
+<li>语法垃圾(syntactic garbage) 语法垃圾是讲那些从语法上无法到达的对象，这些才是垃圾 收集器主要的收集目标。</li>
+</ul>
+<p>语法垃圾:</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210812214439.png" alt=""></p>
+<p>在 allocOnHeap 返回后， 堆上的 a 无法访问 便成为了语法垃圾.</p>
+<h2 id="设计理念">设计理念</h2>
 <p>Go 实现的垃圾回收器是无分代（对象没有代际之分）、不整理（回收过程中不对对象进行移动与整理）、并发（与用户代码并发执行）的三色标记清扫算法。 从宏观的角度来看，Go 运行时的垃圾回收器主要包含五个阶段：</p>
 <ol>
 <li>清理终止阶段(STW):为下一个阶段的并发标记做准备工作，启动写屏障；
@@ -244,7 +254,7 @@
 <li>内存归还(并发):将过多的内存归还给操作系统，写屏障处于关闭状态</li>
 </ol>
 <p>GC流程图:</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201215144804.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210812215006.png" alt=""></p>
 <ul>
 <li>Stack scan：收集根对象（全局变量，和G stack），开启写屏障。全局变量、开启写屏障需要STW，G stack只需要停止该G就好，时间比较少。</li>
 <li>Mark: 扫描所有根对象, 和根对象可以到达的所有对象, 标记它们不被回收</li>

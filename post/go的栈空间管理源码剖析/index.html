@@ -53,7 +53,7 @@
 <meta itemprop="name" content="Go的栈空间管理源码剖析">
 <meta itemprop="description" content="设计原理 栈区的内存一般由编译器自动进行分配和释放，其中存储着函数的入参以及局部变量，这些参数会随着函数的创建而创建，函数的返回而消亡，一般不"><meta itemprop="datePublished" content="2020-12-18T17:46:19+00:00" />
 <meta itemprop="dateModified" content="2020-12-18T17:46:19+00:00" />
-<meta itemprop="wordCount" content="16717">
+<meta itemprop="wordCount" content="18742">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的栈空间管理源码剖析"/>
 <meta name="twitter:description" content="设计原理 栈区的内存一般由编译器自动进行分配和释放，其中存储着函数的入参以及局部变量，这些参数会随着函数的创建而创建，函数的返回而消亡，一般不"/>
@@ -164,8 +164,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 16717 字 </span>
-          <span class="more-meta"> 预计阅读 34 分钟 </span>
+          <span class="more-meta"> 约 18742 字 </span>
+          <span class="more-meta"> 预计阅读 38 分钟 </span>
         
       </div>
     </header>
@@ -192,6 +192,15 @@
       </ul>
     </li>
     <li><a href="#栈内存的申请与堆内存的申请">栈内存的申请与堆内存的申请</a></li>
+    <li><a href="#逃逸分析场景">逃逸分析场景</a>
+      <ul>
+        <li><a href="#逃逸日志分析">逃逸日志分析</a></li>
+        <li><a href="#全部逃逸情景">全部逃逸情景</a></li>
+        <li><a href="#逃逸情景传址">逃逸情景:传址</a></li>
+        <li><a href="#逃逸情景切片">逃逸情景:切片</a></li>
+        <li><a href="#结论">结论</a></li>
+      </ul>
+    </li>
     <li><a href="#小结">小结</a></li>
     <li><a href="#参考">参考</a></li>
   </ul>
@@ -276,6 +285,18 @@
 <li>记录从函数的调用参数到堆以及返回值的数据流，增强函数参数的逃逸分析；</li>
 </ol>
 <p>决定变量是在栈上还是堆上虽然重要，但是这是一个定义相对清晰的问题，我们可以通过编译器在统一作出决策。为了保证内存的绝对安全，编译器可能会将一些变量错误地分配到堆上，但是因为这些对也会被垃圾收集器处理，所以不会造成内存泄露以及悬挂指针等安全问题，解放了工程师的生产力。</p>
+<p>逃逸机制的用处:</p>
+<ol>
+<li>
+<p>最大的好处应该是减少gc的压力，不逃逸的对象分配在栈上，当函数返回时就回收了资源，不需要gc标记清除。</p>
+</li>
+<li>
+<p>因为逃逸分析完后可以确定哪些变量可以分配在栈上，栈的分配比堆快，性能好</p>
+</li>
+<li>
+<p>同步消除，如果你定义的对象的方法上有同步锁，但在运行时，却只有一个线程在访问，此时逃逸分析后的机器码，会去掉同步锁运行。</p>
+</li>
+</ol>
 <h3 id="栈内存空间">栈内存空间</h3>
 <p>Go 语言使用用户态线程 Goroutine 作为执行上下文，它的额外开销和默认栈大小都比线程小很多，然而 Goroutine 的栈内存空间和栈结构也在早期几个版本中发生过一些变化：</p>
 <ol>
@@ -903,7 +924,7 @@
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Allocates a stack from the free pool. Must be called with
 </span><span class="c1">// stackpool[order].item.mu held.
 </span><span class="c1"></span><span class="kd">func</span> <span class="nf">stackpoolalloc</span><span class="p">(</span><span class="nx">order</span> <span class="kt">uint8</span><span class="p">)</span> <span class="nx">gclinkptr</span> <span class="p">{</span>
-	<span class="c1">//我们有一个全局的缓存池，stackpool，存储的就是不同规格的spanlist，首先我们获取对应规格的spanlist 
+	<span class="c1">//我们有一个全局的缓存池，stackpool，存储的就是不同规格的spanlist，首先我们获取对应规格的spanlist
 </span><span class="c1"></span>	<span class="nx">list</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">stackpool</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">item</span><span class="p">.</span><span class="nx">span</span>
 	<span class="c1">//s为指向span的指针
 </span><span class="c1"></span>	<span class="nx">s</span> <span class="o">:=</span> <span class="nx">list</span><span class="p">.</span><span class="nx">first</span>
@@ -3267,12 +3288,468 @@
 <p>既然我们栈内存的申请并非为单个变量申请的，所以我们在这也发现不了哪些地方存储了指针。</p>
 </li>
 </ol>
+<p>golang是根据在adjustframe函数中的一个stackmap类型找到栈內的指针了，那么谁来更新它呢？猜测应该是创建变量的时候入栈操作，会相应的更新这个类似bigmap的东西吧。 到此，栈内存的分配基本结束了。</p>
+<h2 id="逃逸分析场景">逃逸分析场景</h2>
+<h3 id="逃逸日志分析">逃逸日志分析</h3>
+<p>开启逃逸分析日志很简单，只要在编译的时候加上<code>-gcflags '-m'</code>，但是我们为了不让编译时自动内联函数，一般会加<code>-l</code>参数，最终为<code>-gcflags '-m -l'</code></p>
+<p>Example:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;fmt&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">s</span> <span class="o">:=</span> <span class="s">&#34;hello&#34;</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">go</span> <span class="n">run</span> <span class="o">-</span><span class="n">gcflags</span> <span class="s">&#39;-m -l&#39;</span> <span class="n">escape.go</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Output:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-fallback" data-lang="fallback">### command-line-arguments
+escape_analysis/main.go:9: s escapes to heap
+escape_analysis/main.go:9: main ... argument does not escape
+hello
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="全部逃逸情景">全部逃逸情景</h3>
+<p>全部逃逸情景参考: <a href="https://github.com/golang/go/tree/master/test">https://github.com/golang/go/tree/master/test</a> 下的escape相关文件</p>
+<h3 id="逃逸情景传址">逃逸情景:传址</h3>
+<h4 id="example1">Example1</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kd">type</span> <span class="nx">S</span> <span class="kd">struct</span><span class="p">{}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">x</span> <span class="nx">S</span>
+    <span class="nx">y</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">x</span>
+    <span class="nx">_</span> <span class="p">=</span> <span class="o">*</span><span class="nf">identity</span><span class="p">(</span><span class="nx">y</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">identity</span><span class="p">(</span><span class="nx">z</span> <span class="o">*</span><span class="nx">S</span><span class="p">)</span> <span class="o">*</span><span class="nx">S</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nx">z</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Output:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-fallback" data-lang="fallback">### command-line-arguments
+escape_analysis/main.go:11: leaking param: z to result ~r1 level=0
+escape_analysis/main.go:7: main &amp;x does not escape
+</code></pre></td></tr></table>
+</div>
+</div><p>这里的第一行表示z变量是“流式”，因为identity这个函数仅仅输入一个变量，又将这个变量作为返回输出，但identity并没有引用z，所以这个变量没有逃逸，而x没有被引用，且生命周期也在main里，x没有逃逸，分配在栈上。</p>
+<h4 id="example2">Example2</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kd">type</span> <span class="nx">S</span> <span class="kd">struct</span><span class="p">{}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">x</span> <span class="nx">S</span>
+    <span class="nx">_</span> <span class="p">=</span> <span class="o">*</span><span class="nf">ref</span><span class="p">(</span><span class="nx">x</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">ref</span><span class="p">(</span><span class="nx">z</span> <span class="nx">S</span><span class="p">)</span> <span class="o">*</span><span class="nx">S</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">z</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Output:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-fallback" data-lang="fallback">### command-line-arguments
+escape_analysis/main.go:11: &amp;z escapes to heap
+escape_analysis/main.go:10: moved to heap: z
+</code></pre></td></tr></table>
+</div>
+</div><p>这里的z是逃逸了，原因很简单，go都是值传递，ref函数copy了x的值，传给z，返回z的指针，然后在函数外被引用，说明z这个变量在函数內声明，可能会被函数外的其他程序访问。所以z逃逸了，分配在堆上</p>
+<h4 id="example3">Example3</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kd">type</span> <span class="nx">S</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">M</span> <span class="o">*</span><span class="kt">int</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">i</span> <span class="kt">int</span>
+    <span class="nf">refStruct</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">refStruct</span><span class="p">(</span><span class="nx">y</span> <span class="kt">int</span><span class="p">)</span> <span class="p">(</span><span class="nx">z</span> <span class="nx">S</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">z</span><span class="p">.</span><span class="nx">M</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">y</span>
+    <span class="k">return</span> <span class="nx">z</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Output:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-fallback" data-lang="fallback">### command-line-arguments
+escape_analysis/main.go:13: &amp;y escapes to heap
+escape_analysis/main.go:12: moved to heap: y
+</code></pre></td></tr></table>
+</div>
+</div><p>看日志的输出，这里的y是逃逸了，看来在struct里好像并没有区别，有可能被函数外的程序访问就会逃逸</p>
+<h4 id="example4">Example4</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kd">type</span> <span class="nx">S</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">M</span> <span class="o">*</span><span class="kt">int</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">i</span> <span class="kt">int</span>
+    <span class="nf">refStruct</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">i</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">refStruct</span><span class="p">(</span><span class="nx">y</span> <span class="o">*</span><span class="kt">int</span><span class="p">)</span> <span class="p">(</span><span class="nx">z</span> <span class="nx">S</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">z</span><span class="p">.</span><span class="nx">M</span> <span class="p">=</span> <span class="nx">y</span>
+    <span class="k">return</span> <span class="nx">z</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Output:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-fallback" data-lang="fallback">### command-line-arguments
+escape_analysis/main.go:12: leaking param: y to result z level=0
+escape_analysis/main.go:9: main &amp;i does not escape
+</code></pre></td></tr></table>
+</div>
+</div><p>这里的y没有逃逸，分配在栈上，原因和Example1是一样的。</p>
+<h4 id="example5">Example5</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kd">type</span> <span class="nx">S</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">M</span> <span class="o">*</span><span class="kt">int</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">x</span> <span class="nx">S</span>
+    <span class="kd">var</span> <span class="nx">i</span> <span class="kt">int</span>
+    <span class="nf">ref</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">i</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">x</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">ref</span><span class="p">(</span><span class="nx">y</span> <span class="o">*</span><span class="kt">int</span><span class="p">,</span> <span class="nx">z</span> <span class="o">*</span><span class="nx">S</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">z</span><span class="p">.</span><span class="nx">M</span> <span class="p">=</span> <span class="nx">y</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Output:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-fallback" data-lang="fallback">### command-line-arguments
+escape_analysis/main.go:13: leaking param: y
+escape_analysis/main.go:13: ref z does not escape
+escape_analysis/main.go:10: &amp;i escapes to heap
+escape_analysis/main.go:9: moved to heap: i
+escape_analysis/main.go:10: main &amp;x does not escape
+</code></pre></td></tr></table>
+</div>
+</div><p>这里的z没有逃逸，而i却逃逸了，这是因为go的逃逸分析不知道z和i的关系，逃逸分析不知道参数y是z的一个成员，所以只能把它分配给堆。</p>
+<h4 id="example6">Example6</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kd">type</span> <span class="nx">Ret</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">Data</span> <span class="o">*</span><span class="kt">int</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">g</span><span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="kt">int</span><span class="p">)</span> <span class="o">*</span><span class="nx">Ret</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">ret</span> <span class="nx">Ret</span>
+	<span class="nx">ret</span><span class="p">.</span><span class="nx">Data</span> <span class="p">=</span> <span class="nx">p</span>
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">ret</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">c</span> <span class="o">:=</span> <span class="nb">new</span><span class="p">(</span><span class="kt">int</span><span class="p">)</span>
+	<span class="o">*</span><span class="nx">c</span> <span class="p">=</span> <span class="mi">4</span>
+	<span class="nx">_</span> <span class="p">=</span> <span class="nf">g</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>逃逸分析结果</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-fallback" data-lang="fallback">### command-line-arguments
+./test_stack.go:10:9: &amp;ret escapes to heap
+./test_stack.go:8:6: moved to heap: ret
+./test_stack.go:7:17: leaking param: p to result ~r1 level=-1
+./test_stack.go:14:10: new(int) escapes to heap
+</code></pre></td></tr></table>
+</div>
+</div><p>可以看到，ret和2.2中一样，存在外部引用，发生了逃逸</p>
+<p>由于ret.Data是一个指针对象，p赋值给ret.Data后，也伴随p发生了逃逸</p>
+<p>ain()中的对象c，由于作为参数p传入g()后发生了逃逸，因此c也发生了逃逸</p>
+<p>当然，如果定义ret.Data为int(instead of *int)的话，对象p也是不会逃逸的(执行了拷贝)</p>
+<h3 id="逃逸情景切片">逃逸情景:切片</h3>
+<h4 id="example7">Example7</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;fmt&#34;</span>
+<span class="p">)</span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">a</span> <span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="kt">int</span>
+    <span class="nx">c</span> <span class="o">:=</span> <span class="nx">a</span><span class="p">[:]</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-fallback" data-lang="fallback">go run -gcflags &#39;-m -l&#39; test.go
+### command-line-arguments
+./test.go:10:13: c escapes to heap
+./test.go:9:8: a escapes to heap
+./test.go:8:6: moved to heap: a
+./test.go:10:13: main ... argument does not escape
+[0]
+</code></pre></td></tr></table>
+</div>
+</div><p>再看另一个代码，跟开始那段代码的区别，一个用的fmt.Println，一个用的println。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">a</span> <span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="kt">int</span>
+    <span class="nx">c</span> <span class="o">:=</span> <span class="nx">a</span><span class="p">[:]</span>
+    <span class="nb">println</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>但是!!! 这段代码a是在栈上分配的。而最上面那段，却是在堆上分配的。</p>
+<h3 id="结论">结论</h3>
+<p>导致内存逃逸的情况比较多，有些可能还是官方未能够实现精确的分析逃逸情况的bug，简单一点来讲就是如果变量的作用域不会扩大并且其行为或者大小能够在编译的时候确定，一般情况下都是分配到栈上，否则就可能发生内存逃逸分配到堆上。</p>
+<p>简单总结一下有以下几类情况：</p>
+<ol>
+<li>
+<p>发送指针的指针或值包含了指针到 channel 中，由于在编译阶段无法确定其作用域与传递的路径，所以一般都会逃逸到堆上分配。</p>
+</li>
+<li>
+<p>slices 中的值是指针的指针或包含指针字段。一个例子是类似 <code>[] *string</code> 的类型。这总是导致 slice 的逃逸。即使切片的底层存储数组仍可能位于堆栈上，数据的引用也会转移到堆中。</p>
+</li>
+<li>
+<p>slice 由于 append 操作超出其容量，因此会导致 slice 重新分配。这种情况下，由于在编译时 slice 的初始大小的已知情况下，将会在栈上分配。如果 slice 的底层存储必须基于仅在运行时数据进行扩展，则它将分配在堆上。</p>
+</li>
+<li>
+<p>调用接口类型的方法(比如<code>fmt.Println</code>)。接口类型的方法调用是动态调度 - 实际使用的具体实现只能在运行时确定。考虑一个接口类型为 <code>io.Reader</code> 的变量 r。对 <code>r.Read(b)</code> 的调用将导致 r 的值和字节片 b 的后续转义并因此分配到堆上。</p>
+</li>
+<li>
+<p>尽管能够符合分配到栈的场景，但是其大小不能够在在编译时候确定的情况，也会分配到堆上</p>
+</li>
+</ol>
 <h2 id="小结">小结</h2>
 <p>栈内存是应用程序中重要的内存空间，它能够支持本地的局部变量和函数调用，栈空间中的变量会与栈一同创建和销毁，这部分内存空间不需要工程师过多的干预和管理，现代的编程语言通过逃逸分析减少了我们的工作量，理解栈空间的分配对于理解 Go 语言的运行时有很大的帮助。</p>
 <h2 id="参考">参考</h2>
 <p><a href="https://draveness.me/golang/docs/part3-runtime/ch07-memory/golang-stack-management/">7.3 栈空间管理</a>
-<a href="https://www.codenong.com/js9c1e05c223c6/">栈内存管理</a><br>
-<a href="https://golang.design/under-the-hood/zh-cn/part2runtime/ch06sched/stack/#673-g-">6.7 执行栈管理</a><br>
+<a href="https://www.codenong.com/js9c1e05c223c6/">栈内存管理</a>
+<a href="https://golang.design/under-the-hood/zh-cn/part2runtime/ch06sched/stack/#673-g-">6.7 执行栈管理</a>
 <a href="https://zhuanlan.zhihu.com/p/53928867">从垃圾回收解开Golang内存管理的面纱之二Golang的堆栈分析</a></p>
 
     </div>
