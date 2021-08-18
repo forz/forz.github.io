@@ -53,7 +53,7 @@
 <meta itemprop="name" content="Go的垃圾回收源码剖析">
 <meta itemprop="description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage)—有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引"><meta itemprop="datePublished" content="2020-11-30T14:52:24+00:00" />
 <meta itemprop="dateModified" content="2020-11-30T14:52:24+00:00" />
-<meta itemprop="wordCount" content="47652">
+<meta itemprop="wordCount" content="47686">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的垃圾回收源码剖析"/>
 <meta name="twitter:description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage)—有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引"/>
@@ -164,7 +164,7 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 47652 字 </span>
+          <span class="more-meta"> 约 47686 字 </span>
           <span class="more-meta"> 预计阅读 96 分钟 </span>
         
       </div>
@@ -182,6 +182,7 @@
       <ul>
         <li><a href="#插入写屏障">插入写屏障</a></li>
         <li><a href="#删除写屏障">删除写屏障</a></li>
+        <li><a href="#写屏障对比">写屏障对比</a></li>
         <li><a href="#混合写屏障">混合写屏障</a></li>
       </ul>
     </li>
@@ -198,13 +199,12 @@
         <li><a href="#全局变量">全局变量</a></li>
         <li><a href="#根对象">根对象</a></li>
         <li><a href="#触发时机">触发时机</a></li>
-        <li><a href="#垃圾收集启动">垃圾收集启动</a></li>
+        <li><a href="#垃圾收集启动gcstart">垃圾收集启动:gcStart</a></li>
         <li><a href="#并发扫描与标记辅助">并发扫描与标记辅助</a></li>
-        <li><a href="#标记终止">标记终止</a></li>
+        <li><a href="#标记终止-gcmarkdone">标记终止: gcMarkDone</a></li>
         <li><a href="#内存清理">内存清理</a></li>
       </ul>
     </li>
-    <li><a href="#小结">小结</a></li>
     <li><a href="#参考">参考</a></li>
   </ul>
 </nav>
@@ -215,7 +215,7 @@
 <p>垃圾分为以下两类:</p>
 <ul>
 <li>语义垃圾(semantic garbage)—有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引用 得到)的对象，但从语义上来讲他们是垃圾，垃圾回收器对此 无能为力。</li>
-<li>语法垃圾(syntactic garbage) 语法垃圾是讲那些从语法上无法到达的对象，这些才是垃圾 收集器主要的收集目标。</li>
+<li>语法垃圾(syntactic garbage) 语法垃圾是讲那些从语法上无法到达的对象，这些才是垃圾收集器主要的收集目标。</li>
 </ul>
 <p>语法垃圾:</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210812214439.png" alt=""></p>
@@ -260,11 +260,6 @@
 <li>Mark: 扫描所有根对象, 和根对象可以到达的所有对象, 标记它们不被回收</li>
 <li>Mark Termination: 完成标记工作, 重新扫描部分根对象(要求STW)</li>
 <li>Sweep: 按标记结果清扫span</li>
-</ul>
-<p>从上图中我们可以看到整个GC流程会进行两次STW(Stop The World), 第一次是Mark阶段的开始, 第二次是Mark Termination阶段.</p>
-<ul>
-<li>第一次STW会准备根对象的扫描, 启动写屏障(Write Barrier)和辅助GC(mutator assist).</li>
-<li>第二次STW会重新扫描部分根对象, 禁用写屏障(Write Barrier)和辅助GC(mutator assist).</li>
 </ul>
 <p>需要注意的是, 不是所有根对象的扫描都需要STW, 例如扫描栈上的对象只需要停止拥有该栈的G.</p>
 <p>对象整理的优势是解决内存碎片问题以及“允许”使用顺序内存分配器。 但 Go 运行时的分配算法基于 tcmalloc，基本上没有碎片问题。 并且顺序内存分配器在多线程的场景下并不适用。 Go 使用的是基于 tcmalloc 的现代内存分配算法，对对象进行整理不会带来实质性的性能提升。</p>
@@ -367,7 +362,11 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>上述插入写屏障的伪代码非常好理解，每当我们执行类似 *slot = ptr 的表达式时，我们会执行上述写屏障通过 shade 函数尝试改变指针的颜色。如果 ptr 指针是白色的，那么该函数会将该对象设置成灰色，其他情况则保持不变。</p>
+</div><ul>
+<li>Slot 是 Go 代码里的被修改的指针对象</li>
+<li>Ptr 是 Slot 要修改成的值</li>
+</ul>
+<p>上述插入写屏障的伪代码非常好理解，每当我们执行类似 *slot = ptr 的表达式时，我们会执行上述写屏障通过 shade 函数尝试改变指针的颜色。如果 ptr 指针是白色的，那么该函数会将该对象设置成灰色，其他情况则保持不变。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201130174441.png" alt=""></p>
 <p>假设我们在应用程序中使用 Dijkstra 提出的插入写屏障，在一个垃圾收集器和用户程序交替运行的场景中会出现如上图所示的标记过程：</p>
 <ol>
@@ -434,6 +433,29 @@
 <p>方法二：起始快照整栈跨找，扫黑，使得整个堆上的在用对象都处于灰色保护；</p>
 <p>整栈扫黑，那么在用的堆上的对象是一定处于灰色堆对象的保护下的，之后配合堆对象删除写屏障就能保证在用对象不丢失。</p>
 <p>方法三：加入插入写屏障的逻辑，C 指向 D 的时候，把 D 置灰，这样扫描也没问题。这样就能去掉起始 STW 扫描，从而可以并发，一个一个栈扫描。这就成了当前在用的混合写屏障了</p>
+<h3 id="写屏障对比">写屏障对比</h3>
+<p>Dijkstra insertion barrier</p>
+<p>优点:</p>
+<ul>
+<li>能够保证堆上对象的强三色不变性(无栈对象参与时)</li>
+<li>能防止指针从栈被隐藏进堆(因为堆上新建的连接都会被着色)</li>
+</ul>
+<p>缺点:</p>
+<ul>
+<li>不能防止栈上的黑色对象指向堆上的白色对象(这个白色对象之前是被堆上的黑/灰指着的)</li>
+<li>所以在mark结束后需要stw重新扫描所有 goroutine 栈</li>
+</ul>
+<p>Yuasa deletion barrier</p>
+<p>优点:</p>
+<ul>
+<li>能够保证堆上的弱三色不变性(无栈对象参与时)</li>
+<li>能防止指针从堆被隐藏进栈(因为堆上断开的连接都会被着色)</li>
+</ul>
+<p>缺点:</p>
+<ul>
+<li>不能防止堆上的黑色对象指向堆上的白色对象(这个白色对象之前是由栈的黑/灰色对象指着的)</li>
+<li>所以需要 GC 开始时 STW 对栈做快照</li>
+</ul>
 <h3 id="混合写屏障">混合写屏障</h3>
 <p>Go 语言在 v1.8 组合 Dijkstra 插入写屏障和 Yuasa 删除写屏障构成了如下所示的混合写屏障，该写屏障会将被覆盖的对象标记成灰色并在当前栈没有扫描时将新对象也标记成灰色：</p>
 <div class="highlight"><div class="chroma">
@@ -449,6 +471,21 @@
     <span class="nf">shade</span><span class="p">(</span><span class="o">*</span><span class="nx">slot</span><span class="p">)</span>
     <span class="k">if</span> <span class="nx">current</span> <span class="nx">stack</span> <span class="nx">is</span> <span class="nx">grey</span><span class="p">:</span>
         <span class="nf">shade</span><span class="p">(</span><span class="nx">ptr</span><span class="p">)</span>
+    <span class="o">*</span><span class="nx">slot</span> <span class="p">=</span> <span class="nx">ptr</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>后来Go语言团队认为 stack check 成本太高,至少要进行一次atomic操作,实际上在Go语言是如此实现的:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nf">writePointer</span><span class="p">(</span><span class="nx">slot</span><span class="p">,</span> <span class="nx">ptr</span><span class="p">):</span>
+    <span class="nf">shade</span><span class="p">(</span><span class="o">*</span><span class="nx">slot</span><span class="p">)</span>
+    <span class="nf">shade</span><span class="p">(</span><span class="nx">ptr</span><span class="p">)</span>
     <span class="o">*</span><span class="nx">slot</span> <span class="p">=</span> <span class="nx">ptr</span>
 </code></pre></td></tr></table>
 </div>
@@ -548,6 +585,13 @@
 <h2 id="源码分析">源码分析</h2>
 <h3 id="流程图">流程图</h3>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201215182726.png" alt=""></p>
+<p>垃圾回收代码流程</p>
+<ul>
+<li>gcStart -&gt; gcBgMarkWorker &amp;&amp; gcRootPrepare，这时 gcBgMarkWorker 在休眠中</li>
+<li>schedule -&gt; findRunnableGCWorker 唤醒适宜数量的 gcBgMarkWorker</li>
+<li>gcBgMarkWorker -&gt; gcDrain -&gt; scanobject -&gt; greyobject(set mark bit and put to gcw)</li>
+<li>在 gcBgMarkWorker 中调用 gcMarkDone 排空各种 wbBuf 后，使用分布式 termination 检查算法，进入 gcMarkTermination -&gt; gcSweep 唤醒后台沉睡的 sweepg 和 scvg -&gt; sweep -&gt; wake bgsweep &amp;&amp; bgscavenge</li>
+</ul>
 <h3 id="全局变量">全局变量</h3>
 <p>在垃圾收集中有一些比较重要的全局变量，在分析其过程之前，我们会先逐一介绍这些重要的变量，这些变量在垃圾收集的各个阶段中会反复出现，所以理解他们的功能是非常重要的，我们先介绍一些比较简单的变量：</p>
 <ul>
@@ -921,6 +965,7 @@
 <li>gcTriggerCycle — 如果当前没有开启垃圾收集，则触发新的循环；</li>
 </ol>
 <p>用于开启垃圾收集的方法 runtime.gcStart 会接收一个 runtime.gcTrigger 类型的谓词，我们可以根据这个触发_GCoff 退出的结构体找到所有触发的垃圾收集的代码：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210817232004.png" alt=""></p>
 <ul>
 <li>runtime.sysmon 和 runtime.forcegchelper — 后台运行定时检查和垃圾收集；</li>
 <li>runtime.GC — 用户程序手动触发垃圾收集；</li>
@@ -1221,139 +1266,38 @@
 </ol>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code><span class="lnt">  1
-</span><span class="lnt">  2
-</span><span class="lnt">  3
-</span><span class="lnt">  4
-</span><span class="lnt">  5
-</span><span class="lnt">  6
-</span><span class="lnt">  7
-</span><span class="lnt">  8
-</span><span class="lnt">  9
-</span><span class="lnt"> 10
-</span><span class="lnt"> 11
-</span><span class="lnt"> 12
-</span><span class="lnt"> 13
-</span><span class="lnt"> 14
-</span><span class="lnt"> 15
-</span><span class="lnt"> 16
-</span><span class="lnt"> 17
-</span><span class="lnt"> 18
-</span><span class="lnt"> 19
-</span><span class="lnt"> 20
-</span><span class="lnt"> 21
-</span><span class="lnt"> 22
-</span><span class="lnt"> 23
-</span><span class="lnt"> 24
-</span><span class="lnt"> 25
-</span><span class="lnt"> 26
-</span><span class="lnt"> 27
-</span><span class="lnt"> 28
-</span><span class="lnt"> 29
-</span><span class="lnt"> 30
-</span><span class="lnt"> 31
-</span><span class="lnt"> 32
-</span><span class="lnt"> 33
-</span><span class="lnt"> 34
-</span><span class="lnt"> 35
-</span><span class="lnt"> 36
-</span><span class="lnt"> 37
-</span><span class="lnt"> 38
-</span><span class="lnt"> 39
-</span><span class="lnt"> 40
-</span><span class="lnt"> 41
-</span><span class="lnt"> 42
-</span><span class="lnt"> 43
-</span><span class="lnt"> 44
-</span><span class="lnt"> 45
-</span><span class="lnt"> 46
-</span><span class="lnt"> 47
-</span><span class="lnt"> 48
-</span><span class="lnt"> 49
-</span><span class="lnt"> 50
-</span><span class="lnt"> 51
-</span><span class="lnt"> 52
-</span><span class="lnt"> 53
-</span><span class="lnt"> 54
-</span><span class="lnt"> 55
-</span><span class="lnt"> 56
-</span><span class="lnt"> 57
-</span><span class="lnt"> 58
-</span><span class="lnt"> 59
-</span><span class="lnt"> 60
-</span><span class="lnt"> 61
-</span><span class="lnt"> 62
-</span><span class="lnt"> 63
-</span><span class="lnt"> 64
-</span><span class="lnt"> 65
-</span><span class="lnt"> 66
-</span><span class="lnt"> 67
-</span><span class="lnt"> 68
-</span><span class="lnt"> 69
-</span><span class="lnt"> 70
-</span><span class="lnt"> 71
-</span><span class="lnt"> 72
-</span><span class="lnt"> 73
-</span><span class="lnt"> 74
-</span><span class="lnt"> 75
-</span><span class="lnt"> 76
-</span><span class="lnt"> 77
-</span><span class="lnt"> 78
-</span><span class="lnt"> 79
-</span><span class="lnt"> 80
-</span><span class="lnt"> 81
-</span><span class="lnt"> 82
-</span><span class="lnt"> 83
-</span><span class="lnt"> 84
-</span><span class="lnt"> 85
-</span><span class="lnt"> 86
-</span><span class="lnt"> 87
-</span><span class="lnt"> 88
-</span><span class="lnt"> 89
-</span><span class="lnt"> 90
-</span><span class="lnt"> 91
-</span><span class="lnt"> 92
-</span><span class="lnt"> 93
-</span><span class="lnt"> 94
-</span><span class="lnt"> 95
-</span><span class="lnt"> 96
-</span><span class="lnt"> 97
-</span><span class="lnt"> 98
-</span><span class="lnt"> 99
-</span><span class="lnt">100
-</span><span class="lnt">101
-</span><span class="lnt">102
-</span><span class="lnt">103
-</span><span class="lnt">104
-</span><span class="lnt">105
-</span><span class="lnt">106
-</span><span class="lnt">107
-</span><span class="lnt">108
-</span><span class="lnt">109
-</span><span class="lnt">110
-</span><span class="lnt">111
-</span><span class="lnt">112
-</span><span class="lnt">113
-</span><span class="lnt">114
-</span><span class="lnt">115
-</span><span class="lnt">116
-</span><span class="lnt">117
-</span><span class="lnt">118
-</span><span class="lnt">119
-</span><span class="lnt">120
-</span><span class="lnt">121
-</span><span class="lnt">122
-</span><span class="lnt">123
-</span><span class="lnt">124
-</span><span class="lnt">125
-</span><span class="lnt">126
-</span><span class="lnt">127
-</span><span class="lnt">128
-</span><span class="lnt">129
-</span><span class="lnt">130
-</span><span class="lnt">131
-</span><span class="lnt">132
-</span><span class="lnt">133
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">size</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
@@ -1388,111 +1332,9 @@
 
 	<span class="k">return</span> <span class="nx">x</span>
 <span class="p">}</span>
-
-<span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcache</span><span class="p">)</span> <span class="nf">nextFree</span><span class="p">(</span><span class="nx">spc</span> <span class="nx">spanClass</span><span class="p">)</span> <span class="p">(</span><span class="nx">v</span> <span class="nx">gclinkptr</span><span class="p">,</span> <span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span><span class="p">,</span> <span class="nx">shouldhelpgc</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
-	<span class="o">...</span>
-	<span class="k">if</span> <span class="nx">freeIndex</span> <span class="o">==</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">{</span>
-		<span class="c1">// span 已满，进行填充
-</span><span class="c1"></span>		<span class="c1">// The span is full.
-</span><span class="c1"></span>		<span class="k">if</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span><span class="p">)</span> <span class="o">!=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">{</span>
-			<span class="nb">println</span><span class="p">(</span><span class="s">&#34;runtime: s.allocCount=&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span><span class="p">,</span> <span class="s">&#34;s.nelems=&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span><span class="p">)</span>
-			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;s.allocCount != s.nelems &amp;&amp; freeIndex == s.nelems&#34;</span><span class="p">)</span>
-		<span class="p">}</span>
-		<span class="nx">c</span><span class="p">.</span><span class="nf">refill</span><span class="p">(</span><span class="nx">spc</span><span class="p">)</span>
-		<span class="nx">shouldhelpgc</span> <span class="p">=</span> <span class="kc">true</span>
-		<span class="nx">s</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">alloc</span><span class="p">[</span><span class="nx">spc</span><span class="p">]</span>
-
-		<span class="nx">freeIndex</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">nextFreeIndex</span><span class="p">()</span>
-	<span class="p">}</span>
-	<span class="o">...</span>
-	<span class="k">return</span>
-<span class="p">}</span>
-<span class="c1">// refill acquires a new span of span class spc for c. This span will
-</span><span class="c1">// have at least one free object. The current span in c must be full.
-</span><span class="c1">//
-</span><span class="c1">// Must run in a non-preemptible context since otherwise the owner of
-</span><span class="c1">// c could change.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcache</span><span class="p">)</span> <span class="nf">refill</span><span class="p">(</span><span class="nx">spc</span> <span class="nx">spanClass</span><span class="p">)</span> <span class="p">{</span>
-	<span class="o">...</span>
-	<span class="c1">// Get a new cached span from the central lists.
-</span><span class="c1"></span>	<span class="nx">s</span> <span class="p">=</span> <span class="nx">mheap_</span><span class="p">.</span><span class="nx">central</span><span class="p">[</span><span class="nx">spc</span><span class="p">].</span><span class="nx">mcentral</span><span class="p">.</span><span class="nf">cacheSpan</span><span class="p">()</span>
-	<span class="o">...</span>
-<span class="p">}</span>
-
-
-<span class="c1">// Allocate a span to use in an mcache.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcentral</span><span class="p">)</span> <span class="nf">cacheSpan</span><span class="p">()</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
-	<span class="k">if</span> <span class="p">!</span><span class="nx">go115NewMCentralImpl</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="nx">c</span><span class="p">.</span><span class="nf">oldCacheSpan</span><span class="p">()</span>
-	<span class="p">}</span>
-	<span class="o">...</span><span class="p">.</span>
-<span class="p">}</span>
-<span class="c1">// Allocate a span to use in an mcache.
-</span><span class="c1">//
-</span><span class="c1">// For !go115NewMCentralImpl.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcentral</span><span class="p">)</span> <span class="nf">oldCacheSpan</span><span class="p">()</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
-	<span class="o">...</span>
-	<span class="c1">//首先我们会在中心缓存的非空链表中查找可用的 runtime.mspan，根据 sweepgen 字段分别进行不同的处理：
-</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">s</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">nonempty</span><span class="p">.</span><span class="nx">first</span><span class="p">;</span> <span class="nx">s</span> <span class="o">!=</span> <span class="kc">nil</span><span class="p">;</span> <span class="nx">s</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">next</span> <span class="p">{</span>
-		<span class="c1">//1. 当内存单元等待回收时，将其插入 empty 链表、调用 runtime.mspan.sweep 清理该单元并返回；
-</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span> <span class="o">==</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">2</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span><span class="p">,</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span><span class="c1">// 等待回收
-</span><span class="c1"></span>			<span class="nx">c</span><span class="p">.</span><span class="nx">nonempty</span><span class="p">.</span><span class="nf">remove</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
-			<span class="nx">c</span><span class="p">.</span><span class="nx">empty</span><span class="p">.</span><span class="nf">insertBack</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
-			<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
-			<span class="nx">s</span><span class="p">.</span><span class="nf">sweep</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
-			<span class="k">goto</span> <span class="nx">havespan</span>
-		<span class="c1">//2. 当内存单元正在被后台回收时，跳过该内存单元；
-</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span> <span class="o">==</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">1</span> <span class="p">{</span><span class="c1">// 正在回收
-</span><span class="c1"></span>			<span class="c1">// the span is being swept by background sweeper, skip
-</span><span class="c1"></span>			<span class="k">continue</span>
-		<span class="p">}</span>
-		<span class="c1">//3. 当内存单元已经被回收时，将内存单元插入 empty 链表并返回；
-</span><span class="c1"></span>		<span class="c1">// we have a nonempty span that does not require sweeping, allocate from it
-</span><span class="c1"></span>		<span class="nx">c</span><span class="p">.</span><span class="nx">nonempty</span><span class="p">.</span><span class="nf">remove</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span><span class="c1">// 已经回收
-</span><span class="c1"></span>		<span class="nx">c</span><span class="p">.</span><span class="nx">empty</span><span class="p">.</span><span class="nf">insertBack</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
-		<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
-		<span class="k">goto</span> <span class="nx">havespan</span>
-	<span class="p">}</span>
-	<span class="c1">//如果中心缓存没有在 nonempty 中找到可用的mspan，就会继续遍历其持有的 empty 链表，我们在这里的处理与包含空闲对象的链表几乎完全相同。当找到需要回收的内存单元时，我们也会触发 runtime.mspan.sweep 进行清理，如果清理后的内存单元仍然不包含空闲对象，就会重新执行相应的代码：
-</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">s</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">empty</span><span class="p">.</span><span class="nx">first</span><span class="p">;</span> <span class="nx">s</span> <span class="o">!=</span> <span class="kc">nil</span><span class="p">;</span> <span class="nx">s</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">next</span> <span class="p">{</span>
-		<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span> <span class="o">==</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">2</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span><span class="p">,</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
-			<span class="c1">// we have an empty span that requires sweeping,
-</span><span class="c1"></span>			<span class="c1">// sweep it and see if we can free some space in it
-</span><span class="c1"></span>			<span class="nx">c</span><span class="p">.</span><span class="nx">empty</span><span class="p">.</span><span class="nf">remove</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
-			<span class="c1">// swept spans are at the end of the list
-</span><span class="c1"></span>			<span class="nx">c</span><span class="p">.</span><span class="nx">empty</span><span class="p">.</span><span class="nf">insertBack</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
-			<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
-			<span class="nx">s</span><span class="p">.</span><span class="nf">sweep</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
-			<span class="nx">freeIndex</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">nextFreeIndex</span><span class="p">()</span>
-			<span class="k">if</span> <span class="nx">freeIndex</span> <span class="o">!=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">{</span>
-				<span class="nx">s</span><span class="p">.</span><span class="nx">freeindex</span> <span class="p">=</span> <span class="nx">freeIndex</span>
-				<span class="k">goto</span> <span class="nx">havespan</span>
-			<span class="p">}</span>
-			<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
-			<span class="c1">// the span is still empty after sweep
-</span><span class="c1"></span>			<span class="c1">// it is already in the empty list, so just retry
-</span><span class="c1"></span>			<span class="k">goto</span> <span class="nx">retry</span><span class="c1">// 不包含空闲对象
-</span><span class="c1"></span>		<span class="p">}</span>
-		<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span> <span class="o">==</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">1</span> <span class="p">{</span>
-			<span class="c1">// the span is being swept by background sweeper, skip
-</span><span class="c1"></span>			<span class="k">continue</span>
-		<span class="p">}</span>
-		<span class="c1">// already swept empty span,
-</span><span class="c1"></span>		<span class="c1">// all subsequent ones must also be either swept or in process of sweeping
-</span><span class="c1"></span>		<span class="k">break</span>
-	<span class="p">}</span>
-	<span class="o">...</span>
-	<span class="k">if</span> <span class="nx">gcBlackenEnabled</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="c1">// heap_live changed.
-</span><span class="c1"></span>		<span class="nx">gcController</span><span class="p">.</span><span class="nf">revise</span><span class="p">()</span>
-	<span class="p">}</span>
-	<span class="o">...</span>
-	<span class="k">return</span> <span class="nx">s</span>
-<span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="垃圾收集启动">垃圾收集启动</h3>
-<h4 id="gcstart">gcStart</h4>
+</div><h3 id="垃圾收集启动gcstart">垃圾收集启动:gcStart</h3>
 <p>垃圾收集在启动过程一定会调用 runtime.gcStart 函数，虽然该函数的实现比较复杂，但是它的主要职责就是修改全局的垃圾收集状态到 _GCmark 并做一些准备工作，我们会分以下几个阶段介绍该函数的实现：</p>
 <ol>
 <li>两次调用 runtime.gcTrigger.test 方法检查是否满足垃圾收集条件；</li>
@@ -1918,6 +1760,7 @@
 </span><span class="lnt">15
 </span><span class="lnt">16
 </span><span class="lnt">17
+</span><span class="lnt">18
 </span></code></pre></td>
 <td class="lntd">
 <pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// gcBgMarkStartWorkers prepares background mark worker goroutines.
@@ -1936,7 +1779,8 @@
 			<span class="nf">noteclear</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">work</span><span class="p">.</span><span class="nx">bgMarkReady</span><span class="p">)</span>
 		<span class="p">}</span>
 	<span class="p">}</span>
-<span class="p">}</span>
+	<span class="c1">//zhouyunjia
+</span><span class="c1"></span><span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
 </div><p>这些 Goroutine 与处理器是一一对应的关系</p>
@@ -3206,6 +3050,66 @@
 </div>
 </div><p>重启世界后各个M会重新开始调度, 调度时会优先使用findRunnableGCWorker函数查找任务, 之后就有大约25%的P运行后台标记任务.</p>
 <h3 id="并发扫描与标记辅助">并发扫描与标记辅助</h3>
+<p>标记对象从哪里来?</p>
+<ul>
+<li>gcMarkWorker</li>
+<li>Markassist</li>
+<li>mutatorwrite/deleteheappointers</li>
+</ul>
+<p>标记对象到哪里去?</p>
+<ul>
+<li>Workbuffer</li>
+<li>本地workbuffer=&gt;p.gcw</li>
+<li>全局workbuffer=&gt;runtime.work.full • Write barrier buffer</li>
+<li>本地writebarrierbuffer=&gt;p.wbBuf</li>
+</ul>
+<p>在调用 runtime.gcDrain 函数时，运行时会传入处理器上的 runtime.gcWork，这个结构体是垃圾收集器中工作池的抽象，它实现了一个生产者和消费者的模型，我们可以以该结构体为起点从整体理解标记工作：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201214202916.png" alt=""></p>
+<p>写屏障、根对象扫描和栈扫描都会向工作池中增加额外的灰色对象等待处理，而对象的扫描过程会将灰色对象标记成黑色，同时也可能发现新的灰色对象，当工作队列中不包含灰色对象时，整个扫描过程就会结束。</p>
+<p>为了减少锁竞争，运行时在每个处理器上会保存独立的待扫描工作，然而这会遇到与调度器一样的问题 — 不同处理器的资源不平均，导致部分处理器无事可做，调度器引入了工作窃取来解决这个问题，垃圾收集器也使用了差不多的机制平衡不同处理器上的待处理任务。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201214203044.png" alt=""></p>
+<p>runtime.gcWork.balance 方法会将处理器本地一部分工作放回全局队列中，让其他的处理器处理，保证不同处理器负载的平衡。</p>
+<p>runtime.gcWork 为垃圾收集器提供了生产和消费任务的抽象，该结构体持有了两个重要的工作缓冲区 wbuf1 和 wbuf2，这两个缓冲区分别是主缓冲区和备缓冲区：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">gcWork</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">wbuf1</span><span class="p">,</span> <span class="nx">wbuf2</span> <span class="o">*</span><span class="nx">workbuf</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">workbufhdr</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">node</span> <span class="nx">lfnode</span> <span class="c1">// must be first
+</span><span class="c1"></span>	<span class="nx">nobj</span> <span class="kt">int</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">workbuf</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">workbufhdr</span>
+	<span class="nx">obj</span> <span class="p">[(</span><span class="nx">_WorkbufSize</span> <span class="o">-</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">workbufhdr</span><span class="p">{}))</span> <span class="o">/</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">PtrSize</span><span class="p">]</span><span class="kt">uintptr</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>当我们向该结构体中增加或者删除对象时，它总会先操作主缓冲区，一旦主缓冲区空间不足或者没有对象，就会触发主备缓冲区的切换；而当两个缓冲区空间都不足或者都为空时，会从全局的工作缓冲区中插入或者获取对象，该结构体相关方法的实现都非常简单，这里就不展开分析了。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210818212833.png" alt=""></p>
+<p>运行时会使用 runtime.gcDrain 函数扫描工作缓冲区中的灰色对象，它会根据传入 gcDrainFlags 的不同选择不同的策略：</p>
+<p>gcDrain 这个函数就是从队列里不断获取，处理这些对象，最重要的一个就是调用 scanobject 继续扫描对象。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201227003549.png" alt=""></p>
+<p>markroot 从根（栈）扫描，把扫描到的对象投入扫描队列。gcDrain 等函数从里面不断获取，不断处理，并且扫描这些对象，进一步挖掘引用关系，当扫描结束之后，那些没有扫描到的就是垃圾了。</p>
 <h4 id="findrunnablegcworker">findRunnableGCWorker</h4>
 <p>调度器在调度循环 runtime.schedule 中可以通过垃圾收集控制器的 findRunnableGCWorker 方法获取并执行用于后台标记的任务。</p>
 <div class="highlight"><div class="chroma">
@@ -3984,52 +3888,6 @@
 </div>
 </div><p>runtime.gcDrain 是用于扫描和标记堆内存中对象的核心方法.</p>
 <h4 id="gcdrain">gcDrain</h4>
-<p>在调用 runtime.gcDrain 函数时，运行时会传入处理器上的 runtime.gcWork，这个结构体是垃圾收集器中工作池的抽象，它实现了一个生产者和消费者的模型，我们可以以该结构体为起点从整体理解标记工作：</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201214202916.png" alt=""></p>
-<p>写屏障、根对象扫描和栈扫描都会向工作池中增加额外的灰色对象等待处理，而对象的扫描过程会将灰色对象标记成黑色，同时也可能发现新的灰色对象，当工作队列中不包含灰色对象时，整个扫描过程就会结束。</p>
-<p>为了减少锁竞争，运行时在每个处理器上会保存独立的待扫描工作，然而这会遇到与调度器一样的问题 — 不同处理器的资源不平均，导致部分处理器无事可做，调度器引入了工作窃取来解决这个问题，垃圾收集器也使用了差不多的机制平衡不同处理器上的待处理任务。</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201214203044.png" alt=""></p>
-<p>runtime.gcWork.balance 方法会将处理器本地一部分工作放回全局队列中，让其他的处理器处理，保证不同处理器负载的平衡。</p>
-<p>runtime.gcWork 为垃圾收集器提供了生产和消费任务的抽象，该结构体持有了两个重要的工作缓冲区 wbuf1 和 wbuf2，这两个缓冲区分别是主缓冲区和备缓冲区：</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre class="chroma"><code><span class="lnt"> 1
-</span><span class="lnt"> 2
-</span><span class="lnt"> 3
-</span><span class="lnt"> 4
-</span><span class="lnt"> 5
-</span><span class="lnt"> 6
-</span><span class="lnt"> 7
-</span><span class="lnt"> 8
-</span><span class="lnt"> 9
-</span><span class="lnt">10
-</span><span class="lnt">11
-</span><span class="lnt">12
-</span><span class="lnt">13
-</span><span class="lnt">14
-</span></code></pre></td>
-<td class="lntd">
-<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">gcWork</span> <span class="kd">struct</span> <span class="p">{</span>
-	<span class="nx">wbuf1</span><span class="p">,</span> <span class="nx">wbuf2</span> <span class="o">*</span><span class="nx">workbuf</span>
-	<span class="o">...</span>
-<span class="p">}</span>
-
-<span class="kd">type</span> <span class="nx">workbufhdr</span> <span class="kd">struct</span> <span class="p">{</span>
-	<span class="nx">node</span> <span class="nx">lfnode</span> <span class="c1">// must be first
-</span><span class="c1"></span>	<span class="nx">nobj</span> <span class="kt">int</span>
-<span class="p">}</span>
-
-<span class="kd">type</span> <span class="nx">workbuf</span> <span class="kd">struct</span> <span class="p">{</span>
-	<span class="nx">workbufhdr</span>
-	<span class="nx">obj</span> <span class="p">[(</span><span class="nx">_WorkbufSize</span> <span class="o">-</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">workbufhdr</span><span class="p">{}))</span> <span class="o">/</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">PtrSize</span><span class="p">]</span><span class="kt">uintptr</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>当我们向该结构体中增加或者删除对象时，它总会先操作主缓冲区，一旦主缓冲区空间不足或者没有对象，就会触发主备缓冲区的切换；而当两个缓冲区空间都不足或者都为空时，会从全局的工作缓冲区中插入或者获取对象，该结构体相关方法的实现都非常简单，这里就不展开分析了。</p>
-<p>运行时会使用 runtime.gcDrain 函数扫描工作缓冲区中的灰色对象，它会根据传入 gcDrainFlags 的不同选择不同的策略：</p>
-<p>gcDrain 这个函数就是从队列里不断获取，处理这些对象，最重要的一个就是调用 scanobject 继续扫描对象。</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201227003549.png" alt=""></p>
-<p>markroot 从根（栈）扫描，把扫描到的对象投入扫描队列。gcDrain 等函数从里面不断获取，不断处理，并且扫描这些对象，进一步挖掘引用关系，当扫描结束之后，那些没有扫描到的就是垃圾了。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre class="chroma"><code><span class="lnt">  1
@@ -6455,8 +6313,7 @@
 </div><p>如果辅助队列不为空，上述函数会根据每个 Goroutine 的债务数量和已完成的工作决定是否唤醒这些陷入休眠的 Goroutine；如果唤醒所有的 Goroutine 后，标记任务量仍然有剩余，这些标记任务都会加入全局信用中。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201214222145.png" alt=""></p>
 <p>用户程序辅助标记的核心目的就是避免用户程序分配内存影响垃圾收集器完成标记工作的期望时间，它通过维护账户体系保证用户程序不会对垃圾收集造成过多的负担，一旦用户程序分配了大量的内存，该用户程序就会通过辅助标记的方式平衡账本，这个过程会在最后达到相对平衡，保证标记任务在到达期望堆大小时完成。</p>
-<h3 id="标记终止">标记终止</h3>
-<h4 id="gcmarkdone">gcMarkDone</h4>
+<h3 id="标记终止-gcmarkdone">标记终止: gcMarkDone</h3>
 <p>当所有处理器的本地任务都完成并且不存在剩余的工作 Goroutine 时,会执行gcMarkDone函数准备进入完成标记阶段(mark termination):</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -7360,6 +7217,207 @@
 	<span class="p">}</span>
 <span class="p">}</span>
 
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="gcmark">gcMark</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
+</span><span class="lnt">83
+</span><span class="lnt">84
+</span><span class="lnt">85
+</span><span class="lnt">86
+</span><span class="lnt">87
+</span><span class="lnt">88
+</span><span class="lnt">89
+</span><span class="lnt">90
+</span><span class="lnt">91
+</span><span class="lnt">92
+</span><span class="lnt">93
+</span><span class="lnt">94
+</span><span class="lnt">95
+</span><span class="lnt">96
+</span><span class="lnt">97
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// gcMark runs the mark (or, for concurrent GC, mark termination)
+</span><span class="c1">// All gcWork caches must be empty.
+</span><span class="c1">// STW is in effect at this point.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">gcMark</span><span class="p">(</span><span class="nx">start_time</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">debug</span><span class="p">.</span><span class="nx">allocfreetrace</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">tracegc</span><span class="p">()</span>
+	<span class="p">}</span>
+
+	<span class="k">if</span> <span class="nx">gcphase</span> <span class="o">!=</span> <span class="nx">_GCmarktermination</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;in gcMark expecting to see gcphase as _GCmarktermination&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">work</span><span class="p">.</span><span class="nx">tstart</span> <span class="p">=</span> <span class="nx">start_time</span>
+
+	<span class="c1">// Check that there&#39;s no marking work remaining.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">work</span><span class="p">.</span><span class="nx">full</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">work</span><span class="p">.</span><span class="nx">markrootNext</span> <span class="p">&lt;</span> <span class="nx">work</span><span class="p">.</span><span class="nx">markrootJobs</span> <span class="p">{</span>
+		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;runtime: full=&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">work</span><span class="p">.</span><span class="nx">full</span><span class="p">),</span> <span class="s">&#34; next=&#34;</span><span class="p">,</span> <span class="nx">work</span><span class="p">.</span><span class="nx">markrootNext</span><span class="p">,</span> <span class="s">&#34; jobs=&#34;</span><span class="p">,</span> <span class="nx">work</span><span class="p">.</span><span class="nx">markrootJobs</span><span class="p">,</span> <span class="s">&#34; nDataRoots=&#34;</span><span class="p">,</span> <span class="nx">work</span><span class="p">.</span><span class="nx">nDataRoots</span><span class="p">,</span> <span class="s">&#34; nBSSRoots=&#34;</span><span class="p">,</span> <span class="nx">work</span><span class="p">.</span><span class="nx">nBSSRoots</span><span class="p">,</span> <span class="s">&#34; nSpanRoots=&#34;</span><span class="p">,</span> <span class="nx">work</span><span class="p">.</span><span class="nx">nSpanRoots</span><span class="p">,</span> <span class="s">&#34; nStackRoots=&#34;</span><span class="p">,</span> <span class="nx">work</span><span class="p">.</span><span class="nx">nStackRoots</span><span class="p">,</span> <span class="s">&#34;\n&#34;</span><span class="p">)</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="s">&#34;non-empty mark queue after concurrent mark&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="k">if</span> <span class="nx">debug</span><span class="p">.</span><span class="nx">gccheckmark</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="c1">// This is expensive when there&#39;s a large number of
+</span><span class="c1"></span>		<span class="c1">// Gs, so only do it if checkmark is also enabled.
+</span><span class="c1"></span>		<span class="nf">gcMarkRootCheck</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">work</span><span class="p">.</span><span class="nx">full</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;work.full != 0&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Clear out buffers and double-check that all gcWork caches
+</span><span class="c1"></span>	<span class="c1">// are empty. This should be ensured by gcMarkDone before we
+</span><span class="c1"></span>	<span class="c1">// enter mark termination.
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// TODO: We could clear out buffers just before mark if this
+</span><span class="c1"></span>	<span class="c1">// has a non-negligible impact on STW time.
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">p</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">allp</span> <span class="p">{</span>
+		<span class="c1">// The write barrier may have buffered pointers since
+</span><span class="c1"></span>		<span class="c1">// the gcMarkDone barrier. However, since the barrier
+</span><span class="c1"></span>		<span class="c1">// ensured all reachable objects were marked, all of
+</span><span class="c1"></span>		<span class="c1">// these must be pointers to black objects. Hence we
+</span><span class="c1"></span>		<span class="c1">// can just discard the write barrier buffer.
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">debug</span><span class="p">.</span><span class="nx">gccheckmark</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="c1">// For debugging, flush the buffer and make
+</span><span class="c1"></span>			<span class="c1">// sure it really was all marked.
+</span><span class="c1"></span>			<span class="nf">wbBufFlush1</span><span class="p">(</span><span class="nx">p</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">p</span><span class="p">.</span><span class="nx">wbBuf</span><span class="p">.</span><span class="nf">reset</span><span class="p">()</span>
+		<span class="p">}</span>
+
+		<span class="nx">gcw</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">gcw</span>
+		<span class="k">if</span> <span class="p">!</span><span class="nx">gcw</span><span class="p">.</span><span class="nf">empty</span><span class="p">()</span> <span class="p">{</span>
+			<span class="nf">printlock</span><span class="p">()</span>
+			<span class="nb">print</span><span class="p">(</span><span class="s">&#34;runtime: P &#34;</span><span class="p">,</span> <span class="nx">p</span><span class="p">.</span><span class="nx">id</span><span class="p">,</span> <span class="s">&#34; flushedWork &#34;</span><span class="p">,</span> <span class="nx">gcw</span><span class="p">.</span><span class="nx">flushedWork</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">gcw</span><span class="p">.</span><span class="nx">wbuf1</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nb">print</span><span class="p">(</span><span class="s">&#34; wbuf1=&lt;nil&gt;&#34;</span><span class="p">)</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+				<span class="nb">print</span><span class="p">(</span><span class="s">&#34; wbuf1.n=&#34;</span><span class="p">,</span> <span class="nx">gcw</span><span class="p">.</span><span class="nx">wbuf1</span><span class="p">.</span><span class="nx">nobj</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="k">if</span> <span class="nx">gcw</span><span class="p">.</span><span class="nx">wbuf2</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nb">print</span><span class="p">(</span><span class="s">&#34; wbuf2=&lt;nil&gt;&#34;</span><span class="p">)</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+				<span class="nb">print</span><span class="p">(</span><span class="s">&#34; wbuf2.n=&#34;</span><span class="p">,</span> <span class="nx">gcw</span><span class="p">.</span><span class="nx">wbuf2</span><span class="p">.</span><span class="nx">nobj</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="nb">print</span><span class="p">(</span><span class="s">&#34;\n&#34;</span><span class="p">)</span>
+			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;P has cached GC work at end of mark termination&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="c1">// There may still be cached empty buffers, which we
+</span><span class="c1"></span>		<span class="c1">// need to flush since we&#39;re going to free them. Also,
+</span><span class="c1"></span>		<span class="c1">// there may be non-zero stats because we allocated
+</span><span class="c1"></span>		<span class="c1">// black after the gcMarkDone barrier.
+</span><span class="c1"></span>		<span class="nx">gcw</span><span class="p">.</span><span class="nf">dispose</span><span class="p">()</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Update the marked heap stat.
+</span><span class="c1"></span>	<span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_marked</span> <span class="p">=</span> <span class="nx">work</span><span class="p">.</span><span class="nx">bytesMarked</span>
+
+	<span class="c1">// Flush scanAlloc from each mcache since we&#39;re about to modify
+</span><span class="c1"></span>	<span class="c1">// heap_scan directly. If we were to flush this later, then scanAlloc
+</span><span class="c1"></span>	<span class="c1">// might have incorrect information.
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">p</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">allp</span> <span class="p">{</span>
+		<span class="nx">c</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">mcache</span>
+		<span class="k">if</span> <span class="nx">c</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">continue</span>
+		<span class="p">}</span>
+		<span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_scan</span> <span class="o">+=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">scanAlloc</span><span class="p">)</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nx">scanAlloc</span> <span class="p">=</span> <span class="mi">0</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Update other GC heap size stats. This must happen after
+</span><span class="c1"></span>	<span class="c1">// cachestats (which flushes local statistics to these) and
+</span><span class="c1"></span>	<span class="c1">// flushallmcaches (which modifies heap_live).
+</span><span class="c1"></span>	<span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_live</span> <span class="p">=</span> <span class="nx">work</span><span class="p">.</span><span class="nx">bytesMarked</span>
+	<span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_scan</span> <span class="p">=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">gcController</span><span class="p">.</span><span class="nx">scanWork</span><span class="p">)</span>
+
+	<span class="k">if</span> <span class="nx">trace</span><span class="p">.</span><span class="nx">enabled</span> <span class="p">{</span>
+		<span class="nf">traceHeapAlloc</span><span class="p">()</span>
+	<span class="p">}</span>
+<span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
 </div><h4 id="gcsettriggerratio">gcSetTriggerRatio</h4>
@@ -8858,9 +8916,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h2 id="小结">小结</h2>
-<p>垃圾收集是一门非常古老的技术，它的执行速度和利用率很大程度上决定了程序的运行速度，Go 语言为了实现高性能的并发垃圾收集器，使用三色抽象、并发增量回收、混合写屏障、调步算法以及用户程序协助等机制将垃圾收集的暂停时间优化至毫秒级以下，从早期的版本看到今天，我们能体会到其中的工程设计和演进.</p>
-<h2 id="参考">参考</h2>
+</div><h2 id="参考">参考</h2>
 <p><a href="https://draveness.me/golang/docs/part3-runtime/ch07-memory/golang-garbage-collector/#%E5%86%85%E5%AD%98%E6%B8%85%E7%90%86">7.2 垃圾收集器</a>
 <a href="https://blog.csdn.net/cyq6239075/article/details/106412038">深入理解GO语言：GC原理及源码分析</a>
 <a href="https://juejin.cn/post/6854573210365591559#heading-6">golang 混合写屏障深入剖析。</a></p>
