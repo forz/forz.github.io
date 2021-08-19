@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>内存模型与伪共享 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="前言 伪共享的非标准定义为：缓存系统中是以缓存行（cache line）为单位存储的，当多线程修改互相独立的变量时，如果这些变量共享同一个缓存行" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.84.4 with theme even" />
+
+
+<link rel="canonical" href="/post/%E5%86%85%E5%AD%98%E6%A8%A1%E5%9E%8B%E4%B8%8E%E4%BC%AA%E5%85%B1%E4%BA%AB/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="内存模型与伪共享" />
+<meta property="og:description" content="前言 伪共享的非标准定义为：缓存系统中是以缓存行（cache line）为单位存储的，当多线程修改互相独立的变量时，如果这些变量共享同一个缓存行" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/%E5%86%85%E5%AD%98%E6%A8%A1%E5%9E%8B%E4%B8%8E%E4%BC%AA%E5%85%B1%E4%BA%AB/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-01-26T16:15:38+00:00" />
+<meta property="article:modified_time" content="2021-01-26T16:15:38+00:00" />
+
+<meta itemprop="name" content="内存模型与伪共享">
+<meta itemprop="description" content="前言 伪共享的非标准定义为：缓存系统中是以缓存行（cache line）为单位存储的，当多线程修改互相独立的变量时，如果这些变量共享同一个缓存行"><meta itemprop="datePublished" content="2021-01-26T16:15:38+00:00" />
+<meta itemprop="dateModified" content="2021-01-26T16:15:38+00:00" />
+<meta itemprop="wordCount" content="5068">
+<meta itemprop="keywords" content="伪共享," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="内存模型与伪共享"/>
+<meta name="twitter:description" content="前言 伪共享的非标准定义为：缓存系统中是以缓存行（cache line）为单位存储的，当多线程修改互相独立的变量时，如果这些变量共享同一个缓存行"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">内存模型与伪共享</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-01-26 </span>
+        <div class="post-category">
+            <a href="/categories/go/"> Go </a>
+            </div>
+          <span class="more-meta"> 约 5068 字 </span>
+          <span class="more-meta"> 预计阅读 11 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#前言">前言</a></li>
+    <li><a href="#cpu缓存">CPU缓存</a></li>
+    <li><a href="#mesi-协议及-rfo-请求">MESI 协议及 RFO 请求</a></li>
+    <li><a href="#缓存行与伪共享">缓存行与伪共享</a></li>
+    <li><a href="#如何避免伪共享">如何避免伪共享</a></li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="前言">前言</h2>
+<p>伪共享的非标准定义为：缓存系统中是以缓存行（cache line）为单位存储的，当多线程修改互相独立的变量时，如果这些变量共享同一个缓存行，就会无意中影响彼此的性能，这就是伪共享。</p>
+<p>下面我们就来详细剖析伪共享产生的前因后果。首先，我们要了解什么是缓存系统。</p>
+<h2 id="cpu缓存">CPU缓存</h2>
+<p>CPU 缓存的百度百科定义为：</p>
+<p>CPU 缓存（Cache Memory）是位于 CPU 与内存之间的临时存储器，它的容量比内存小的多但是交换速度却比内存要快得多。</p>
+<p>高速缓存的出现主要是为了解决 CPU 运算速度与内存读写速度不匹配的矛盾，因为 CPU 运算速度要比内存读写速度快很多，这样会使 CPU 花费很长时间等待数据到来或把数据写入内存。</p>
+<p>在缓存中的数据是内存中的一小部分，但这一小部分是短时间内 CPU 即将访问的，当 CPU 调用大量数据时，就可避开内存直接从缓存中调用，从而加快读取速度。</p>
+<p>CPU 和主内存之间有好几层缓存，因为即使直接访问主内存也是非常慢的。如果你正在多次对一块数据做相同的运算，那么在执行运算的时候把它加载到离 CPU 很近的地方就有意义了。</p>
+<p>按照数据读取顺序和与 CPU 结合的紧密程度，CPU 缓存可以分为一级缓存，二级缓存，部分高端 CPU 还具有三级缓存。每一级缓存中所储存的全部数据都是下一级缓存的一部分，越靠近 CPU 的缓存越快也越小。所以 L1 缓存很小但很快(译注：L1 表示一级缓存)，并且紧靠着在使用它的 CPU 内核。L2 大一些，也慢一些，并且仍然只能被一个单独的 CPU 核使用。L3 在现代多核机器中更普遍，仍然更大，更慢，并且被单个插槽上的所有 CPU 核共享。最后，你拥有一块主存，由全部插槽上的所有 CPU 核共享。拥有三级缓存的的 CPU，到三级缓存时能够达到 95% 的命中率，只有不到 5% 的数据需要从内存中查询。</p>
+<p>多核机器的存储结构如下图所示：</p>
+<p>L1D cache 又会被划分为多个cache line，每个 cache line = 64 bytes</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210819213447.png" alt=""></p>
+<p>当 CPU 执行运算的时候，它先去 L1 查找所需的数据，再去 L2，然后是 L3，最后如果这些缓存中都没有，所需的数据就要去主内存拿。走得越远，运算耗费的时间就越长。所以如果你在做一些很频繁的事，你要确保数据在 L1 缓存中。</p>
+<p>Martin Thompson 给出了一些缓存未命中的消耗数据，如下所示：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210126163517.png" alt=""></p>
+<h2 id="mesi-协议及-rfo-请求">MESI 协议及 RFO 请求</h2>
+<p>从上一节中我们知道，每个核都有自己私有的 L1,、L2 缓存。那么多线程编程时, 另外一个核的线程想要访问当前核内 L1、L2 缓存行的数据, 该怎么办呢？</p>
+<p>有人说可以通过第 2 个核直接访问第 1 个核的缓存行，这是当然是可行的，但这种方法不够快。跨核访问需要通过 Memory Controller（内存控制器，是计算机系统内部控制内存并且通过内存控制器使内存与 CPU 之间交换数据的重要组成部分），典型的情况是第 2 个核经常访问第 1 个核的这条数据，那么每次都有跨核的消耗.。更糟的情况是，有可能第 2 个核与第 1 个核不在一个插槽内，况且 Memory Controller 的总线带宽是有限的，扛不住这么多数据传输。所以，CPU 设计者们更偏向于另一种办法： 如果第 2 个核需要这份数据，由第 1 个核直接把数据内容发过去，数据只需要传一次。</p>
+<p>那么什么时候会发生缓存行的传输呢？答案很简单：当一个核需要读取另外一个核的脏缓存行时发生。但是前者怎么判断后者的缓存行已经被弄脏(写)了呢？</p>
+<p>下面将详细地解答以上问题. 首先我们需要谈到一个协议—— MESI 协议。现在主流的处理器都是用它来保证缓存的相干性和内存的相干性。M、E、S 和 I 代表使用 MESI 协议时缓存行所处的四个状态：</p>
+<ul>
+<li>M（修改，Modified）：本地处理器已经修改缓存行，即是脏行，它的内容与内存中的内容不一样，并且此 cache 只有本地一个拷贝(专有)；</li>
+<li>E（专有，Exclusive）：缓存行内容和内存中的一样，而且其它处理器都没有这行数据；</li>
+<li>S（共享，Shared）：缓存行内容和内存中的一样, 有可能其它处理器也存在此缓存行的拷贝；</li>
+<li>I（无效，Invalid）：缓存行失效, 不能使用。</li>
+</ul>
+<p>下面说明这四个状态是如何转换的：</p>
+<p>初始：一开始时，缓存行没有加载任何数据，所以它处于 I 状态。</p>
+<p>本地写（Local Write）：如果本地处理器写数据至处于 I 状态的缓存行，则缓存行的状态变成 M。</p>
+<p>本地读（Local Read）：如果本地处理器读取处于 I 状态的缓存行，很明显此缓存没有数据给它。此时分两种情况：(1)其它处理器的缓存里也没有此行数据，则从内存加载数据到此缓存行后，再将它设成 E 状态，表示只有我一家有这条数据，其它处理器都没有；(2)其它处理器的缓存有此行数据，则将此缓存行的状态设为 S 状态。（备注：如果处于M状态的缓存行，再由本地处理器写入/读出，状态是不会改变的）</p>
+<p>远程读（Remote Read）：假设我们有两个处理器 c1 和 c2，如果 c2 需要读另外一个处理器 c1 的缓存行内容，c1 需要把它缓存行的内容通过内存控制器 (Memory Controller) 发送给 c2，c2 接到后将相应的缓存行状态设为 S。在设置之前，内存也得从总线上得到这份数据并保存。</p>
+<p>远程写（Remote Write）：其实确切地说不是远程写，而是 c2 得到 c1 的数据后，不是为了读，而是为了写。也算是本地写，只是 c1 也拥有这份数据的拷贝，这该怎么办呢？c2 将发出一个 RFO (Request For Owner) 请求，它需要拥有这行数据的权限，其它处理器的相应缓存行设为 I，除了它自已，谁不能动这行数据。这保证了数据的安全，同时处理 RFO 请求以及设置I的过程将给写操作带来很大的性能消耗。</p>
+<p>状态转换由下图做个补充：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210126164450.png" alt=""></p>
+<p>我们从上节知道，写操作的代价很高，特别当需要发送 RFO 消息时。我们编写程序时，什么时候会发生 RFO 请求呢？有以下两种：</p>
+<ol>
+<li>线程的工作从一个处理器移到另一个处理器, 它操作的所有缓存行都需要移到新的处理器上。此后如果再写缓存行，则此缓存行在不同核上有多个拷贝，需要发送 RFO 请求了。</li>
+<li>两个不同的处理器确实都需要操作相同的缓存行</li>
+</ol>
+<p>接下来，我们要了解什么是缓存行。</p>
+<h2 id="缓存行与伪共享">缓存行与伪共享</h2>
+<p>在文章开头提到过，缓存系统中是以缓存行（cache line）为单位存储的。缓存行通常是 64 字节（译注：本文基于 64 字节，其他长度的如 32 字节等不适本文讨论的重点），并且它有效地引用主内存中的一块地址。一个 Java 的 long 类型是 8 字节，因此在一个缓存行中可以存 8 个 long 类型的变量。所以，如果你访问一个 long 数组，当数组中的一个值被加载到缓存中，它会额外加载另外 7 个，以致你能非常快地遍历这个数组。事实上，你可以非常快速的遍历在连续的内存块中分配的任意数据结构。而如果你在数据结构中的项在内存中不是彼此相邻的（如链表），你将得不到免费缓存加载所带来的优势，并且在这些数据结构中的每一个项都可能会出现缓存未命中。</p>
+<p>如果存在这样的场景，有多个线程操作不同的成员变量，但是相同的缓存行，这个时候会发生什么？。没错，伪共享（False Sharing）问题就发生了！有张 Disruptor 项目的经典示例图，如下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210126164647.png" alt=""></p>
+<p>上图中，一个运行在处理器 core1上的线程想要更新变量 X 的值，同时另外一个运行在处理器 core2 上的线程想要更新变量 Y 的值。但是，这两个频繁改动的变量都处于同一条缓存行。两个线程就会轮番发送 RFO 消息，占得此缓存行的拥有权。当 core1 取得了拥有权开始更新 X，则 core2 对应的缓存行需要设为 I 状态。当 core2 取得了拥有权开始更新 Y，则 core1 对应的缓存行需要设为 I 状态(失效态)。轮番夺取拥有权不但带来大量的 RFO 消息，而且如果某个线程需要读此行数据时，L1 和 L2 缓存上都是失效数据，只有 L3 缓存上是同步好的数据。从前一篇我们知道，读 L3 的数据非常影响性能。更坏的情况是跨槽读取，L3 都要 miss，只能从内存上加载。</p>
+<p>表面上 X 和 Y 都是被独立线程操作的，而且两操作之间也没有任何关系。只不过它们共享了一个缓存行，但所有竞争冲突都是来源于共享。</p>
+<p>下面是在服务器上获取 L1 cache line size 的命令</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">getconf</span> <span class="n">LEVEL1_DCACHE_LINESIZE</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>
+<p>False sharing:因为 CPU 处理读写是以 cache line 为单位， 所以在并发修改变量时，会一次性将其它 CPU core 中的 cache line invalidate 掉，导致未修改的内存上相邻的变量也 需要同步，带来额外的性能负担。</p>
+</li>
+<li>
+<p>True sharing:多线程确实在共享并更新同一个变量/内存区域</p>
+</li>
+</ul>
+<h2 id="如何避免伪共享">如何避免伪共享</h2>
+<p>在并发编程中，经常会有共享数据被多个goroutine同时访问， 所以如何有效的进行数据的设计，就是一个相当有技巧的操作。最常用的技巧就是Padding。现在大部分的CPU的cahceline是64字节，将变量补足为64字节可以保证它正好可以填充一个cacheline。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">test</span>
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;sync/atomic&#34;</span>
+	<span class="s">&#34;testing&#34;</span>
+<span class="p">)</span>
+<span class="kd">type</span> <span class="nx">NoPad</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">a</span> <span class="kt">uint64</span>
+	<span class="nx">b</span> <span class="kt">uint64</span>
+	<span class="nx">c</span> <span class="kt">uint64</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">np</span> <span class="o">*</span><span class="nx">NoPad</span><span class="p">)</span> <span class="nf">Increase</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">np</span><span class="p">.</span><span class="nx">a</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">np</span><span class="p">.</span><span class="nx">b</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">np</span><span class="p">.</span><span class="nx">c</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="kd">type</span> <span class="nx">Pad</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">a</span>   <span class="kt">uint64</span>
+	<span class="nx">_p1</span> <span class="p">[</span><span class="mi">8</span><span class="p">]</span><span class="kt">uint64</span>
+	<span class="nx">b</span>   <span class="kt">uint64</span>
+	<span class="nx">_p2</span> <span class="p">[</span><span class="mi">8</span><span class="p">]</span><span class="kt">uint64</span>
+	<span class="nx">c</span>   <span class="kt">uint64</span>
+	<span class="nx">_p3</span> <span class="p">[</span><span class="mi">8</span><span class="p">]</span><span class="kt">uint64</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">Pad</span><span class="p">)</span> <span class="nf">Increase</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">a</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">b</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddUint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">c</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">BenchmarkPad_Increase</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">pad</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Pad</span><span class="p">{}</span>
+	<span class="nx">b</span><span class="p">.</span><span class="nf">RunParallel</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">pb</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">PB</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="nx">pb</span><span class="p">.</span><span class="nf">Next</span><span class="p">()</span> <span class="p">{</span>
+			<span class="nx">pad</span><span class="p">.</span><span class="nf">Increase</span><span class="p">()</span>
+		<span class="p">}</span>
+	<span class="p">})</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">BenchmarkNoPad_Increase</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">nopad</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">NoPad</span><span class="p">{}</span>
+	<span class="nx">b</span><span class="p">.</span><span class="nf">RunParallel</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">pb</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">PB</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="nx">pb</span><span class="p">.</span><span class="nf">Next</span><span class="p">()</span> <span class="p">{</span>
+			<span class="nx">nopad</span><span class="p">.</span><span class="nf">Increase</span><span class="p">()</span>
+		<span class="p">}</span>
+	<span class="p">})</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>运行结果:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s"><span class="n">go</span> <span class="n">test</span> <span class="o">-</span><span class="n">gcflags</span> <span class="s">&#34;-N -l&#34;</span> <span class="o">-</span><span class="n">bench</span> <span class="n">.
+</span><span class="n">goos</span><span class="o">:</span> <span class="n">darwin</span>
+<span class="n">goarch</span><span class="o">:</span> <span class="n">amd64</span>
+<span class="n">BenchmarkPad_Increase</span><span class="m">-4</span>     	<span class="m">30000000</span>	        <span class="m">56.4</span> <span class="n">ns</span><span class="o">/</span><span class="n">op</span>
+<span class="n">BenchmarkNoPad_Increase</span><span class="m">-4</span>   	<span class="m">20000000</span>	        <span class="m">91.4</span> <span class="n">ns</span><span class="o">/</span><span class="n">op</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>可能每次运行的结果不相同，但是基本上Padding后的数据结构要比没有padding的数据结构要好的多。</p>
+<p>Java中知名的高性能的disruptor库中的设计中也采用了padding的方式避免伪共享。</p>
+<p>你可以使用intel-go/cpuid获取CPU的cacheline的大小， 官方库x/sys/cpu也提供了一个CacheLinePad struct用来padding,你只需要在你的struct定义的第一行增加_ CacheLinePad这么一行即可：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">X86</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">_</span>            <span class="nx">CacheLinePad</span>
+	<span class="nx">HasAES</span>       <span class="kt">bool</span> <span class="c1">// AES hardware implementation (AES NI)
+</span><span class="c1"></span>    <span class="nx">HasADX</span>       <span class="kt">bool</span> <span class="c1">// Multi-precision add-carry instruction extensions
+</span><span class="c1"></span>    <span class="o">......</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>一个完整的测试, 相关讨论#25203:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span><span class="lnt">103
+</span><span class="lnt">104
+</span><span class="lnt">105
+</span><span class="lnt">106
+</span><span class="lnt">107
+</span><span class="lnt">108
+</span><span class="lnt">109
+</span><span class="lnt">110
+</span><span class="lnt">111
+</span><span class="lnt">112
+</span><span class="lnt">113
+</span><span class="lnt">114
+</span><span class="lnt">115
+</span><span class="lnt">116
+</span><span class="lnt">117
+</span><span class="lnt">118
+</span><span class="lnt">119
+</span><span class="lnt">120
+</span><span class="lnt">121
+</span><span class="lnt">122
+</span><span class="lnt">123
+</span><span class="lnt">124
+</span><span class="lnt">125
+</span><span class="lnt">126
+</span><span class="lnt">127
+</span><span class="lnt">128
+</span><span class="lnt">129
+</span><span class="lnt">130
+</span><span class="lnt">131
+</span><span class="lnt">132
+</span><span class="lnt">133
+</span><span class="lnt">134
+</span><span class="lnt">135
+</span><span class="lnt">136
+</span><span class="lnt">137
+</span><span class="lnt">138
+</span><span class="lnt">139
+</span><span class="lnt">140
+</span><span class="lnt">141
+</span><span class="lnt">142
+</span><span class="lnt">143
+</span><span class="lnt">144
+</span><span class="lnt">145
+</span><span class="lnt">146
+</span><span class="lnt">147
+</span><span class="lnt">148
+</span><span class="lnt">149
+</span><span class="lnt">150
+</span><span class="lnt">151
+</span><span class="lnt">152
+</span><span class="lnt">153
+</span><span class="lnt">154
+</span><span class="lnt">155
+</span><span class="lnt">156
+</span><span class="lnt">157
+</span><span class="lnt">158
+</span><span class="lnt">159
+</span><span class="lnt">160
+</span><span class="lnt">161
+</span><span class="lnt">162
+</span><span class="lnt">163
+</span><span class="lnt">164
+</span><span class="lnt">165
+</span><span class="lnt">166
+</span><span class="lnt">167
+</span><span class="lnt">168
+</span><span class="lnt">169
+</span><span class="lnt">170
+</span><span class="lnt">171
+</span><span class="lnt">172
+</span><span class="lnt">173
+</span><span class="lnt">174
+</span><span class="lnt">175
+</span><span class="lnt">176
+</span><span class="lnt">177
+</span><span class="lnt">178
+</span><span class="lnt">179
+</span><span class="lnt">180
+</span><span class="lnt">181
+</span><span class="lnt">182
+</span><span class="lnt">183
+</span><span class="lnt">184
+</span><span class="lnt">185
+</span><span class="lnt">186
+</span><span class="lnt">187
+</span><span class="lnt">188
+</span><span class="lnt">189
+</span><span class="lnt">190
+</span><span class="lnt">191
+</span><span class="lnt">192
+</span><span class="lnt">193
+</span><span class="lnt">194
+</span><span class="lnt">195
+</span><span class="lnt">196
+</span><span class="lnt">197
+</span><span class="lnt">198
+</span><span class="lnt">199
+</span><span class="lnt">200
+</span><span class="lnt">201
+</span><span class="lnt">202
+</span><span class="lnt">203
+</span><span class="lnt">204
+</span><span class="lnt">205
+</span><span class="lnt">206
+</span><span class="lnt">207
+</span><span class="lnt">208
+</span><span class="lnt">209
+</span><span class="lnt">210
+</span><span class="lnt">211
+</span><span class="lnt">212
+</span><span class="lnt">213
+</span><span class="lnt">214
+</span><span class="lnt">215
+</span><span class="lnt">216
+</span><span class="lnt">217
+</span><span class="lnt">218
+</span><span class="lnt">219
+</span><span class="lnt">220
+</span><span class="lnt">221
+</span><span class="lnt">222
+</span><span class="lnt">223
+</span><span class="lnt">224
+</span><span class="lnt">225
+</span><span class="lnt">226
+</span><span class="lnt">227
+</span><span class="lnt">228
+</span><span class="lnt">229
+</span><span class="lnt">230
+</span><span class="lnt">231
+</span><span class="lnt">232
+</span><span class="lnt">233
+</span><span class="lnt">234
+</span><span class="lnt">235
+</span><span class="lnt">236
+</span><span class="lnt">237
+</span><span class="lnt">238
+</span><span class="lnt">239
+</span><span class="lnt">240
+</span><span class="lnt">241
+</span><span class="lnt">242
+</span><span class="lnt">243
+</span><span class="lnt">244
+</span><span class="lnt">245
+</span><span class="lnt">246
+</span><span class="lnt">247
+</span><span class="lnt">248
+</span><span class="lnt">249
+</span><span class="lnt">250
+</span><span class="lnt">251
+</span><span class="lnt">252
+</span><span class="lnt">253
+</span><span class="lnt">254
+</span><span class="lnt">255
+</span><span class="lnt">256
+</span><span class="lnt">257
+</span><span class="lnt">258
+</span><span class="lnt">259
+</span><span class="lnt">260
+</span><span class="lnt">261
+</span><span class="lnt">262
+</span><span class="lnt">263
+</span><span class="lnt">264
+</span><span class="lnt">265
+</span><span class="lnt">266
+</span><span class="lnt">267
+</span><span class="lnt">268
+</span><span class="lnt">269
+</span><span class="lnt">270
+</span><span class="lnt">271
+</span><span class="lnt">272
+</span><span class="lnt">273
+</span><span class="lnt">274
+</span><span class="lnt">275
+</span><span class="lnt">276
+</span><span class="lnt">277
+</span><span class="lnt">278
+</span><span class="lnt">279
+</span><span class="lnt">280
+</span><span class="lnt">281
+</span><span class="lnt">282
+</span><span class="lnt">283
+</span><span class="lnt">284
+</span><span class="lnt">285
+</span><span class="lnt">286
+</span><span class="lnt">287
+</span><span class="lnt">288
+</span><span class="lnt">289
+</span><span class="lnt">290
+</span><span class="lnt">291
+</span><span class="lnt">292
+</span><span class="lnt">293
+</span><span class="lnt">294
+</span><span class="lnt">295
+</span><span class="lnt">296
+</span><span class="lnt">297
+</span><span class="lnt">298
+</span><span class="lnt">299
+</span><span class="lnt">300
+</span><span class="lnt">301
+</span><span class="lnt">302
+</span><span class="lnt">303
+</span><span class="lnt">304
+</span><span class="lnt">305
+</span><span class="lnt">306
+</span><span class="lnt">307
+</span><span class="lnt">308
+</span><span class="lnt">309
+</span><span class="lnt">310
+</span><span class="lnt">311
+</span><span class="lnt">312
+</span><span class="lnt">313
+</span><span class="lnt">314
+</span><span class="lnt">315
+</span><span class="lnt">316
+</span><span class="lnt">317
+</span><span class="lnt">318
+</span><span class="lnt">319
+</span><span class="lnt">320
+</span><span class="lnt">321
+</span><span class="lnt">322
+</span><span class="lnt">323
+</span><span class="lnt">324
+</span><span class="lnt">325
+</span><span class="lnt">326
+</span><span class="lnt">327
+</span><span class="lnt">328
+</span><span class="lnt">329
+</span><span class="lnt">330
+</span><span class="lnt">331
+</span><span class="lnt">332
+</span><span class="lnt">333
+</span><span class="lnt">334
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">test</span>
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;runtime&#34;</span>
+	<span class="s">&#34;sync&#34;</span>
+	<span class="s">&#34;testing&#34;</span>
+<span class="p">)</span>
+<span class="kd">type</span> <span class="nx">foo</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">x</span><span class="p">,</span> <span class="nx">y</span><span class="p">,</span> <span class="nx">z</span> <span class="kt">int64</span>
+<span class="p">}</span>
+<span class="kd">type</span> <span class="nx">foo64Start</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">_</span><span class="p">[</span><span class="mi">64</span><span class="p">]</span><span class="kt">byte</span>
+	<span class="nx">x</span><span class="p">,</span> <span class="nx">y</span><span class="p">,</span> <span class="nx">z</span> <span class="kt">int64</span>
+<span class="p">}</span>
+<span class="kd">type</span> <span class="nx">foo64StartEnd</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">_</span>       <span class="p">[</span><span class="mi">64</span><span class="p">]</span><span class="kt">byte</span>
+	<span class="nx">x</span><span class="p">,</span> <span class="nx">y</span><span class="p">,</span> <span class="nx">z</span> <span class="kt">int64</span>
+	<span class="nx">_</span><span class="p">[</span><span class="mi">64</span><span class="p">]</span><span class="kt">byte</span>
+<span class="p">}</span>
+<span class="kd">type</span> <span class="nx">foo128Start</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">_</span>       <span class="p">[</span><span class="mi">128</span><span class="p">]</span><span class="kt">byte</span>
+	<span class="nx">x</span><span class="p">,</span> <span class="nx">y</span><span class="p">,</span> <span class="nx">z</span> <span class="kt">int64</span>
+<span class="p">}</span>
+<span class="kd">type</span> <span class="nx">foo128StartEnd</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">_</span><span class="p">[</span><span class="mi">128</span><span class="p">]</span><span class="kt">byte</span>
+	<span class="nx">x</span><span class="p">,</span> <span class="nx">y</span><span class="p">,</span> <span class="nx">z</span> <span class="kt">int64</span>
+	<span class="nx">_</span>       <span class="p">[</span><span class="mi">128</span><span class="p">]</span><span class="kt">byte</span>
+<span class="p">}</span>
+<span class="kd">type</span> <span class="nx">foo64StartEndAligned</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">_</span><span class="p">[</span><span class="mi">64</span><span class="p">]</span><span class="kt">byte</span>
+	<span class="nx">x</span><span class="p">,</span> <span class="nx">y</span><span class="p">,</span> <span class="nx">z</span> <span class="kt">int64</span>
+	<span class="nx">_</span>       <span class="p">[</span><span class="mi">64</span> <span class="o">-</span> <span class="mi">24</span><span class="p">]</span><span class="kt">byte</span>
+<span class="p">}</span>
+<span class="kd">type</span> <span class="nx">foo128StartEndAligned</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">_</span><span class="p">[</span><span class="mi">128</span><span class="p">]</span><span class="kt">byte</span>
+	<span class="nx">x</span><span class="p">,</span> <span class="nx">y</span><span class="p">,</span> <span class="nx">z</span> <span class="kt">int64</span>
+	<span class="nx">_</span>       <span class="p">[</span><span class="mi">128</span> <span class="o">-</span> <span class="mi">24</span><span class="p">]</span><span class="kt">byte</span>
+<span class="p">}</span>
+<span class="kd">const</span> <span class="nx">iter</span> <span class="p">=</span> <span class="p">(</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">16</span><span class="p">)</span>
+<span class="kd">func</span> <span class="nf">BenchmarkFalseSharing</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+<span class="nx">b</span><span class="p">.</span><span class="nf">Run</span><span class="p">(</span><span class="s">&#34;NoPad&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">b</span><span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">arr</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">foo</span><span class="p">,</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="nx">arrChan</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{},</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+		<span class="p">}</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arr</span> <span class="p">{</span>
+			<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">for</span> <span class="k">range</span> <span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">{</span>
+					<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">iter</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+						<span class="nx">arr</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">x</span><span class="o">++</span>
+					<span class="p">}</span>
+					<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+				<span class="p">}</span>
+			<span class="p">}(</span><span class="nx">i</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+			<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+				<span class="nx">arrChan</span><span class="p">[</span><span class="nx">j</span><span class="p">]</span> <span class="o">&lt;-</span> <span class="kd">struct</span><span class="p">{}{}</span>
+			<span class="p">}</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">StopTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nb">close</span><span class="p">(</span><span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+		<span class="p">}</span>
+	<span class="p">})</span>
+	<span class="nx">b</span><span class="p">.</span><span class="nf">Run</span><span class="p">(</span><span class="s">&#34;Pad64Start&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">arr</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">foo64Start</span><span class="p">,</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="nx">arrChan</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{},</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+		<span class="p">}</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arr</span> <span class="p">{</span>
+			<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">for</span> <span class="k">range</span> <span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">{</span>
+					<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">iter</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+						<span class="nx">arr</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">x</span><span class="o">++</span>
+					<span class="p">}</span>
+					<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+				<span class="p">}</span>
+			<span class="p">}(</span><span class="nx">i</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+			<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+				<span class="nx">arrChan</span><span class="p">[</span><span class="nx">j</span><span class="p">]</span> <span class="o">&lt;-</span> <span class="kd">struct</span><span class="p">{}{}</span>
+			<span class="p">}</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">StopTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nb">close</span><span class="p">(</span><span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+		<span class="p">}</span>
+	<span class="p">})</span>
+<span class="nx">b</span><span class="p">.</span><span class="nf">Run</span><span class="p">(</span><span class="s">&#34;Pad64StartEnd&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">b</span><span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">arr</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">foo64StartEnd</span><span class="p">,</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="nx">arrChan</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{},</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+		<span class="p">}</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arr</span> <span class="p">{</span>
+			<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">for</span> <span class="k">range</span> <span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">{</span>
+					<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">iter</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+						<span class="nx">arr</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">x</span><span class="o">++</span>
+					<span class="p">}</span>
+					<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+				<span class="p">}</span>
+			<span class="p">}(</span><span class="nx">i</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+			<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+				<span class="nx">arrChan</span><span class="p">[</span><span class="nx">j</span><span class="p">]</span> <span class="o">&lt;-</span> <span class="kd">struct</span><span class="p">{}{}</span>
+			<span class="p">}</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">StopTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nb">close</span><span class="p">(</span><span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+		<span class="p">}</span>
+	<span class="p">})</span>
+	<span class="nx">b</span><span class="p">.</span><span class="nf">Run</span><span class="p">(</span><span class="s">&#34;Pad128Start&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">arr</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">foo128Start</span><span class="p">,</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="nx">arrChan</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{},</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+		<span class="p">}</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arr</span> <span class="p">{</span>
+			<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">for</span> <span class="k">range</span> <span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">{</span>
+					<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">iter</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+						<span class="nx">arr</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">x</span><span class="o">++</span>
+					<span class="p">}</span>
+					<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+				<span class="p">}</span>
+			<span class="p">}(</span><span class="nx">i</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+			<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+				<span class="nx">arrChan</span><span class="p">[</span><span class="nx">j</span><span class="p">]</span> <span class="o">&lt;-</span> <span class="kd">struct</span><span class="p">{}{}</span>
+			<span class="p">}</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">StopTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nb">close</span><span class="p">(</span><span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+		<span class="p">}</span>
+	<span class="p">})</span>
+<span class="nx">b</span><span class="p">.</span><span class="nf">Run</span><span class="p">(</span><span class="s">&#34;Pad128StartEnd&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">b</span><span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">arr</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">foo128StartEnd</span><span class="p">,</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="nx">arrChan</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{},</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+		<span class="p">}</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arr</span> <span class="p">{</span>
+			<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">for</span> <span class="k">range</span> <span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">{</span>
+					<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">iter</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+						<span class="nx">arr</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">x</span><span class="o">++</span>
+					<span class="p">}</span>
+					<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+				<span class="p">}</span>
+			<span class="p">}(</span><span class="nx">i</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+			<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+				<span class="nx">arrChan</span><span class="p">[</span><span class="nx">j</span><span class="p">]</span> <span class="o">&lt;-</span> <span class="kd">struct</span><span class="p">{}{}</span>
+			<span class="p">}</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">StopTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nb">close</span><span class="p">(</span><span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+		<span class="p">}</span>
+	<span class="p">})</span>
+	<span class="nx">b</span><span class="p">.</span><span class="nf">Run</span><span class="p">(</span><span class="s">&#34;Pad64StartEndAligned&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">arr</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">foo64StartEndAligned</span><span class="p">,</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="nx">arrChan</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{},</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+		<span class="p">}</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arr</span> <span class="p">{</span>
+			<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">for</span> <span class="k">range</span> <span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">{</span>
+					<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">iter</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+						<span class="nx">arr</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">x</span><span class="o">++</span>
+					<span class="p">}</span>
+					<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+				<span class="p">}</span>
+			<span class="p">}(</span><span class="nx">i</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+			<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+				<span class="nx">arrChan</span><span class="p">[</span><span class="nx">j</span><span class="p">]</span> <span class="o">&lt;-</span> <span class="kd">struct</span><span class="p">{}{}</span>
+			<span class="p">}</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">StopTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nb">close</span><span class="p">(</span><span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+		<span class="p">}</span>
+	<span class="p">})</span>
+<span class="nx">b</span><span class="p">.</span><span class="nf">Run</span><span class="p">(</span><span class="s">&#34;Pad128StartEndAligned&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">b</span><span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">arr</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">foo128StartEndAligned</span><span class="p">,</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="nx">arrChan</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{},</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+		<span class="p">}</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arr</span> <span class="p">{</span>
+			<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">for</span> <span class="k">range</span> <span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">{</span>
+					<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">iter</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+						<span class="nx">arr</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">x</span><span class="o">++</span>
+					<span class="p">}</span>
+					<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+				<span class="p">}</span>
+			<span class="p">}(</span><span class="nx">i</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+			<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+				<span class="nx">arrChan</span><span class="p">[</span><span class="nx">j</span><span class="p">]</span> <span class="o">&lt;-</span> <span class="kd">struct</span><span class="p">{}{}</span>
+			<span class="p">}</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">StopTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nb">close</span><span class="p">(</span><span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+		<span class="p">}</span>
+	<span class="p">})</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">BenchmarkTrueSharing</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+<span class="nx">b</span><span class="p">.</span><span class="nf">Run</span><span class="p">(</span><span class="s">&#34;&lt;64&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">b</span><span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">arr</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">foo</span><span class="p">,</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">*</span><span class="nx">iter</span><span class="p">)</span>
+		<span class="nx">arrChan</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{},</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+		<span class="p">}</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">for</span> <span class="k">range</span> <span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">{</span>
+					<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">iter</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+						<span class="nx">arr</span><span class="p">[(</span><span class="nx">i</span><span class="o">*</span><span class="nx">iter</span><span class="p">)</span><span class="o">+</span><span class="nx">j</span><span class="p">].</span><span class="nx">x</span><span class="o">++</span>
+					<span class="p">}</span>
+					<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+				<span class="p">}</span>
+			<span class="p">}(</span><span class="nx">i</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+			<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+				<span class="nx">arrChan</span><span class="p">[</span><span class="nx">j</span><span class="p">]</span> <span class="o">&lt;-</span> <span class="kd">struct</span><span class="p">{}{}</span>
+			<span class="p">}</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">StopTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nb">close</span><span class="p">(</span><span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+		<span class="p">}</span>
+	<span class="p">})</span>
+<span class="nx">b</span><span class="p">.</span><span class="nf">Run</span><span class="p">(</span><span class="s">&#34;&gt;64&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">b</span><span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">arr</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">foo64Start</span><span class="p">,</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">*</span><span class="nx">iter</span><span class="p">)</span>
+		<span class="nx">arrChan</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{},</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+		<span class="p">}</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">for</span> <span class="k">range</span> <span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">{</span>
+					<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">iter</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+						<span class="nx">arr</span><span class="p">[(</span><span class="nx">i</span><span class="o">*</span><span class="nx">iter</span><span class="p">)</span><span class="o">+</span><span class="nx">j</span><span class="p">].</span><span class="nx">x</span><span class="o">++</span>
+					<span class="p">}</span>
+					<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+				<span class="p">}</span>
+			<span class="p">}(</span><span class="nx">i</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+			<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+				<span class="nx">arrChan</span><span class="p">[</span><span class="nx">j</span><span class="p">]</span> <span class="o">&lt;-</span> <span class="kd">struct</span><span class="p">{}{}</span>
+			<span class="p">}</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">StopTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nb">close</span><span class="p">(</span><span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+		<span class="p">}</span>
+	<span class="p">})</span>
+<span class="nx">b</span><span class="p">.</span><span class="nf">Run</span><span class="p">(</span><span class="s">&#34;&gt;128&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">b</span><span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">arr</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">foo128Start</span><span class="p">,</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">*</span><span class="nx">iter</span><span class="p">)</span>
+		<span class="nx">arrChan</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{},</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+		<span class="p">}</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">for</span> <span class="k">range</span> <span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">{</span>
+					<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">iter</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+						<span class="nx">arr</span><span class="p">[(</span><span class="nx">i</span><span class="o">*</span><span class="nx">iter</span><span class="p">)</span><span class="o">+</span><span class="nx">j</span><span class="p">].</span><span class="nx">x</span><span class="o">++</span>
+					<span class="p">}</span>
+					<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+				<span class="p">}</span>
+			<span class="p">}(</span><span class="nx">i</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">ResetTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+			<span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+				<span class="nx">arrChan</span><span class="p">[</span><span class="nx">j</span><span class="p">]</span> <span class="o">&lt;-</span> <span class="kd">struct</span><span class="p">{}{}</span>
+			<span class="p">}</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="nx">b</span><span class="p">.</span><span class="nf">StopTimer</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">arrChan</span> <span class="p">{</span>
+			<span class="nb">close</span><span class="p">(</span><span class="nx">arrChan</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+		<span class="p">}</span>
+	<span class="p">})</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="参考">参考</h2>
+<p><a href="https://colobu.com/2019/01/24/cacheline-affects-performance-in-go/">cacheline 对 Go 程序的影响</a>
+<a href="https://www.cnblogs.com/cyfonly/p/5800758.html">伪共享（false sharing），并发编程无声的性能杀手</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-01-26
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/%E4%BC%AA%E5%85%B1%E4%BA%AB/">伪共享</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/net-http%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">net-http源码剖析</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/%E8%B4%9F%E8%BD%BD%E5%9D%87%E8%A1%A1p2c&#43;ewma%E7%AE%97%E6%B3%95/">
+            <span class="next-text nav-default">负载均衡P2C&#43;EWMA算法</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

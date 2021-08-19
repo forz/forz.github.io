@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Go中的happens-before - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="前言 Go 官方文档里专门介绍了 Go 的 内存模型,你不要误解这里的内存模型的含义,它并不是指 Go 对象的内存分配、内存回收和内存整理的规范,它描述的是并发" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.84.4 with theme even" />
+
+
+<link rel="canonical" href="/post/go%E4%B8%AD%E7%9A%84happens-before/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Go中的happens-before" />
+<meta property="og:description" content="前言 Go 官方文档里专门介绍了 Go 的 内存模型,你不要误解这里的内存模型的含义,它并不是指 Go 对象的内存分配、内存回收和内存整理的规范,它描述的是并发" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/go%E4%B8%AD%E7%9A%84happens-before/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-05-23T23:21:53+00:00" />
+<meta property="article:modified_time" content="2021-05-23T23:21:53+00:00" />
+
+<meta itemprop="name" content="Go中的happens-before">
+<meta itemprop="description" content="前言 Go 官方文档里专门介绍了 Go 的 内存模型,你不要误解这里的内存模型的含义,它并不是指 Go 对象的内存分配、内存回收和内存整理的规范,它描述的是并发"><meta itemprop="datePublished" content="2021-05-23T23:21:53+00:00" />
+<meta itemprop="dateModified" content="2021-05-23T23:21:53+00:00" />
+<meta itemprop="wordCount" content="6942">
+<meta itemprop="keywords" content="Go," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Go中的happens-before"/>
+<meta name="twitter:description" content="前言 Go 官方文档里专门介绍了 Go 的 内存模型,你不要误解这里的内存模型的含义,它并不是指 Go 对象的内存分配、内存回收和内存整理的规范,它描述的是并发"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Go中的happens-before</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-05-23 </span>
+        <div class="post-category">
+            <a href="/categories/go/"> Go </a>
+            </div>
+          <span class="more-meta"> 约 6942 字 </span>
+          <span class="more-meta"> 预计阅读 14 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#前言">前言</a></li>
+    <li><a href="#重排和可见性的问题">重排和可见性的问题</a></li>
+    <li><a href="#happens-before">happens-before</a></li>
+    <li><a href="#go-语言中保证的-happens-before-关系">Go 语言中保证的 happens-before 关系</a>
+      <ul>
+        <li><a href="#init-函数">init 函数</a></li>
+        <li><a href="#goroutine">goroutine</a></li>
+        <li><a href="#channel">Channel</a></li>
+        <li><a href="#mutexrwmutex">Mutex/RWMutex</a></li>
+        <li><a href="#waitgroup">WaitGroup</a></li>
+        <li><a href="#once">Once</a></li>
+        <li><a href="#atomic">atomic</a></li>
+      </ul>
+    </li>
+    <li><a href="#总结">总结</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="前言">前言</h2>
+<p>Go 官方文档里专门介绍了 Go 的 内存模型,你不要误解这里的内存模型的含义,它并不是指 Go 对象的内存分配、内存回收和内存整理的规范,它描述的是并发环境中多 goroutine 读相同变量的时候,变量的可见性条件。具体点说,就是指,在什么条件下, goroutine 在读取一个变量的值的时候,能够看到其它 goroutine 对这个变量进行的写的结果。</p>
+<p>由于 CPU 指令重排和多级 Cache 的存在,保证多核访问同一个变量这件事儿变得非常复杂。毕竟,不同 CPU 架构(x86/amd64、ARM、Power 等)的处理方式也不一样,再加上编译器的优化也可能对指令进行重排,所以编程语言需要一个规范,来明确多线程同时访问同一个变量的可见性和顺序( Russ Cox 在麻省理工学院 6.824 分布式系统 Distributed Systems 课程 的一课,专门介绍了相关的知识)。在编程语言中,这个规范被叫做内存模型。</p>
+<p>除了 Go,Java、C++、C、C#、Rust 等编程语言也有内存模型。为什么这些编程语言都要定义内存模型呢?在我看来,主要是两个目的。</p>
+<p>向广大的程序员提供一种保证,以便他们在做设计和开发程序时,面对同一个数据同时被多个 goroutine 访问的情况,可以做一些串行化访问的控制,比如使用 Channel 或者 sync 包和 sync/atomic 包中的并发原语。</p>
+<p>允许编译器和硬件对程序做一些优化。这一点其实主要是为编译器开发者提供的保证, 这样可以方便他们对 Go 的编译器做优化。</p>
+<p>首先,我们要先弄明白重排和可见性的问题,因为它们影响着程序实际执行的顺序关系。</p>
+<h2 id="重排和可见性的问题">重排和可见性的问题</h2>
+<p>由于指令重排,代码并不一定会按照你写的顺序执行。</p>
+<p>举个例子,当两个 goroutine 同时对一个数据进行读写时,假设 goroutine g1 对这个变量进行写操作 w,goroutine g2 同时对这个变量进行读操作 r,那么,如果 g2 在执行读操作 r 的时候,已经看到了 g1 写操作 w 的结果,那么,也不意味着 g2 能看到在 w 之前的其它的写操作。这是一个反直观的结果,不过的确可能会存在。</p>
+<p>接下来,我再举几个具体的例子,带你来感受一下,重排以及多核 CPU 并发执行导致程序的运行和代码的书写顺序不一样的情况。</p>
+<p>先看第一个例子,代码如下:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">
+<span class="kd">var</span> <span class="nx">a</span><span class="p">,</span> <span class="nx">b</span> <span class="kt">int</span>
+
+<span class="kd">func</span> <span class="nf">f</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">a</span> <span class="p">=</span> <span class="mi">1</span> <span class="c1">// w之前的写操作
+</span><span class="c1"></span>  <span class="nx">b</span> <span class="p">=</span> <span class="mi">2</span> <span class="c1">// 写操作w
+</span><span class="c1"></span><span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">g</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nb">print</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span> <span class="c1">// 读操作r
+</span><span class="c1"></span>  <span class="nb">print</span><span class="p">(</span><span class="nx">a</span><span class="p">)</span> <span class="c1">// ???
+</span><span class="c1"></span><span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+  <span class="k">go</span> <span class="nf">f</span><span class="p">()</span> <span class="c1">//g1
+</span><span class="c1"></span>  <span class="nf">g</span><span class="p">()</span> <span class="c1">//g2
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>可以看到,第 9 行是要打印 b 的值。需要注意的是,即使这里打印出的值是 2,但是依然可能在打印 a 的值时,打印出初始值 0,而不是 1。这是因为,程序运行的时候,不能保证 g2 看到的 a 和 b 的赋值有先后关系。</p>
+<p>再来看一个类似的例子。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">
+<span class="kd">var</span> <span class="nx">a</span> <span class="kt">string</span>
+<span class="kd">var</span> <span class="nx">done</span> <span class="kt">bool</span>
+
+<span class="kd">func</span> <span class="nf">setup</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">a</span> <span class="p">=</span> <span class="s">&#34;hello, world&#34;</span>
+  <span class="nx">done</span> <span class="p">=</span> <span class="kc">true</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+  <span class="k">go</span> <span class="nf">setup</span><span class="p">()</span>
+  <span class="k">for</span> <span class="p">!</span><span class="nx">done</span> <span class="p">{</span>
+  <span class="p">}</span>
+  <span class="nb">print</span><span class="p">(</span><span class="nx">a</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在这段代码中,主 goroutine main 即使观察到 done 变成 true 了,最后读取到的 a 的值仍然可能为空。</p>
+<p>更糟糕的情况是,main 根本就观察不到另一个 goroutine 对 done 的写操作,这就会导致 main 程序一直被 hang 住。甚至可能还会出现半初始化的情况,比如:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">T</span> <span class="kd">struct</span> <span class="p">{</span>
+  <span class="nx">msg</span> <span class="kt">string</span>
+<span class="p">}</span>
+
+<span class="kd">var</span> <span class="nx">g</span> <span class="o">*</span><span class="nx">T</span>
+
+<span class="kd">func</span> <span class="nf">setup</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">t</span> <span class="o">:=</span> <span class="nb">new</span><span class="p">(</span><span class="nx">T</span><span class="p">)</span>
+  <span class="nx">t</span><span class="p">.</span><span class="nx">msg</span> <span class="p">=</span> <span class="s">&#34;hello, world&#34;</span>
+  <span class="nx">g</span> <span class="p">=</span> <span class="nx">t</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+  <span class="k">go</span> <span class="nf">setup</span><span class="p">()</span>
+  <span class="k">for</span> <span class="nx">g</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+  <span class="p">}</span>
+  <span class="nb">print</span><span class="p">(</span><span class="nx">g</span><span class="p">.</span><span class="nx">msg</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>即使 main goroutine 观察到 g 不为 nil,也可能打印出空的 msg(第 17 行)。</p>
+<p>看到这里,你可能要说了,我都运行这个程序几百万次了,怎么也没有观察到这种现象? 我可以这么告诉你,能不能观察到和提供保证(guarantee)是两码事儿。由于 CPU 架构和 Go 编译器的不同,即使你运行程序时没有遇到这些现象,也不代表 Go 可以 100% 保证不会出现这些问题。</p>
+<p>刚刚说了,程序在运行的时候,两个操作的顺序可能不会得到保证,那该怎么办呢?接下来,我要带你了解一下 Go 内存模型中很重要的一个概念:happens-before,这是用来描述两个时间的顺序关系的。如果某些操作能提供 happens-before 关系,那么,我们就可以 100% 保证它们之间的顺序。</p>
+<p>在并发编程中的 memory barrier 和 GC 中的 barrier 不是一回
+事。</p>
+<p>Memory barrier 是为了防止各种类型的读写重排:</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210819215541.png" alt=""></p>
+<p>而 GC 中的 read/write barrier 则是指堆上指针修改之前插入 的一小段代码。</p>
+<h2 id="happens-before">happens-before</h2>
+<p>在一个 goroutine 内部,程序的执行顺序和它们的代码指定的顺序是一样的,即使编译器或者 CPU 重排了读写顺序,从行为上来看,也和代码指定的顺序一样。</p>
+<p>这是一个非常重要的保证,我们一定要记住。</p>
+<p>我们来看一个例子。在下面的代码中,即使编译器或者 CPU 对 a、b、c 的初始化进行了重排,但是打印结果依然能保证是 1、2、3,而不会出现 1、0、0 或 1、0、1 等情况。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">
+<span class="kd">func</span> <span class="nf">foo</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">a</span> <span class="p">=</span> <span class="mi">1</span>
+    <span class="kd">var</span> <span class="nx">b</span> <span class="p">=</span> <span class="mi">2</span>
+    <span class="kd">var</span> <span class="nx">c</span> <span class="p">=</span> <span class="mi">3</span>
+
+    <span class="nb">println</span><span class="p">(</span><span class="nx">a</span><span class="p">)</span>
+    <span class="nb">println</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span>
+    <span class="nb">println</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>但是,对于另一个 goroutine 来说,重排却会产生非常大的影响。因为 Go 只保证 goroutine 内部重排对读写的顺序没有影响,比如刚刚我们在讲“可见性”问题时提到的三个例子,那该怎么办呢?这就要用到 happens-before 关系了。</p>
+<p>如果两个 action(read 或者 write)有明确的 happens-before 关系,你就可以确定它们之间的执行顺序(或者是行为表现上的顺序)。</p>
+<p>Go 内存模型通过 happens-before 定义两个事件(读、写 action)的顺序:如果事件 e1  happens before 事件 e2,那么,我们就可以说事件 e2 在事件 e1 之后发生(happens after)。如果 e1 不是 happens before e2, 同时也不 happens after e2,那么,我们就可以说事件 e1 和 e2 是同时发生的。</p>
+<p>如果要保证对“变量 v 的读操作 r”能够观察到一个对“变量 v 的写操作 w”,并且 r 只能观察到 w 对变量 v 的写,没有其它对 v 的写操作,也就是说,我们要保证 r 绝对能观察到 w 操作的结果,那么就需要同时满足两个条件:</p>
+<ol>
+<li>w happens before r;</li>
+<li>其它对 v 的写操作(w2、w3、w4, …) 要么 happens before w,要么 happens after r,绝对不会和 w、r 同时发生,或者是在它们之间发生。</li>
+</ol>
+<p>你可能会说,这是很显然的事情啊,但我要和你说的是,这是一个非常严格、严谨的数学定义。</p>
+<p>对于单个的 goroutine 来说,它有一个特殊的 happens-before 关系,Go 内存模型中是这么讲的:</p>
+<p>Within a single goroutine, the happens-before order is the order expressed by the program.</p>
+<p>我来解释下这句话。它的意思是,在单个的 goroutine 内部, happens-before 的关系和代码编写的顺序是一致的。</p>
+<p>我再具体解释下。</p>
+<p>在 goroutine 内部对一个局部变量 v 的读,一定能观察到最近一次对这个局部变量 v 的写。如果要保证多个 goroutine 之间对一个共享变量的读写顺序,在 Go 语言中,可以使用并发原语为读写操作建立 happens-before 关系,这样就可以保证顺序了。</p>
+<p>说到这儿,我想先给你补充三个 Go 语言中和内存模型有关的小知识,掌握了这些,你就能更好地理解下面的内容。</p>
+<ol>
+<li>在 Go 语言中,对变量进行零值的初始化就是一个写操作。</li>
+<li>如果对超过机器 word(64bit、32bit 或者其它)大小的值进行读写,那么,就可以看作是对拆成 word 大小的几个读写无序进行。</li>
+<li>Go 并不提供直接的 CPU 屏障(CPU fence)来提示编译器或者 CPU 保证顺序性,而是使用不同架构的内存屏障指令来实现统一的并发原语。</li>
+</ol>
+<p>接下来,我就带你学习下 Go 语言中提供的 happens-before 关系保证。</p>
+<p>Happen-before 到底是什么?</p>
+<p>本质是在用户不知道 memory barrier 概念和具体实现的前提 下，能够按照官方提供的 happen-before 正确进行并发编 程。</p>
+<h2 id="go-语言中保证的-happens-before-关系">Go 语言中保证的 happens-before 关系</h2>
+<p>除了单个 goroutine 内部提供的 happens-before 保证,Go 语言中还提供了一些其它的 happens-before 关系的保证,下面我来一个一个介绍下。</p>
+<h3 id="init-函数">init 函数</h3>
+<p>应用程序的初始化是在单一的 goroutine 执行的。如果包 p 导入了包 q,那么,q 的 init 函数的执行一定 happens before  p 的任何初始化代码。</p>
+<p>这里有一个特殊情况需要你记住:main 函数一定在导入的包的 init 函数之后执行。</p>
+<p>包级别的变量在同一个文件中是按照声明顺序逐个初始化的,除非初始化它的时候依赖其它的变量。同一个包下的多个文件,会按照文件名的排列顺序进行初始化。这个顺序被定义在Go 语言规范中,而不是 Go 的内存模型规范中。你可以看看下面的例子中各个变量的值:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="p">(</span>
+  <span class="nx">a</span> <span class="p">=</span> <span class="nx">c</span> <span class="o">+</span> <span class="nx">b</span>  <span class="c1">// == 9
+</span><span class="c1"></span>  <span class="nx">b</span> <span class="p">=</span> <span class="nf">f</span><span class="p">()</span>    <span class="c1">// == 4
+</span><span class="c1"></span>  <span class="nx">c</span> <span class="p">=</span> <span class="nf">f</span><span class="p">()</span>    <span class="c1">// == 5
+</span><span class="c1"></span>  <span class="nx">d</span> <span class="p">=</span> <span class="mi">3</span>      <span class="c1">// == 5 全部初始化完成后
+</span><span class="c1"></span><span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">f</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
+  <span class="nx">d</span><span class="o">++</span>
+  <span class="k">return</span> <span class="nx">d</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>具体怎么对这些变量进行初始化呢?Go 采用的是依赖分析技术。不过,依赖分析技术保证的顺序只是针对同一包下的变量,而且,只有引用关系是本包变量、函数和非接口的方法,才能保证它们的顺序性。</p>
+<p>同一个包下可以有多个 init 函数,但是每个文件最多只能有一个 init 函数,多个 init 函数按照它们的文件名顺序逐个初始化。</p>
+<p>刚刚讲的这些都是不同包的 init 函数执行顺序,下面我举一个具体的例子,把这些内容串起来,你一看就明白了。</p>
+<p>这个例子是一个 main 程序,它依赖包 p1,包 p1 依赖包 p2,包 p2 依赖 p3。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210523235204.png" alt=""></p>
+<p>为了追踪初始化过程,并输出有意义的日志,我定义了一个辅助方法,打印出日志并返回一个用来初始化的整数值:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">
+<span class="kd">func</span> <span class="nf">Trace</span><span class="p">(</span><span class="nx">t</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">v</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">t</span><span class="p">,</span> <span class="s">&#34;:&#34;</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">v</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>包 p3 包含两个文件,分别定义了一个 init 函数。第一个文件中定义了两个变量,这两个变量的值还会在 init 函数中进行修改。</p>
+<p>我们来分别看下包 p3 的这两个文件:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">
+<span class="c1">// lib1.go in p3
+</span><span class="c1"></span>
+<span class="kd">var</span> <span class="nx">V1_p3</span> <span class="p">=</span> <span class="nx">trace</span><span class="p">.</span><span class="nf">Trace</span><span class="p">(</span><span class="s">&#34;init v1_p3&#34;</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+<span class="kd">var</span> <span class="nx">V2_p3</span> <span class="p">=</span> <span class="nx">trace</span><span class="p">.</span><span class="nf">Trace</span><span class="p">(</span><span class="s">&#34;init v2_p3&#34;</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+
+
+<span class="kd">func</span> <span class="nf">init</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;init func in p3&#34;</span><span class="p">)</span>
+    <span class="nx">V1_p3</span> <span class="p">=</span> <span class="mi">300</span>
+    <span class="nx">V2_p3</span> <span class="p">=</span> <span class="mi">300</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">
+<span class="c1">// lib2.go in p3
+</span><span class="c1"></span>
+<span class="kd">func</span> <span class="nf">init</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;another init func in p3&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>下面再来看看包 p2。包 p2 定义了变量和 init 函数。第一个变量初始化为 2,并在 init 函数中更改为 200。第二个变量是复制的 p3.V2_p3。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">V1_p2</span> <span class="p">=</span> <span class="nx">trace</span><span class="p">.</span><span class="nf">Trace</span><span class="p">(</span><span class="s">&#34;init v1_p2&#34;</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+<span class="kd">var</span> <span class="nx">V2_p2</span> <span class="p">=</span> <span class="nx">trace</span><span class="p">.</span><span class="nf">Trace</span><span class="p">(</span><span class="s">&#34;init v2_p2&#34;</span><span class="p">,</span> <span class="nx">p3</span><span class="p">.</span><span class="nx">V2_p3</span><span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">init</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;init func in p2&#34;</span><span class="p">)</span>
+    <span class="nx">V1_p2</span> <span class="p">=</span> <span class="mi">200</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>包 p1 定义了变量和 init 函数。它的两个变量的值是复制的 p2 对应的两个变量值。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">V1_p1</span> <span class="p">=</span> <span class="nx">trace</span><span class="p">.</span><span class="nf">Trace</span><span class="p">(</span><span class="s">&#34;init v1_p1&#34;</span><span class="p">,</span> <span class="nx">p2</span><span class="p">.</span><span class="nx">V1_p2</span><span class="p">)</span>
+<span class="kd">var</span> <span class="nx">V2_p1</span> <span class="p">=</span> <span class="nx">trace</span><span class="p">.</span><span class="nf">Trace</span><span class="p">(</span><span class="s">&#34;init v2_p1&#34;</span><span class="p">,</span> <span class="nx">p2</span><span class="p">.</span><span class="nx">V2_p2</span><span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">init</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;init func in p1&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>main 定义了 init 函数和 main 函数。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">init</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;init func in main&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;V1_p1:&#34;</span><span class="p">,</span> <span class="nx">p1</span><span class="p">.</span><span class="nx">V1_p1</span><span class="p">)</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;V2_p1:&#34;</span><span class="p">,</span> <span class="nx">p1</span><span class="p">.</span><span class="nx">V2_p1</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>运行 main 函数会依次输出 p3、p2、p1、main 的初始化变量时的日志(变量初始化时的日志和 init 函数调用时的日志):</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s">
+<span class="o">//</span> 包<span class="n">p3的变量初始化</span>
+<span class="n">init</span> <span class="n">v1_p3</span> <span class="o">:</span> <span class="m">3</span>
+<span class="n">init</span> <span class="n">v2_p3</span> <span class="o">:</span> <span class="m">3</span>
+<span class="o">//</span> <span class="n">p3的init函数</span>
+<span class="n">init</span> <span class="n">func</span> <span class="n">in</span> <span class="n">p3</span>
+<span class="o">//</span> <span class="n">p3的另一个init函数</span>
+<span class="n">another</span> <span class="n">init</span> <span class="n">func</span> <span class="n">in</span> <span class="n">p3</span>
+
+<span class="o">//</span> 包<span class="n">p2的变量初始化</span>
+<span class="n">init</span> <span class="n">v1_p2</span> <span class="o">:</span> <span class="m">2</span>
+<span class="n">init</span> <span class="n">v2_p2</span> <span class="o">:</span> <span class="m">300</span>
+<span class="o">//</span> 包<span class="n">p2的init函数</span>
+<span class="n">init</span> <span class="n">func</span> <span class="n">in</span> <span class="n">p2</span>
+
+<span class="o">//</span> 包<span class="n">p1的变量初始化</span>
+<span class="n">init</span> <span class="n">v1_p1</span> <span class="o">:</span> <span class="m">200</span>
+<span class="n">init</span> <span class="n">v2_p1</span> <span class="o">:</span> <span class="m">300</span>
+<span class="o">//</span> 包<span class="n">p1的init函数</span>
+<span class="n">init</span> <span class="n">func</span> <span class="n">in</span> <span class="n">p1</span>
+
+<span class="o">//</span> 包<span class="n">main的init函数</span>
+<span class="n">init</span> <span class="n">func</span> <span class="n">in</span> <span class="n">main</span>
+<span class="o">//</span> <span class="n">main函数</span>
+<span class="n">V1_p1</span><span class="o">:</span> <span class="m">200</span>
+<span class="n">V2_p1</span><span class="o">:</span> <span class="m">300</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>下面,我们再来看看 goroutine 对 happens-before 关系的保证情况。</p>
+<h3 id="goroutine">goroutine</h3>
+<p>首先,我们需要明确一个规则:启动 goroutine 的 go 语句的执行,一定 happens before 此 goroutine 内的代码执行。</p>
+<p>根据这个规则,我们就可以知道,如果 go 语句传入的参数是一个函数执行的结果,那么,这个函数一定先于 goroutine 内部的代码被执行。</p>
+<p>同一个 goroutine 内的逻辑有依赖的语句执行，满足顺序关系。</p>
+<p>编译器/CPU 可能对同一个 goroutine 中的语句执行进行打 乱，以提高性能，但不能破坏其应用原有的逻辑。</p>
+<p>不同的 goroutine 观察到的共享变量的修改顺序可能不一样。</p>
+<p>Goroutine 的创建(creation)一定先于 goroutine 的执行 (execution)</p>
+<p>我们来看一个例子。在下面的代码中,第 8 行 a 的赋值和第 9 行的 go 语句是在同一个 goroutine 中执行的,所以,在主 goroutine 看来,第 8 行肯定 happens before 第 9 行,又由于刚才的保证,第 9 行子 goroutine 的启动 happens before 第 4 行的变量输出,那么,我们就可以推断出,第 8 行 happens before 第 4 行。也就是说,在第 4 行打印 a 的值的时候,肯定会打印出“hello world”。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">
+<span class="kd">var</span> <span class="nx">a</span> <span class="kt">string</span>
+
+<span class="kd">func</span> <span class="nf">f</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nb">print</span><span class="p">(</span><span class="nx">a</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">hello</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">a</span> <span class="p">=</span> <span class="s">&#34;hello, world&#34;</span>
+  <span class="k">go</span> <span class="nf">f</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>刚刚说的是启动 goroutine 的情况,goroutine 退出的时候,是没有任何 happensbefore 保证的。所以,如果你想观察某个 goroutine 的执行效果,你需要使用同步机制建立 happens-before 关系,比如 Mutex 或者 Channel。接下来,我会讲 Channel 的 happens-before 的关系保证。</p>
+<p>在没有显式同步的情况下，goroutine 的结束没有任何保证， 可能被执行，也可能不被执行</p>
+<h3 id="channel">Channel</h3>
+<p>Channel 是 goroutine 同步交流的主要方法。往一个 Channel 中发送一条数据,通常对应着另一个 goroutine 从这个 Channel 中接收一条数据。</p>
+<p>通用的 Channel happens-before 关系保证有 4 条规则,我分别来介绍下。</p>
+<p>第 1 条规则是,往 Channel 中的发送操作,happens before 从该 Channel 接收相应数据的动作完成之前,即第 n 个 send 一定 happens before 第 n 个 receive 的完成。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">ch</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{},</span> <span class="mi">10</span><span class="p">)</span> <span class="c1">// buffered或者unbuffered
+</span><span class="c1"></span><span class="kd">var</span> <span class="nx">s</span> <span class="kt">string</span>
+
+<span class="kd">func</span> <span class="nf">f</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">s</span> <span class="p">=</span> <span class="s">&#34;hello, world&#34;</span>
+  <span class="nx">ch</span> <span class="o">&lt;-</span> <span class="kd">struct</span><span class="p">{}{}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+  <span class="k">go</span> <span class="nf">f</span><span class="p">()</span>
+  <span class="o">&lt;-</span><span class="nx">ch</span>
+  <span class="nb">print</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在这个例子中,s 的初始化(第 5 行)happens before 往 ch 中发送数据, 往 ch 发送数据 happens before 从 ch 中读取出一条数据(第 11 行),第 12 行打印 s 的值 happens after 第 11 行,所以,打印的结果肯定是初始化后的 s 的值“hello world”。</p>
+<p>第 2 条规则是,close 一个 Channel 的调用,肯定 happens before 从关闭的 Channel 中读取出一个零值。</p>
+<p>还是拿刚刚的这个例子来说,如果你把第 6 行替换成 close(ch),也能保证同样的执行顺序。因为第 11 行从关闭的 ch 中读取出零值后,第 6 行肯定被调用了。</p>
+<p>第 3 条规则是,对于 unbuffered 的 Channel,也就是容量是 0 的 Channel,从此 Channel 中读取数据的调用一定 happens before 往此 Channel 发送数据的调用完成。</p>
+<p>所以,在上面的这个例子中呢,如果想保持同样的执行顺序,也可以写成这样:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">
+<span class="kd">var</span> <span class="nx">ch</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">int</span><span class="p">)</span>
+<span class="kd">var</span> <span class="nx">s</span> <span class="kt">string</span>
+
+<span class="kd">func</span> <span class="nf">f</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">s</span> <span class="p">=</span> <span class="s">&#34;hello, world&#34;</span>
+  <span class="o">&lt;-</span><span class="nx">ch</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+  <span class="k">go</span> <span class="nf">f</span><span class="p">()</span>
+  <span class="nx">ch</span> <span class="o">&lt;-</span> <span class="kd">struct</span><span class="p">{}{}</span>
+  <span class="nb">print</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>如果第 11 行发送语句执行成功(完毕),那么根据这个规则,第 6 行(接收)的调用肯定发生了(执行完成不完成不重要,重要的是这一句“肯定执行了”),那么 s 也肯定初始化了,所以一定会打印出“hello world”。</p>
+<p>这一条比较晦涩,但是,因为 Channel 是 unbuffered 的 Channel,所以这个规则也成立。</p>
+<p>第 4 条规则是,如果 Channel 的容量是 m(m&gt;0),那么,第 n 个 receive 一定 happens before 第 n+m 个 send 的完成。</p>
+<p>前一条规则是针对 unbuffered channel 的,这里给出了更广泛的针对 buffered channel 的保证。利用这个规则,我们可以实现信号量(Semaphore)的并发原语。Channel 的容量相当于可用的资源,发送一条数据相当于请求信号量,接收一条数据相当于释放信号。</p>
+<h3 id="mutexrwmutex">Mutex/RWMutex</h3>
+<p>对于互斥锁 Mutex m 或者读写锁 RWMutex m,有 3 条 happens-before 关系的保证。</p>
+<ol>
+<li>第 n 次的 l.Unlock,那么,和这个 RLock 相对应的 l.RUnlock 一定 happens 第 n 次的 m.Unlock 一定 happens before 第 n+1 m.Lock 方法的返回; 1.</li>
+<li>对于读写锁 RWMutex m,如果它的第 n 个 m.Lock 方法的调用已返回,那么它的第 n 个 m.Unlock 的方法调用一定 happens before 任何一个 m.RLock 方法调用的返回, 只要这些 m.RLock 方法调用 happens after 第 n 次 m.Lock 的调用的返回。这就可以保证,只有释放了持有的写锁,那些等待的读请求才能请求到读锁。</li>
+<li>对于读写锁 RWMutex m,如果它的第 n 个 m.RLock 方法的调用已返回,那么它的第 k (k&lt;=n)个成功的 m.RUnlock 方法的返回一定 happens before 任意的 m.RUnlockLock 方法调用,只要这些 m.Lock 方法调用 happens after 第 n 次 m.RLock。</li>
+</ol>
+<p>读写锁的保证有点绕,我再带你看看官方的描述:</p>
+<p>对于读写锁 l 的 l.RLock 方法调用,如果存在一个 n,这次的 l.RLock 调用 happens after第 n 次的 l.Unlock,那么,和这个 RLock 相对应的 l.RUnlock 一定 happens before 第 n+1 次 l.Lock。意思是,读写锁的 Lock 必须等待既有的读锁释放后才能获取到。</p>
+<p>我再举个例子。在下面的代码中,第 6 行第一次的 Unlock 一定 happens before 第二次的 Lock(第 12 行),所以这也能保证正确地打印出“hello world”。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">
+<span class="kd">var</span> <span class="nx">mu</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
+<span class="kd">var</span> <span class="nx">s</span> <span class="kt">string</span>
+
+<span class="kd">func</span> <span class="nf">foo</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">s</span> <span class="p">=</span> <span class="s">&#34;hello, world&#34;</span>
+  <span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+  <span class="k">go</span> <span class="nf">foo</span><span class="p">()</span>
+  <span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+  <span class="nb">print</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="waitgroup">WaitGroup</h3>
+<p>接下来是 WaitGroup 的保证。</p>
+<p>对于一个 WaitGroup 实例 wg,在某个时刻 t0 时,它的计数值已经不是零了,假如 t0 时刻之后调用了一系列的 wg.Add(n) 或者 wg.Done(),并且只有最后一次调用 wg 的计数值变为了 0,那么,可以保证这些 wg.Add 或者 wg.Done() 一定 happens before t0 时刻之后调用的 wg.Wait 方法的返回。</p>
+<p>这个保证的通俗说法,就是 Wait 方法等到计数值归零之后才返回。</p>
+<h3 id="once">Once</h3>
+<p>它提供的保证是:对于 once.Do(f) 调用,f 函数的那个单次调用一定 happens before 任何 once.Do(f) 调用的返回。换句话说,就是函数 f 一定会在 Do 方法返回之前执行。</p>
+<p>还是以 hello world 的例子为例,这次我们使用 Once 并发原语实现,可以看下下面的代码:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">s</span> <span class="kt">string</span>
+<span class="kd">var</span> <span class="nx">once</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Once</span>
+
+<span class="kd">func</span> <span class="nf">foo</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">s</span> <span class="p">=</span> <span class="s">&#34;hello, world&#34;</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">twoprint</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">once</span><span class="p">.</span><span class="nf">Do</span><span class="p">(</span><span class="nx">foo</span><span class="p">)</span>
+  <span class="nb">print</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>第 5 行的执行一定 happens before 第 9 行的返回,所以执行到第 10 行的时候,sd 已经初始化了,所以会正确地打印“hello world”。</p>
+<p>最后,我再来说说 atomic 的保证。</p>
+<h3 id="atomic">atomic</h3>
+<p>其实,Go 内存模型的官方文档并没有明确给出 atomic 的保证,有一个相关的 issue go# 5045记录了相关的讨论。光看 issue 号,就知道这个讨论由来已久了。Russ Cox 想让 atomic 有一个弱保证,这样可以为以后留下充足的可扩展空间,所以,Go 内存模型规范上并没有严格的定义。</p>
+<p>对于 Go 1.15 的官方实现来说,可以保证使用 atomic 的 Load/Store 的变量之间的顺序性。</p>
+<p>在下面的例子中,打印出的 a 的结果总是 1,但是官方并没有做任何文档上的说明和保证。</p>
+<p>依照 Ian Lance Taylor 的说法,Go 核心开发组的成员几乎没有关注这个方向上的研究, 因为这个问题太复杂,有很多问题需要去研究,所以,现阶段还是不要使用 atomic 来保证顺序性。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+  <span class="kd">var</span> <span class="nx">a</span><span class="p">,</span> <span class="nx">b</span> <span class="kt">int32</span> <span class="p">=</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span>
+
+  <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">a</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">b</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+  <span class="p">}()</span>
+
+  <span class="k">for</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">b</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">{</span>
+    <span class="nx">runtime</span><span class="p">.</span><span class="nf">Gosched</span><span class="p">()</span>
+  <span class="p">}</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">a</span><span class="p">))</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Ian Lance Taylor曾经在论坛中说:</p>
+<p>In C++ memory model terms I believe that the sync/atomic Load
+operations are memory_order_acquire, and I believe that the
+sync/atomic Store operations are memory_order_release. It&rsquo;s possible
+that if we ever document it we will go for stronger memory ordering,
+but I believe that these operations must at least carry those guarantees.</p>
+<p>I&rsquo;m somewhat less certain of the memory order guarantees of the Swap,
+CompareAndSwap, and Add functions. I guess that Swap and
+CompareAndSwap are probably at least memory_order_acq_rel, but Add may
+be memory_order_relaxed.</p>
+<p>Russ Cox曾经回答过问题,他把go的atomic 操作定位sequential consistency的，这是一个更严格的memory ordering。它们之前的读写操作,不会重排在Load/Store之后， 它们之后的读写操作也不会重排在Load/Store之前，所以建立了一个内存屏障(Memory barrier)。</p>
+<p>rsc
+2019年7月16日上午9:12:01</p>
+<p>Although there&rsquo;s been no official resolution to the issue, I think the actual path forward is what I posted a while back: &ldquo;Go&rsquo;s atomics guarantee sequential consistency among the atomic variables (behave like C/C++&rsquo;s seqconst atomics), and that you shouldn&rsquo;t mix atomic and non-atomic accesses for a given memory word.&rdquo;</p>
+<p>至少目前，我们可以按照他们的解答进行理解。</p>
+<h2 id="总结">总结</h2>
+<p>Go 的内存模型规范中,一开始有这么一段话:</p>
+<p>If you must read the rest of this document to understand the behavior of your program, you are being too clever.</p>
+<p>Don’t be clever.</p>
+<p>理解你的程序的行为是聪明的,但是, 不要自作聪明。</p>
+<p>谨慎地使用这些保证,能够让你的程序按照设想的 happens-before 关系执行,但是不要以为完全理解这些概念和保证,就可以随意地制造所谓的各种技巧,否则就很容易掉进“坑”里,而且会给代码埋下了很多的“定时炸弹”。</p>
+<p>比如,Go 里面已经有值得信赖的互斥锁了,如果没有额外的需求,就不要使用 Channel 创造出自己的互斥锁。</p>
+<p>当然,我也不希望你畏手畏脚地把思想局限住,我还是建议你去做一些有意义的尝试,比如使用 Channel 实现信号量等扩展并发原语。</p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-05-23
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go/">Go</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/%E6%89%A9%E5%B1%95%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADsemaphore%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">扩展并发原语Semaphore源码剖析</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/%E4%BD%BF%E7%94%A8delve%E5%B7%A5%E5%85%B7%E8%B0%83%E8%AF%95go%E7%A8%8B%E5%BA%8F/">
+            <span class="next-text nav-default">使用Delve工具调试Go程序</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

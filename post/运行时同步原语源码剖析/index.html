@@ -1,0 +1,1389 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>运行时同步原语源码剖析 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="前言 Go 的运行时能够直接接触到操作系统内核级的同步原语，note 和 mutex 分别是 Go 运行时实现的一次性通知机制和互斥锁机制， 其实现是操作系统特定的，这" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.84.4 with theme even" />
+
+
+<link rel="canonical" href="/post/%E8%BF%90%E8%A1%8C%E6%97%B6%E5%90%8C%E6%AD%A5%E5%8E%9F%E8%AF%AD%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="运行时同步原语源码剖析" />
+<meta property="og:description" content="前言 Go 的运行时能够直接接触到操作系统内核级的同步原语，note 和 mutex 分别是 Go 运行时实现的一次性通知机制和互斥锁机制， 其实现是操作系统特定的，这" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/%E8%BF%90%E8%A1%8C%E6%97%B6%E5%90%8C%E6%AD%A5%E5%8E%9F%E8%AF%AD%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-08-19T15:54:50+00:00" />
+<meta property="article:modified_time" content="2021-08-19T15:54:50+00:00" />
+
+<meta itemprop="name" content="运行时同步原语源码剖析">
+<meta itemprop="description" content="前言 Go 的运行时能够直接接触到操作系统内核级的同步原语，note 和 mutex 分别是 Go 运行时实现的一次性通知机制和互斥锁机制， 其实现是操作系统特定的，这"><meta itemprop="datePublished" content="2021-08-19T15:54:50+00:00" />
+<meta itemprop="dateModified" content="2021-08-19T15:54:50+00:00" />
+<meta itemprop="wordCount" content="5211">
+<meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="运行时同步原语源码剖析"/>
+<meta name="twitter:description" content="前言 Go 的运行时能够直接接触到操作系统内核级的同步原语，note 和 mutex 分别是 Go 运行时实现的一次性通知机制和互斥锁机制， 其实现是操作系统特定的，这"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">运行时同步原语源码剖析</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-08-19 </span>
+        <div class="post-category">
+            <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
+            </div>
+          <span class="more-meta"> 约 5211 字 </span>
+          <span class="more-meta"> 预计阅读 11 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#前言">前言</a></li>
+    <li><a href="#运行时通知机制-note">运行时通知机制 note</a>
+      <ul>
+        <li><a href="#结构">结构</a></li>
+        <li><a href="#注册通知">注册通知</a></li>
+        <li><a href="#发送通知">发送通知</a></li>
+        <li><a href="#清除通知">清除通知</a></li>
+      </ul>
+    </li>
+    <li><a href="#运行时互斥量机制-mutex">运行时互斥量机制 mutex</a>
+      <ul>
+        <li><a href="#结构-1">结构</a></li>
+        <li><a href="#lock">lock</a></li>
+      </ul>
+    </li>
+    <li><a href="#运行时信号量机制-semaphore">运行时信号量机制 semaphore</a>
+      <ul>
+        <li><a href="#sudog-缓存">sudog 缓存</a></li>
+        <li><a href="#基于-goroutine-抽象的信号量">基于 goroutine 抽象的信号量</a></li>
+      </ul>
+    </li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="前言">前言</h2>
+<p>Go 的运行时能够直接接触到操作系统内核级的同步原语，note 和 mutex 分别是 Go 运行时实现的一次性通知机制和互斥锁机制， 其实现是操作系统特定的，这里讨论 darwin 和 linux 的分别基于 semaphore 和 futex 的实现，wasm 的实现我们放到其章节中专门讨论。</p>
+<p>虽然 Go 受到 CSP 的影响提供了 channel 这一同步原语，但 channel 在某些情况下（比如天然需要共享内存的资源池） 使用共享内存的互斥锁这一同步原语在编程上会更加方便。但问题在于，由于调度器的存在，内核级的同步原语并不能直接暴露给用户态代码， 因此运行时还需要特殊设计的信号量机制来支持用户态的同步原语。</p>
+<h2 id="运行时通知机制-note">运行时通知机制 note</h2>
+<p>运行时的通知机制在 Linux 上直接基于 Futex（Fast userspace mutex），我们首先回顾它。</p>
+<p>futex（快速用户区互斥的简称）是一个在Linux上实现锁定和构建高级抽象锁如信号量和POSIX互斥的基本工具</p>
+<p>Futex 由一块能够被多个进程共享的内存空间（一个对齐后的整型变量）组成；这个整型变量的值能够通过汇编语言调用CPU提供的原子操作指令来增加或减少，并且一个进程可以等待直到那个值变成正数。Futex 的操作几乎全部在用户空间完成；只有当操作结果不一致从而需要仲裁时，才需要进入操作系统内核空间执行。这种机制允许使用 futex 的锁定原语有非常高的执行效率：由于绝大多数的操作并不需要在多个进程之间进行仲裁，所以绝大多数操作都可以在应用程序空间执行，而不需要使用（相对高代价的）内核系统调用。</p>
+<h3 id="结构">结构</h3>
+<p>note 的结构本身并没有什么可说的，它自身只包含一个 uintptr 类型的标志。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 休眠与唤醒一次性事件.
+</span><span class="c1">// 在任何调用 notesleep 或 notewakeup 之前，必须调用 noteclear 来初始化这个 note
+</span><span class="c1">// 且只能有一个线程调用 notewakeup 一次。一旦 notewakeup 被调用后，notesleep 会返回。
+</span><span class="c1">// 随后的 notesleep 调用则会立即返回。
+</span><span class="c1">// 随后的 noteclear 必须在前一个 notesleep 返回前调用，例如 notewakeup 调用后
+</span><span class="c1">// 直接调用 noteclear 是不允许的。
+</span><span class="c1">//
+</span><span class="c1">// notetsleep 类似于 notesleep 但会在给定数量的纳秒时间后唤醒，即使事件尚未发生。
+</span><span class="c1">// 如果一个 goroutine 使用 notetsleep 来提前唤醒，则必须等待调用 noteclear，直到可以确定
+</span><span class="c1">// 没有其他 goroutine 正在调用 notewakeup。
+</span><span class="c1">//
+</span><span class="c1">// notesleep/notetsleep 通常在 g0 上调用，notetsleepg 类似于 notetsleep 但会在用户 g 上调用。
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">note</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="c1">// 基于 futex 的实现将其视为 uint32 key (linux)
+</span><span class="c1"></span>	<span class="c1">// 而基于 sema 实现则将其视为 M*waitm。 (darwin)
+</span><span class="c1"></span>	<span class="c1">// 以前作为 union 使用，但 union 会破坏精确 GC
+</span><span class="c1"></span>	<span class="nx">key</span> <span class="kt">uintptr</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="注册通知">注册通知</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">notesleep</span><span class="p">(</span><span class="nx">n</span> <span class="o">*</span><span class="nx">note</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">gp</span> <span class="o">!=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">g0</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;notesleep not on g0&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">ns</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+	<span class="k">if</span> <span class="o">*</span><span class="nx">cgo_yield</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// Sleep for an arbitrary-but-moderate interval to poll libc interceptors.
+</span><span class="c1"></span>		<span class="nx">ns</span> <span class="p">=</span> <span class="mf">10e6</span>
+	<span class="p">}</span>
+	<span class="k">for</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">n</span><span class="p">.</span><span class="nx">key</span><span class="p">))</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">blocked</span> <span class="p">=</span> <span class="kc">true</span>
+		<span class="nf">futexsleep</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">n</span><span class="p">.</span><span class="nx">key</span><span class="p">),</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">ns</span><span class="p">)</span>
+		<span class="k">if</span> <span class="o">*</span><span class="nx">cgo_yield</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nf">asmcgocall</span><span class="p">(</span><span class="o">*</span><span class="nx">cgo_yield</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">blocked</span> <span class="p">=</span> <span class="kc">false</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">notetsleep</span><span class="p">(</span><span class="nx">n</span><span class="o">*</span><span class="nx">note</span><span class="p">,</span> <span class="nx">ns</span> <span class="kt">int64</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="p">(</span><span class="o">...</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nf">notetsleep_internal</span><span class="p">(</span><span class="nx">n</span><span class="p">,</span> <span class="nx">ns</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="c1">//go:nosplit
+</span><span class="c1">//go:nowritebarrier
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">notetsleep_internal</span><span class="p">(</span><span class="nx">n</span><span class="o">*</span><span class="nx">note</span><span class="p">,</span> <span class="nx">ns</span> <span class="kt">int64</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+
+	<span class="k">if</span> <span class="nx">ns</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="o">*</span><span class="nx">cgo_yield</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="c1">// Sleep for an arbitrary-but-moderate interval to poll libc interceptors.
+</span><span class="c1"></span>			<span class="nx">ns</span> <span class="p">=</span> <span class="mf">10e6</span>
+		<span class="p">}</span>
+		<span class="k">for</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">n</span><span class="p">.</span><span class="nx">key</span><span class="p">))</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">blocked</span> <span class="p">=</span> <span class="kc">true</span>
+			<span class="nf">futexsleep</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">n</span><span class="p">.</span><span class="nx">key</span><span class="p">),</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">ns</span><span class="p">)</span>
+			<span class="k">if</span> <span class="o">*</span><span class="nx">cgo_yield</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nf">asmcgocall</span><span class="p">(</span><span class="o">*</span><span class="nx">cgo_yield</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">blocked</span> <span class="p">=</span> <span class="kc">false</span>
+		<span class="p">}</span>
+		<span class="k">return</span> <span class="kc">true</span>
+	<span class="p">}</span>
+
+	<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">n</span><span class="p">.</span><span class="nx">key</span><span class="p">))</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">true</span>
+	<span class="p">}</span>
+
+	<span class="nx">deadline</span> <span class="o">:=</span> <span class="nf">nanotime</span><span class="p">()</span> <span class="o">+</span> <span class="nx">ns</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="o">*</span><span class="nx">cgo_yield</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">ns</span> <span class="p">&gt;</span> <span class="mf">10e6</span> <span class="p">{</span>
+			<span class="nx">ns</span> <span class="p">=</span> <span class="mf">10e6</span>
+		<span class="p">}</span>
+		<span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">blocked</span> <span class="p">=</span> <span class="kc">true</span>
+		<span class="nf">futexsleep</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">n</span><span class="p">.</span><span class="nx">key</span><span class="p">),</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">ns</span><span class="p">)</span>
+		<span class="k">if</span> <span class="o">*</span><span class="nx">cgo_yield</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nf">asmcgocall</span><span class="p">(</span><span class="o">*</span><span class="nx">cgo_yield</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">blocked</span> <span class="p">=</span> <span class="kc">false</span>
+		<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">n</span><span class="p">.</span><span class="nx">key</span><span class="p">))</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+		<span class="nx">now</span> <span class="o">:=</span> <span class="nf">nanotime</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">now</span> <span class="o">&gt;=</span> <span class="nx">deadline</span> <span class="p">{</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+		<span class="nx">ns</span> <span class="p">=</span> <span class="nx">deadline</span> <span class="o">-</span> <span class="nx">now</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">n</span><span class="p">.</span><span class="nx">key</span><span class="p">))</span> <span class="o">!=</span> <span class="mi">0</span>
+<span class="p">}</span>
+<span class="c1">//go:nosplit
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">futexsleep</span><span class="p">(</span><span class="nx">addr</span> <span class="o">*</span><span class="kt">uint32</span><span class="p">,</span> <span class="nx">val</span> <span class="kt">uint32</span><span class="p">,</span> <span class="nx">ns</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="c1">// Some Linux kernels have a bug where futex of
+</span><span class="c1"></span>	<span class="c1">// FUTEX_WAIT returns an internal error code
+</span><span class="c1"></span>	<span class="c1">// as an errno. Libpthread ignores the return value
+</span><span class="c1"></span>	<span class="c1">// here, and so can we: as it says a few lines up,
+</span><span class="c1"></span>	<span class="c1">// spurious wakeups are allowed.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">ns</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">futex</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">addr</span><span class="p">),</span> <span class="nx">_FUTEX_WAIT_PRIVATE</span><span class="p">,</span> <span class="nx">val</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+
+	<span class="kd">var</span> <span class="nx">ts</span> <span class="nx">timespec</span>
+	<span class="nx">ts</span><span class="p">.</span><span class="nf">setNsec</span><span class="p">(</span><span class="nx">ns</span><span class="p">)</span>
+	<span class="nf">futex</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">addr</span><span class="p">),</span> <span class="nx">_FUTEX_WAIT_PRIVATE</span><span class="p">,</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ts</span><span class="p">),</span> <span class="kc">nil</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 允许在用户 g 上调用
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">notetsleepg</span><span class="p">(</span><span class="nx">n</span> <span class="o">*</span><span class="nx">note</span><span class="p">,</span> <span class="nx">ns</span> <span class="kt">int64</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="p">(</span><span class="o">...</span><span class="p">)</span>
+	<span class="nf">entersyscallblock</span><span class="p">()</span>
+	<span class="nx">ok</span> <span class="o">:=</span> <span class="nf">notetsleep_internal</span><span class="p">(</span><span class="nx">n</span><span class="p">,</span> <span class="nx">ns</span><span class="p">)</span>
+	<span class="nf">exitsyscall</span><span class="p">()</span>
+	<span class="k">return</span> <span class="nx">ok</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="发送通知">发送通知</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">notewakeup</span><span class="p">(</span><span class="nx">n</span><span class="o">*</span><span class="nx">note</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">old</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Xchg</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">n</span><span class="p">.</span><span class="nx">key</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">old</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;notewakeup - double wakeup (&#34;</span><span class="p">,</span> <span class="nx">old</span><span class="p">,</span> <span class="s">&#34;)\n&#34;</span><span class="p">)</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;notewakeup - double wakeup&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nf">futexwakeup</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">n</span><span class="p">.</span><span class="nx">key</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">futexwakeup</span><span class="p">(</span><span class="nx">addr</span><span class="o">*</span><span class="kt">uint32</span><span class="p">,</span> <span class="nx">cnt</span> <span class="kt">uint32</span><span class="p">)</span> <span class="p">{</span>
+	<span class="c1">// linux futex 系统调用
+</span><span class="c1"></span>	<span class="nx">ret</span> <span class="o">:=</span> <span class="nf">futex</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">addr</span><span class="p">),</span> <span class="nx">_FUTEX_WAKE_PRIVATE</span><span class="p">,</span> <span class="nx">cnt</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">ret</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="清除通知">清除通知</h3>
+<p>note 通知被设计为调用前必须对其标志位进行复位，这就需要调用 noteclear：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// darwin, runtime/lock_sema.go
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">noteclear</span><span class="p">(</span><span class="nx">n</span> <span class="o">*</span><span class="nx">note</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">n</span><span class="p">.</span><span class="nx">key</span> <span class="p">=</span> <span class="mi">0</span>
+<span class="p">}</span>
+
+<span class="c1">// linux, runtime/lock_futex.go
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">noteclear</span><span class="p">(</span><span class="nx">n</span> <span class="o">*</span><span class="nx">note</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">n</span><span class="p">.</span><span class="nx">key</span> <span class="p">=</span> <span class="mi">0</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="运行时互斥量机制-mutex">运行时互斥量机制 mutex</h2>
+<h3 id="结构-1">结构</h3>
+<p>运行时的 mutex 互斥锁与 note 原理几乎一致，结构上也只有一个 uintptr 类型的 key：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 互斥锁。在无竞争的情况下，与自旋锁 spin lock（只是一些用户级指令）一样快，
+</span><span class="c1">// 但在争用路径 contention path 中，它们在内核中休眠。零值互斥锁为未加锁状态（无需初始化每个锁）。
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">mutex</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="c1">// 基于 futex 的实现将其视为 uint32 key (linux)
+</span><span class="c1"></span>	<span class="c1">// 而基于 sema 实现则将其视为 M* waitm。 (darwin)
+</span><span class="c1"></span>	<span class="c1">// 以前作为 union 使用，但 union 会打破精确 GC
+</span><span class="c1"></span>	<span class="nx">key</span> <span class="kt">uintptr</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="lock">lock</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="p">(</span>
+	<span class="nx">mutex_unlocked</span> <span class="p">=</span> <span class="mi">0</span>
+	<span class="nx">mutex_locked</span>   <span class="p">=</span> <span class="mi">1</span>
+	<span class="nx">mutex_sleeping</span> <span class="p">=</span> <span class="mi">2</span>
+
+	<span class="nx">active_spin</span>     <span class="p">=</span> <span class="mi">4</span>
+	<span class="nx">passive_spin</span>    <span class="p">=</span> <span class="mi">1</span>
+<span class="p">)</span>
+<span class="c1">//go:nosplit
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">key32</span><span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="kt">uintptr</span><span class="p">)</span><span class="o">*</span><span class="kt">uint32</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="p">(</span><span class="o">*</span><span class="kt">uint32</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">p</span><span class="p">))</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">lock</span><span class="p">(</span><span class="nx">l</span><span class="o">*</span><span class="nx">mutex</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+	<span class="p">(</span><span class="o">...</span><span class="p">)</span>
+	<span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">locks</span><span class="o">++</span>
+
+	<span class="c1">// 锁的推测抓取
+</span><span class="c1"></span>	<span class="nx">v</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Xchg</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">key</span><span class="p">),</span> <span class="nx">mutex_locked</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">v</span> <span class="o">==</span> <span class="nx">mutex_unlocked</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+
+	<span class="c1">// wait 可能是 MUTEX_LOCKED 或 MUTEX_SLEEPING
+</span><span class="c1"></span>	<span class="c1">// 取决于是否有线程在此 mutex 上休眠。
+</span><span class="c1"></span>	<span class="c1">// 如果我们没有将 l.key 从 MUTEX_SLEEPING 修改到其他值，
+</span><span class="c1"></span>	<span class="c1">// 我们必须小心的在返回前将其修改回 MUTEX_SLEEPING，进而保证睡眠的
+</span><span class="c1"></span>	<span class="c1">// 的线程能够获得唤醒调用
+</span><span class="c1"></span>	<span class="nx">wait</span> <span class="o">:=</span> <span class="nx">v</span>
+
+	<span class="c1">// 在单处理器中，没有 spinning
+</span><span class="c1"></span>	<span class="c1">// 在多处理器中，作为 ACTIVE_SPIN 尝试进行自旋
+</span><span class="c1"></span>	<span class="nx">spin</span> <span class="o">:=</span> <span class="mi">0</span>
+	<span class="k">if</span> <span class="nx">ncpu</span> <span class="p">&gt;</span> <span class="mi">1</span> <span class="p">{</span>
+		<span class="nx">spin</span> <span class="p">=</span> <span class="nx">active_spin</span>
+	<span class="p">}</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="c1">// 尝试加锁, spinning
+</span><span class="c1"></span>		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">spin</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="k">for</span> <span class="nx">l</span><span class="p">.</span><span class="nx">key</span> <span class="o">==</span> <span class="nx">mutex_unlocked</span> <span class="p">{</span>
+				<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Cas</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">key</span><span class="p">),</span> <span class="nx">mutex_unlocked</span><span class="p">,</span> <span class="nx">wait</span><span class="p">)</span> <span class="p">{</span>
+					<span class="k">return</span>
+				<span class="p">}</span>
+			<span class="p">}</span>
+			<span class="nf">procyield</span><span class="p">(</span><span class="nx">active_spin_cnt</span><span class="p">)</span> <span class="c1">// 30
+</span><span class="c1"></span>		<span class="p">}</span>
+
+		<span class="c1">// Try for lock, rescheduling.
+</span><span class="c1"></span>		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">passive_spin</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="k">for</span> <span class="nx">l</span><span class="p">.</span><span class="nx">key</span> <span class="o">==</span> <span class="nx">mutex_unlocked</span> <span class="p">{</span>
+				<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Cas</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">key</span><span class="p">),</span> <span class="nx">mutex_unlocked</span><span class="p">,</span> <span class="nx">wait</span><span class="p">)</span> <span class="p">{</span>
+					<span class="k">return</span>
+				<span class="p">}</span>
+			<span class="p">}</span>
+			<span class="nf">osyield</span><span class="p">()</span>
+		<span class="p">}</span>
+
+		<span class="c1">// Sleep.
+</span><span class="c1"></span>		<span class="nx">v</span> <span class="p">=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Xchg</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">key</span><span class="p">),</span> <span class="nx">mutex_sleeping</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">v</span> <span class="o">==</span> <span class="nx">mutex_unlocked</span> <span class="p">{</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+		<span class="nx">wait</span> <span class="p">=</span> <span class="nx">mutex_sleeping</span>
+		<span class="nf">futexsleep</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">key</span><span class="p">),</span> <span class="nx">mutex_sleeping</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>procyield 内部实现什么也不做，只是反复调用 PAUSE 指令 30 次。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">TEXT</span> <span class="nx">runtime</span><span class="err">·</span><span class="nf">procyield</span><span class="p">(</span><span class="nx">SB</span><span class="p">),</span><span class="nx">NOSPLIT</span><span class="p">,</span><span class="err">$</span><span class="mi">0</span><span class="o">-</span><span class="mi">0</span>
+	<span class="nx">MOVL</span>	<span class="nx">cycles</span><span class="o">+</span><span class="mi">0</span><span class="p">(</span><span class="nx">FP</span><span class="p">),</span> <span class="nx">AX</span>
+<span class="nx">again</span><span class="p">:</span>
+	<span class="nx">PAUSE</span>
+	<span class="nx">SUBL</span>	<span class="err">$</span><span class="mi">1</span><span class="p">,</span> <span class="nx">AX</span>
+	<span class="nx">JNZ</span>	<span class="nx">again</span>
+	<span class="nx">RET</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>osyield 则是系统调用 sched_yield 的封装：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="nx">TEXT</span> <span class="nx">runtime</span><span class="err">·</span><span class="nf">osyield</span><span class="p">(</span><span class="nx">SB</span><span class="p">),</span><span class="nx">NOSPLIT</span><span class="p">,</span><span class="err">$</span><span class="mi">0</span>
+	<span class="nx">MOVL</span>	<span class="err">$</span><span class="nx">SYS_sched_yield</span><span class="p">,</span> <span class="nx">AX</span>
+	<span class="nx">SYSCALL</span>
+	<span class="nx">RET</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>unlock</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">unlock</span><span class="p">(</span><span class="nx">l</span> <span class="o">*</span><span class="nx">mutex</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">v</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Xchg</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">key</span><span class="p">),</span> <span class="nx">mutex_unlocked</span><span class="p">)</span>
+	<span class="p">(</span><span class="o">...</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">v</span> <span class="o">==</span> <span class="nx">mutex_sleeping</span> <span class="p">{</span>
+		<span class="nf">futexwakeup</span><span class="p">(</span><span class="nf">key32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">key</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+	<span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">locks</span><span class="o">--</span>
+	<span class="p">(</span><span class="o">...</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">locks</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">preempt</span> <span class="p">{</span> <span class="c1">// restore the preemption request in case we&#39;ve cleared it in newstack
+</span><span class="c1"></span>		<span class="nx">gp</span><span class="p">.</span><span class="nx">stackguard0</span> <span class="p">=</span> <span class="nx">stackPreempt</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="运行时信号量机制-semaphore">运行时信号量机制 semaphore</h2>
+<p>go中的semaphore作用和futex目标一样，提供sleep和wakeup原语，使其能够在其它同步原语中的竞争情况下使用。当一个goroutine需要休眠时，将其进行集中存放，当需要wakeup时，再将其取出，重新放入调度器中。</p>
+<p>sync 包中 Mutex 的实现依赖运行时中关于 runtime_Semacquire 与 runtime_Semrelease 的实现。 他们对应于运行时的 sync_runtime_Semacquire 和 sync_runtime_Semrelease 函数。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">//go:linkname sync_runtime_Semacquire sync.runtime_Semacquire
+</span><span class="c1">// Semacquire等待*s &gt; 0，然后原子递减它。
+</span><span class="c1">// 它是一个简单的睡眠原语，用于同步
+</span><span class="c1">// library and不应该直接使用。
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">sync_runtime_Semacquire</span><span class="p">(</span><span class="nx">addr</span> <span class="o">*</span><span class="kt">uint32</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nf">semacquire1</span><span class="p">(</span><span class="nx">addr</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="nx">semaBlockProfile</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="c1">//go:linkname sync_runtime_Semrelease sync.runtime_Semrelease
+</span><span class="c1">// Semrelease会自动增加*s并通知一个被Semacquire阻塞的等待的goroutine
+</span><span class="c1">// 它是一个简单的唤醒原语，用于同步
+</span><span class="c1">// library and不应该直接使用。
+</span><span class="c1">// 如果handoff为true, 传递信号到队列头部的waiter
+</span><span class="c1">// skipframes是跟踪过程中要省略的帧数，从这里开始计算
+</span><span class="c1">// runtime_Semrelease&#39;s caller.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">sync_runtime_Semrelease</span><span class="p">(</span><span class="nx">addr</span> <span class="o">*</span><span class="kt">uint32</span><span class="p">,</span> <span class="nx">handoff</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">skipframes</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nf">semrelease1</span><span class="p">(</span><span class="nx">addr</span><span class="p">,</span> <span class="nx">handoff</span><span class="p">,</span> <span class="nx">skipframes</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>可以看到他们均为运行时中的 semacquire1 和 semrelease1 函数。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210819212747.png" alt=""></p>
+<h3 id="sudog-缓存">sudog 缓存</h3>
+<p>sudog 是运行时用来存放处于阻塞状态的 goroutine 的一个上层抽象，是用来实现用户态信号量的主要机制之一。 例如当一个 goroutine 因为等待 channel 的数据需要进行阻塞时，sudog 会将 goroutine 及其用于等待数据的位置进行记录， 并进而串联成一个等待队列，或二叉平衡树。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-s" data-lang="s">   <span class="n">sudog</span>
+<span class="o">+---------+</span>
+<span class="o">|</span>    <span class="n">g</span>    <span class="o">|</span> <span class="o">---&gt;</span> <span class="n">goroutine</span>
+<span class="o">+---------+</span>
+<span class="o">|</span>   <span class="n">next</span>  <span class="o">|</span> <span class="o">---&gt;</span> 下一个 <span class="n">g</span>
+<span class="o">+---------+</span>
+<span class="o">|</span>  	<span class="n">prev</span>  <span class="o">|</span> <span class="o">---&gt;</span> 上一个 <span class="n">g</span>
+<span class="o">+---------+</span>
+<span class="o">|</span>   <span class="n">elem</span>  <span class="o">|</span> <span class="o">---&gt;</span> 发送的元素，可能指向其他 <span class="n">goroutine</span> 的执行栈
+<span class="o">+---------+</span>
+<span class="o">|</span>   <span class="kc">...</span>   <span class="o">|</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go">
+<span class="c1">// sudog represents a g in a wait list, such as for sending/receiving
+</span><span class="c1">// on a channel.
+</span><span class="c1">//
+</span><span class="c1">// sudog is necessary because the g ↔ synchronization object relation
+</span><span class="c1">// is many-to-many. A g can be on many wait lists, so there may be
+</span><span class="c1">// many sudogs for one g; and many gs may be waiting on the same
+</span><span class="c1">// synchronization object, so there may be many sudogs for one object.
+</span><span class="c1">//
+</span><span class="c1">// sudogs are allocated from a special pool. Use acquireSudog and
+</span><span class="c1">// releaseSudog to allocate and free them.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">sudog</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="c1">// The following fields are protected by the hchan.lock of the
+</span><span class="c1"></span>	<span class="c1">// channel this sudog is blocking on. shrinkstack depends on
+</span><span class="c1"></span>	<span class="c1">// this for sudogs involved in channel ops.
+</span><span class="c1"></span>	<span class="c1">// 由 sudog 阻塞的通道的 hchan.lock 进行保护
+</span><span class="c1"></span>	<span class="nx">g</span> <span class="o">*</span><span class="nx">g</span>
+
+	<span class="nx">next</span> <span class="o">*</span><span class="nx">sudog</span>
+	<span class="nx">prev</span> <span class="o">*</span><span class="nx">sudog</span>
+	<span class="c1">// 数据元素（可能指向栈）
+</span><span class="c1"></span>	<span class="nx">elem</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// data element (may point to stack)
+</span><span class="c1"></span>
+	<span class="c1">// The following fields are never accessed concurrently.
+</span><span class="c1"></span>	<span class="c1">// For channels, waitlink is only accessed by g.
+</span><span class="c1"></span>	<span class="c1">// For semaphores, all fields (including the ones above)
+</span><span class="c1"></span>	<span class="c1">// are only accessed when holding a semaRoot lock.
+</span><span class="c1"></span>	<span class="c1">// 下面的字段永远不会并发的被访问。对于 channel waitlink 只会被 g 访问
+</span><span class="c1"></span>	<span class="c1">// 对于 semaphores，所有的字段（包括上面的）只会在持有 semaRoot 锁时被访问
+</span><span class="c1"></span>	<span class="nx">acquiretime</span> <span class="kt">int64</span>
+	<span class="nx">releasetime</span> <span class="kt">int64</span>
+	<span class="nx">ticket</span>      <span class="kt">uint32</span>
+
+	<span class="c1">// isSelect indicates g is participating in a select, so
+</span><span class="c1"></span>	<span class="c1">// g.selectDone must be CAS&#39;d to win the wake-up race.
+</span><span class="c1"></span>	<span class="c1">// isSelect 表示 g 正在参与一个 select，因此 g.selectDone 必须以 CAS 的方式来避免唤醒时候的 data race。
+</span><span class="c1"></span>	<span class="nx">isSelect</span> <span class="kt">bool</span>
+
+	<span class="c1">// success indicates whether communication over channel c
+</span><span class="c1"></span>	<span class="c1">// succeeded. It is true if the goroutine was awoken because a
+</span><span class="c1"></span>	<span class="c1">// value was delivered over channel c, and false if awoken
+</span><span class="c1"></span>	<span class="c1">// because c was closed.
+</span><span class="c1"></span>	<span class="nx">success</span> <span class="kt">bool</span>
+	<span class="c1">// semaRoot 二叉树
+</span><span class="c1"></span>	<span class="nx">parent</span>   <span class="o">*</span><span class="nx">sudog</span> <span class="c1">// semaRoot binary tree
+</span><span class="c1"></span>	<span class="c1">// g.waiting 列表或 semaRoot
+</span><span class="c1"></span>	<span class="nx">waitlink</span> <span class="o">*</span><span class="nx">sudog</span> <span class="c1">// g.waiting list or semaRoot
+</span><span class="c1"></span>	<span class="nx">waittail</span> <span class="o">*</span><span class="nx">sudog</span> <span class="c1">// semaRoot
+</span><span class="c1"></span>	<span class="nx">c</span>        <span class="o">*</span><span class="nx">hchan</span> <span class="c1">// channel
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这些信息是从一个全局缓存池或 per-P 的缓存池进行分配（per-P 优先），当使用完毕后又再次归还给缓存池。 其遵循策略：</p>
+<ol>
+<li>优先从 per-P 缓存中获取，如果 per-P 缓存为空，则从全局池抓取一半；</li>
+<li>优先归还到 per-P 缓存，如果 per-P 缓存已满，则将 per-P 缓存的一半归还到全局池。</li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">//go:nosplit
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">acquireSudog</span><span class="p">()</span> <span class="o">*</span><span class="nx">sudog</span> <span class="p">{</span>
+	<span class="c1">// Delicate dance: 信号量的实现调用acquireSudog，然后acquireSudog调用new(sudog)
+</span><span class="c1"></span>	<span class="c1">// new调用malloc, malloc调用垃圾收集器，垃圾收集器在stopTheWorld调用信号量
+</span><span class="c1"></span>	<span class="c1">// 通过在new(sudog)周围执行acquirem/releasem来打破循环
+</span><span class="c1"></span>	<span class="c1">// acquirem/releasem在new(sudog)期间增加m.locks，防止垃圾收集器被调用。
+</span><span class="c1"></span>
+	<span class="c1">// 获取当前 g 所在的 m
+</span><span class="c1"></span>	<span class="nx">mp</span> <span class="o">:=</span> <span class="nf">acquirem</span><span class="p">()</span> <span class="c1">// 获取当前 g 所在的 m
+</span><span class="c1"></span>	<span class="nx">pp</span> <span class="o">:=</span> <span class="nx">mp</span><span class="p">.</span><span class="nx">p</span><span class="p">.</span><span class="nf">ptr</span><span class="p">()</span>
+	<span class="c1">// 检查 per-P sudogcache 池是否存在可复用的 sudog
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sudoglock</span><span class="p">)</span>
+		<span class="c1">// 从中央缓存抓取一半
+</span><span class="c1"></span>		<span class="k">for</span> <span class="nb">len</span><span class="p">(</span><span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">)</span> <span class="p">&lt;</span> <span class="nb">cap</span><span class="p">(</span><span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">)</span><span class="o">/</span><span class="mi">2</span> <span class="o">&amp;&amp;</span> <span class="nx">sched</span><span class="p">.</span><span class="nx">sudogcache</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">s</span> <span class="o">:=</span> <span class="nx">sched</span><span class="p">.</span><span class="nx">sudogcache</span>
+			<span class="nx">sched</span><span class="p">.</span><span class="nx">sudogcache</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">next</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">next</span> <span class="p">=</span> <span class="kc">nil</span>
+			<span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">,</span> <span class="nx">s</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sudoglock</span><span class="p">)</span>
+		<span class="c1">// 中央缓存也没有，新分配
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">,</span> <span class="nb">new</span><span class="p">(</span><span class="nx">sudog</span><span class="p">))</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="c1">// 取缓存中最后一个
+</span><span class="c1"></span>	<span class="nx">n</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">)</span>
+	<span class="nx">s</span> <span class="o">:=</span> <span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">[</span><span class="nx">n</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+	<span class="c1">// 将刚取出的在缓存中移除
+</span><span class="c1"></span>	<span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">[</span><span class="nx">n</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="p">=</span> <span class="kc">nil</span>
+	<span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span> <span class="p">=</span> <span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">[:</span><span class="nx">n</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+	<span class="p">(</span><span class="o">...</span><span class="p">)</span>
+	<span class="nf">releasem</span><span class="p">(</span><span class="nx">mp</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+<span class="c1">//go:nosplit
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">releaseSudog</span><span class="p">(</span><span class="nx">s</span><span class="o">*</span><span class="nx">sudog</span><span class="p">)</span> <span class="p">{</span>
+	<span class="p">(</span><span class="o">...</span><span class="p">)</span>
+	<span class="nx">mp</span> <span class="o">:=</span> <span class="nf">acquirem</span><span class="p">()</span> <span class="c1">// 避免在释放时重新调度到其他的 p 上
+</span><span class="c1"></span>	<span class="nx">pp</span> <span class="o">:=</span> <span class="nx">mp</span><span class="p">.</span><span class="nx">p</span><span class="p">.</span><span class="nf">ptr</span><span class="p">()</span>
+	<span class="c1">// p 的 sudogcache 已存满，将一半放回到中央缓存中
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">)</span> <span class="o">==</span> <span class="nb">cap</span><span class="p">(</span><span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">)</span> <span class="p">{</span>
+		<span class="kd">var</span> <span class="nx">first</span><span class="p">,</span> <span class="nx">last</span> <span class="o">*</span><span class="nx">sudog</span>
+		<span class="k">for</span> <span class="nb">len</span><span class="p">(</span><span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">)</span> <span class="p">&gt;</span> <span class="nb">cap</span><span class="p">(</span><span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">)</span><span class="o">/</span><span class="mi">2</span> <span class="p">{</span>
+			<span class="nx">n</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">)</span>
+			<span class="nx">p</span> <span class="o">:=</span> <span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">[</span><span class="nx">n</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+			<span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">[</span><span class="nx">n</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="p">=</span> <span class="kc">nil</span>
+			<span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span> <span class="p">=</span> <span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">[:</span><span class="nx">n</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+			<span class="c1">// 构建 sudog 链表
+</span><span class="c1"></span>			<span class="k">if</span> <span class="nx">first</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nx">first</span> <span class="p">=</span> <span class="nx">p</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+				<span class="nx">last</span><span class="p">.</span><span class="nx">next</span> <span class="p">=</span> <span class="nx">p</span>
+			<span class="p">}</span>
+			<span class="nx">last</span> <span class="p">=</span> <span class="nx">p</span>
+		<span class="p">}</span>
+		<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sudoglock</span><span class="p">)</span>
+		<span class="nx">last</span><span class="p">.</span><span class="nx">next</span> <span class="p">=</span> <span class="nx">sched</span><span class="p">.</span><span class="nx">sudogcache</span>
+		<span class="nx">sched</span><span class="p">.</span><span class="nx">sudogcache</span> <span class="p">=</span> <span class="nx">first</span>
+		<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sudoglock</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="c1">// 将释放的 s 添加到 sudogcache
+</span><span class="c1"></span>	<span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">pp</span><span class="p">.</span><span class="nx">sudogcache</span><span class="p">,</span> <span class="nx">s</span><span class="p">)</span>
+	<span class="nf">releasem</span><span class="p">(</span><span class="nx">mp</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="基于-goroutine-抽象的信号量">基于 goroutine 抽象的信号量</h3>
+<p>运行时的信号量需要在 Go 运行时调度器的基础之上提供一个 sleep 和 wakeup 原语，从而向用户态代码屏蔽内部调度器的存在。 例如，当用户态代码使用互斥锁发生竞争时，能够让用户态代码依附的 goroutine 进行 sleep，并在可用时候被 wakeup，并被重新调度。</p>
+<p>因此 sleep 和 wakeup 原语的本质是，当一个 goroutine 需要休眠时，将其进行集中存放，当需要 wakeup 时，再将其取出，重新放入调度器中。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// semaRoot拥有一个具有不同地址（s.elem）的sudog平衡树。
+</span><span class="c1">// 每个sudog都可以依次（通过s.waitlink）指向一个列表，在相同地址上等待的其他sudog。
+</span><span class="c1">// 对具有相同地址的sudog内部列表进行的操作全部为O（1）。顶层semaRoot列表的扫描为O（log n），
+</span><span class="c1">// 其中，n是阻止goroutines的不同地址的数量，通过他们散列到给定的semaRoot。
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">semaRoot</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">lock</span>  <span class="nx">mutex</span>
+	<span class="c1">// waiters的平衡树的根节点
+</span><span class="c1"></span>	<span class="nx">treap</span> <span class="o">*</span><span class="nx">sudog</span>
+	<span class="c1">// waiters的数量，读取的时候无所
+</span><span class="c1"></span>	<span class="nx">nwait</span> <span class="kt">uint32</span>
+<span class="p">}</span>
+<span class="kd">var</span> <span class="nx">semtable</span> <span class="p">[</span><span class="mi">251</span><span class="p">]</span><span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">root</span> <span class="nx">semaRoot</span>
+	<span class="nx">pad</span>  <span class="p">[</span><span class="nx">cpu</span><span class="p">.</span><span class="nx">CacheLinePadSize</span> <span class="o">-</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">semaRoot</span><span class="p">{})]</span><span class="kt">byte</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">semroot</span><span class="p">(</span><span class="nx">addr</span><span class="o">*</span><span class="kt">uint32</span><span class="p">)</span> <span class="o">*</span><span class="nx">semaRoot</span> <span class="p">{</span>
+	<span class="c1">// 对信号量的地址取 hash(x) = (x &gt;&gt; 3) % size
+</span><span class="c1"></span>	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">semtable</span><span class="p">[(</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">addr</span><span class="p">))</span><span class="o">&gt;&gt;</span><span class="mi">3</span><span class="p">)</span><span class="o">%</span><span class="nx">semTabSize</span><span class="p">].</span><span class="nx">root</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>其实现中使用分布式散列表结构，根据信号量的实际地址的散列值将其打散到 251 个 treap 树中。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">semacquire1</span><span class="p">(</span><span class="nx">addr</span> <span class="o">*</span><span class="kt">uint32</span><span class="p">,</span> <span class="nx">lifo</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">profile</span> <span class="nx">semaProfileFlags</span><span class="p">,</span> <span class="nx">skipframes</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+<span class="c1">// 快速路径:*addr -= 1
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nf">cansemacquire</span><span class="p">(</span><span class="nx">addr</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+
+	<span class="c1">// 增加等待计数
+</span><span class="c1"></span>	<span class="c1">// 再试一次 cansemacquire 如果成功则直接返回
+</span><span class="c1"></span>	<span class="c1">// 将自己作为等待者入队
+</span><span class="c1"></span>	<span class="c1">// 休眠
+</span><span class="c1"></span>	<span class="c1">// (等待器描述符由出队信号产生出队行为)
+</span><span class="c1"></span>	<span class="nx">s</span> <span class="o">:=</span> <span class="nf">acquireSudog</span><span class="p">()</span>
+	<span class="nx">root</span> <span class="o">:=</span> <span class="nf">semroot</span><span class="p">(</span><span class="nx">addr</span><span class="p">)</span>
+	<span class="p">(</span><span class="o">...</span><span class="p">)</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">ticket</span> <span class="p">=</span> <span class="mi">0</span>
+	<span class="p">(</span><span class="o">...</span><span class="p">)</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">root</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+		<span class="c1">// 把我们添加到 nwait 进而避免 semrelease 中的快速路径
+</span><span class="c1"></span>		<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">root</span><span class="p">.</span><span class="nx">nwait</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+		<span class="c1">// 避免虚假唤醒
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nf">cansemacquire</span><span class="p">(</span><span class="nx">addr</span><span class="p">)</span> <span class="p">{</span> <span class="c1">// atomic *addr -= 1
+</span><span class="c1"></span>			<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">root</span><span class="p">.</span><span class="nx">nwait</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+			<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">root</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+		<span class="c1">// 任何在 cansemacquire 之后的 semrelease 都知道我们在等待（因为设置了 nwait），因此休眠
+</span><span class="c1"></span>		<span class="c1">// treap.insert(addr, s), addr 保存到 s.elem 中, s 保存到 root 中,
+</span><span class="c1"></span>		<span class="nx">root</span><span class="p">.</span><span class="nf">queue</span><span class="p">(</span><span class="nx">addr</span><span class="p">,</span> <span class="nx">s</span><span class="p">,</span> <span class="nx">lifo</span><span class="p">)</span> <span class="c1">// lifo == true: list 中已经有 addr 了
+</span><span class="c1"></span>		<span class="c1">// 将当前goroutine置于等待状态并解锁锁。
+</span><span class="c1"></span>		<span class="c1">// 通过调用goready（gp），可以使goroutine再次可运行。
+</span><span class="c1"></span>		<span class="nf">goparkunlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">root</span><span class="p">.</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">waitReasonSemacquire</span><span class="p">,</span> <span class="nx">traceEvGoBlockSync</span><span class="p">,</span> <span class="mi">4</span><span class="o">+</span><span class="nx">skipframes</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nx">ticket</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nf">cansemacquire</span><span class="p">(</span><span class="nx">addr</span><span class="p">)</span> <span class="p">{</span> <span class="c1">// atomic *addr -= 1
+</span><span class="c1"></span>			<span class="k">break</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="p">(</span><span class="o">...</span><span class="p">)</span>
+	<span class="c1">// 归还sudog
+</span><span class="c1"></span>	<span class="nf">releaseSudog</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">semrelease1</span><span class="p">(</span><span class="nx">addr</span> <span class="o">*</span><span class="kt">uint32</span><span class="p">,</span> <span class="nx">handoff</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">skipframes</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">root</span> <span class="o">:=</span> <span class="nf">semroot</span><span class="p">(</span><span class="nx">addr</span><span class="p">)</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd</span><span class="p">(</span><span class="nx">addr</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+	<span class="c1">// 快速路径: 没有人在此 root 等待
+</span><span class="c1"></span>	<span class="c1">// 必须发生在 xadd 之后，避免虚假唤醒
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">root</span><span class="p">.</span><span class="nx">nwait</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+
+	<span class="c1">// 搜索一个等待着然后将其唤醒
+</span><span class="c1"></span>	<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">root</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">root</span><span class="p">.</span><span class="nx">nwait</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">root</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="nx">s</span><span class="p">,</span> <span class="nx">t0</span> <span class="o">:=</span> <span class="nx">root</span><span class="p">.</span><span class="nf">dequeue</span><span class="p">(</span><span class="nx">addr</span><span class="p">)</span> <span class="c1">// 查找第一个出现的 addr
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">s</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">root</span><span class="p">.</span><span class="nx">nwait</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">root</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">s</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span> <span class="c1">// 可能会很慢，因此先解锁
+</span><span class="c1"></span>		<span class="p">(</span><span class="o">...</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">handoff</span> <span class="o">&amp;&amp;</span> <span class="nf">cansemacquire</span><span class="p">(</span><span class="nx">addr</span><span class="p">)</span> <span class="p">{</span> <span class="c1">// atomic *addr -= 1
+</span><span class="c1"></span>			<span class="nx">s</span><span class="p">.</span><span class="nx">ticket</span> <span class="p">=</span> <span class="mi">1</span>
+		<span class="p">}</span>
+		<span class="nf">readyWithTime</span><span class="p">(</span><span class="nx">s</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span> <span class="c1">// goready(s.g, 5) // 标记 runnable，等待被重新调度
+</span><span class="c1"></span>	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这一对 semacquire 和 semrelease 理解上可能不太直观。 首先，我们必须意识到这两个函数一定是在两个不同的 M（线程）上得到执行，否则不会出现并发，我们不妨设为 M1 和 M2。 当 M1 上的 G1 执行到 semacquire1 时，如果快速路径成功，则说明 G1 抢到锁，能够继续执行。但一旦失败且在慢速路径下 依然抢不到锁，则会进入 goparkunlock，将当前的 G1 放到等待队列中，进而让 M1 切换并执行其他 G。 当 M2 上的 G2 开始调用 semrelease1 时，只是单纯的将等待队列的 G1 重新放到调度队列中，而当 G1 重新被调度时（假设运气好又在 M1 上被调度），代码仍然会从 goparkunlock 之后开始执行，并再次尝试竞争信号量，如果成功，则会归还 sudog。</p>
+<h2 id="参考">参考</h2>
+<p><a href="https://golang.design/under-the-hood/zh-cn/part2runtime/ch06sched/sync/#heading1">6.8 同步原语</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-08-19
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/go%E4%B8%AD%E7%9A%84%E7%B3%BB%E7%BB%9F%E8%B0%83%E7%94%A8/">
+            <span class="next-text nav-default">Go中的系统调用</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
