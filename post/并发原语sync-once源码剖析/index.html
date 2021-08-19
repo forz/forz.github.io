@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>并发原语sync-Once源码剖析 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="Once 很多人认为实现一个 Once 一样的并发原语很简单,只需使用一个 flag 标记是否初始化过即可,最多是用 atomic 原子操作这个 flag,但是,这个实现有一个很大的问" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.84.4 with theme even" />
+
+
+<link rel="canonical" href="/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADsync-once%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="并发原语sync-Once源码剖析" />
+<meta property="og:description" content="Once 很多人认为实现一个 Once 一样的并发原语很简单,只需使用一个 flag 标记是否初始化过即可,最多是用 atomic 原子操作这个 flag,但是,这个实现有一个很大的问" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADsync-once%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-05-21T14:36:14+00:00" />
+<meta property="article:modified_time" content="2021-05-21T14:36:14+00:00" />
+
+<meta itemprop="name" content="并发原语sync-Once源码剖析">
+<meta itemprop="description" content="Once 很多人认为实现一个 Once 一样的并发原语很简单,只需使用一个 flag 标记是否初始化过即可,最多是用 atomic 原子操作这个 flag,但是,这个实现有一个很大的问"><meta itemprop="datePublished" content="2021-05-21T14:36:14+00:00" />
+<meta itemprop="dateModified" content="2021-05-21T14:36:14+00:00" />
+<meta itemprop="wordCount" content="2897">
+<meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="并发原语sync-Once源码剖析"/>
+<meta name="twitter:description" content="Once 很多人认为实现一个 Once 一样的并发原语很简单,只需使用一个 flag 标记是否初始化过即可,最多是用 atomic 原子操作这个 flag,但是,这个实现有一个很大的问"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">并发原语sync-Once源码剖析</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-05-21 </span>
+        <div class="post-category">
+            <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
+            </div>
+          <span class="more-meta"> 约 2897 字 </span>
+          <span class="more-meta"> 预计阅读 6 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#once">Once</a></li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="once">Once</h2>
+<p>很多人认为实现一个 Once 一样的并发原语很简单,只需使用一个 flag 标记是否初始化过即可,最多是用 atomic 原子操作这个 flag,但是,这个实现有一个很大的问题,就是如果参数 f 执行很慢的话,后续调用 Do 方法的 goroutine 虽然看到 done 已经设置为执行过了,但是获取某些初始化资源的时候可能会得到空的资源,因为 f 还没有执行完。</p>
+<p>所以,一个正确的 Once 实现要使用一个互斥锁,这样初始化的时候如果有并发的 goroutine,就会进入doSlow 方法。互斥锁的机制保证只有一个 goroutine 进行初始化,同时利用双检查的机制(double-checking),再次判断 o.done 是否为 0,如果为 0,则是第一次执行,执行完毕后,就将 o.done 设置为 1,然后释放锁。</p>
+<p>即使此时有多个 goroutine 同时进入了 doSlow 方法,因为双检查的机制,后续的 goroutine 会看到 o.done 的值为 1,也不会再次执行 f。</p>
+<p>这样既保证了并发的 goroutine 会等待 f 完成,而且还不会多次执行 f。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span></code></pre></td>
+<td class="lntd">
+<pre class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Once is an object that will perform exactly one action.
+</span><span class="c1">// Once 对象可以保证一个动作的绝对一次执行。
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Once</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="c1">// done indicates whether the action has been performed.
+</span><span class="c1"></span>	<span class="c1">// It is first in the struct because it is used in the hot path.
+</span><span class="c1"></span>	<span class="c1">// The hot path is inlined at every call site.
+</span><span class="c1"></span>	<span class="c1">// Placing done first allows more compact instructions on some architectures (amd64/x86),
+</span><span class="c1"></span>	<span class="c1">// and fewer instructions (to calculate offset) on other architectures.
+</span><span class="c1"></span>	<span class="c1">// done 表明某个动作是否被执行
+</span><span class="c1"></span>	<span class="c1">// 由于其使用频繁（热路径），故将其放在结构体的最上方
+</span><span class="c1"></span>	<span class="c1">// 热路径在每个调用点进行内嵌
+</span><span class="c1"></span>	<span class="c1">// 将 done 放在第一位，在某些架构下（amd64/x86）能获得更加紧凑的指令，
+</span><span class="c1"></span>	<span class="c1">// 而在其他架构下能更少的指令（用于计算其偏移量）。
+</span><span class="c1"></span>	<span class="nx">done</span> <span class="kt">uint32</span>
+	<span class="nx">m</span>    <span class="nx">Mutex</span>
+<span class="p">}</span>
+
+<span class="c1">// Do calls the function f if and only if Do is being called for the
+</span><span class="c1">// first time for this instance of Once. In other words, given
+</span><span class="c1">// 	var once Once
+</span><span class="c1">// if once.Do(f) is called multiple times, only the first call will invoke f,
+</span><span class="c1">// even if f has a different value in each invocation. A new instance of
+</span><span class="c1">// Once is required for each function to execute.
+</span><span class="c1">//
+</span><span class="c1">// Do is intended for initialization that must be run exactly once. Since f
+</span><span class="c1">// is niladic, it may be necessary to use a function literal to capture the
+</span><span class="c1">// arguments to a function to be invoked by Do:
+</span><span class="c1">// 	config.once.Do(func() { config.init(filename) })
+</span><span class="c1">//
+</span><span class="c1">// Because no call to Do returns until the one call to f returns, if f causes
+</span><span class="c1">// Do to be called, it will deadlock.
+</span><span class="c1">//
+</span><span class="c1">// If f panics, Do considers it to have returned; future calls of Do return
+</span><span class="c1">// without calling f.
+</span><span class="c1">//
+</span><span class="c1">// Do 当且仅当第一次调用时，f 会被执行。换句话说，给定
+</span><span class="c1">// 	var once Once
+</span><span class="c1">// 如果 once.Do(f) 被多次调用则只有第一次会调用 f，即使每次提供的 f 不同。
+</span><span class="c1">// 每次执行必须新建一个 Once 实例。
+</span><span class="c1">//
+</span><span class="c1">// Do 用于变量的一次初始化，由于 f 是无参数的，因此有必要使用函数字面量来捕获参数：
+</span><span class="c1">// 	config.once.Do(func() { config.init(filename) })
+</span><span class="c1">//
+</span><span class="c1">// 因为该调用无返回值，因此如果 f 调用了 Do，则会导致死锁。
+</span><span class="c1">//
+</span><span class="c1">// 如果 f 发生 panic，则 Do 认为 f 已经返回；之后的调用也不会调用 f。
+</span><span class="c1">//
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">o</span> <span class="o">*</span><span class="nx">Once</span><span class="p">)</span> <span class="nf">Do</span><span class="p">(</span><span class="nx">f</span> <span class="kd">func</span><span class="p">())</span> <span class="p">{</span>
+	<span class="c1">// Note: Here is an incorrect implementation of Do:
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">//	if atomic.CompareAndSwapUint32(&amp;o.done, 0, 1) {
+</span><span class="c1"></span>	<span class="c1">//		f()
+</span><span class="c1"></span>	<span class="c1">//	}
+</span><span class="c1"></span>	<span class="c1">//
+</span><span class="c1"></span>	<span class="c1">// Do guarantees that when it returns, f has finished.
+</span><span class="c1"></span>	<span class="c1">// This implementation would not implement that guarantee:
+</span><span class="c1"></span>	<span class="c1">// given two simultaneous calls, the winner of the cas would
+</span><span class="c1"></span>	<span class="c1">// call f, and the second would return immediately, without
+</span><span class="c1"></span>	<span class="c1">// waiting for the first&#39;s call to f to complete.
+</span><span class="c1"></span>	<span class="c1">// This is why the slow path falls back to a mutex, and why
+</span><span class="c1"></span>	<span class="c1">// the atomic.StoreUint32 must be delayed until after f returns.
+</span><span class="c1"></span>	<span class="c1">// 原子读取 Once 内部的 done 属性，是否为 0，是则进入慢速路径，否则直接调用
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadUint32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">o</span><span class="p">.</span><span class="nx">done</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="c1">// Outlined slow-path to allow inlining of the fast-path.
+</span><span class="c1"></span>		<span class="nx">o</span><span class="p">.</span><span class="nf">doSlow</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">o</span> <span class="o">*</span><span class="nx">Once</span><span class="p">)</span> <span class="nf">doSlow</span><span class="p">(</span><span class="nx">f</span> <span class="kd">func</span><span class="p">())</span> <span class="p">{</span>
+	<span class="c1">// 注意，我们只使用原子读读取了 o.done 的值，这是最快速的路径执行原子操作，即 fast-path
+</span><span class="c1"></span>	<span class="c1">// 但当我们需要确保在并发状态下，是不是有多个人读到 0，因此必须加锁，这个操作相对昂贵，即 slow-path
+</span><span class="c1"></span>	<span class="nx">o</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="k">defer</span> <span class="nx">o</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="c1">// 双检查
+</span><span class="c1"></span>	<span class="c1">// 正好我们有一个并发的 goroutine 读到了 0，那么立即执行 f 并在结束时候调用原子写，将 o.done 修改为 1
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">o</span><span class="p">.</span><span class="nx">done</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">defer</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreUint32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">o</span><span class="p">.</span><span class="nx">done</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+		<span class="nf">f</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="c1">// 当 o.done 为 0 的 goroutine 解锁后，其他人会继续加锁，这时会发现 o.done 已经为了 1 ，于是 f 已经不用在继续执行了
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>有的同学不太理解为什么要使用Mutex。</p>
+<p>使用Mutex并不会影响这个数据结构的性能。因为Mutex的逻辑(也就是doSlow方法)只会在初始化时并发的情况下发生，一旦初始化完成，后续的goroutine在调用Do方法时并不会请求锁。</p>
+<p>所以，使用Mutex主要处理并发初始化的问题。</p>
+<p>假设Once对象的Do方法还没有被初次调用。这个时候有goroutine g2和goroutine g3同时调用Do方法。碰巧，g2和g3可能原子读取done变量会等于0,所以这两个goroutine可能都会同时进入doSlow方法(可能在同一个CPU上，也可能在不同的cpu上)。</p>
+<p>这个时候我们就需要Mutex限制只允许一个goroutine并发执行，也就是将并行变成了串行。假设g2运气好先执行，那么它就会进行初始化，并且执行完毕后把o.done设置为1,再释放锁。</p>
+<p>锁释放后，g3开始执行，这个时候还会执行double checking,再一次检查done字段。这一步是必须的，因为不双检查的话，它又会执行f一次。这里正确地使用了双检查，发现done已经被设置成了1,所以不需要初始化了，就直接返回。</p>
+<p>如果一个goroutine在双检查的时候如果发现done=0,说明还没有goroutine执行过初始化，这种重担压在了自己的身上，就像g2一样，它就会执行初始化函数f。</p>
+<p>所以，这里使用了Mutex,保护并发的初始化。</p>
+<p>我们知道，现代的CPU都是支持乱序执行的。那么最后两行<code>defer atomic.StoreUint32(&amp;o.done, 1)</code>和<code>f()</code>如果乱序了怎么办，那不也是还是没有初始化完毕就把done设置为1了吗？</p>
+<p>而且有些人，包括Russ Cox review这段代码的时候也提出，<code>defer atomic.StoreUint32(&amp;o.done, 1)</code> (源代码和此有所不同)能不能改成<code>o.done=1</code>。</p>
+<p>Go的标准库的代码质量是非常高的，而且都经过大神的仔细review,所以这样设计肯定是有它的用处的。</p>
+<p>首先，第15行的<code>defer atomic.StoreUint32(&amp;o.done, 1)</code>可以确保执行完第16行的f才将done设置为1。</p>
+<p>Ian Lance Taylor曾经在论坛中说:</p>
+<p>In C++ memory model terms I believe that the sync/atomic Load
+operations are memory_order_acquire, and I believe that the
+sync/atomic Store operations are memory_order_release. It&rsquo;s possible
+that if we ever document it we will go for stronger memory ordering,
+but I believe that these operations must at least carry those guarantees.</p>
+<p>I&rsquo;m somewhat less certain of the memory order guarantees of the Swap,
+CompareAndSwap, and Add functions. I guess that Swap and
+CompareAndSwap are probably at least memory_order_acq_rel, but Add may
+be memory_order_relaxed.</p>
+<p>Russ Cox曾经回答过问题,他把go的atomic 操作定位sequential consistency的，这是一个更严格的memory ordering。它们之前的读写操作,不会重排在Load/Store之后， 它们之后的读写操作也不会重排在Load/Store之前，所以建立了一个内存屏障(Memory barrier)。</p>
+<p>rsc
+2019年7月16日上午9:12:01</p>
+<p>Although there&rsquo;s been no official resolution to the issue, I think the actual path forward is what I posted a while back: &ldquo;Go&rsquo;s atomics guarantee sequential consistency among the atomic variables (behave like C/C++&rsquo;s seqconst atomics), and that you shouldn&rsquo;t mix atomic and non-atomic accesses for a given memory word.&rdquo;</p>
+<p>至少目前，我们可以按照他们的解答进行理解。</p>
+<p>这样的话，Go可以保证第15行<code>defer atomic.StoreUint32(&amp;o.done, 1)</code>肯定会在第16行f<code>()</code>之后执行，这样就不会出现未初始化完成就将done设置为1的问题。</p>
+<p>另一个问题，第14行为什么不使用atomic?</p>
+<p>因为Mutex的happend before关系， g2设置<code>o.done=1</code>之后才释放锁，这个时候g3才获取到锁，所以当g3获取到锁之后，<code>o.done</code>肯定就已经是1了，所以这个时候访问o.done肯定得到1的结果，不会在g2设置<code>o.done=1</code> g3看不到<code>o.done=1</code>这个write。</p>
+<p>第6行没有Mutex等的保护，所以通过atomic可以保证在o.done设置为1之后能看到这个设置的结果，避免总是落入到doSlow逻辑中。</p>
+<h2 id="参考">参考</h2>
+<p><a href="https://colobu.com/2017/07/11/dive-into-sync-Map">https://colobu.com/2017/07/11/dive-into-sync-Map</a></p>
+<p><a href="https://segmentfault.com/a/1190000015242373">https://segmentfault.com/a/1190000015242373</a></p>
+<p><a href="https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/">https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/</a></p>
+<p><a href="http://www.qiuxiaobing.cn/%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80/2018/03/09/go-sync-map.html">http://www.qiuxiaobing.cn/%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80/2018/03/09/go-sync-map.html</a></p>
+<p><a href="http://www.gogodjzhu.com/index.php/code/basic/397/">http://www.gogodjzhu.com/index.php/code/basic/397/</a></p>
+<p><a href="http://russellluo.com/2017/06/go-sync-map-diagram.html">http://russellluo.com/2017/06/go-sync-map-diagram.html</a></p>
+<p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/cond/">5.4 条件变量</a></p>
+<p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/waitgroup/">5.5 同步组</a></p>
+<p><a href="https://blog.csdn.net/sinat_41790904/article/details/115416237">Go 标准库源码分析 - sync 包的Pool</a></p>
+<p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/map/">5.7 并发安全散列表</a></p>
+<p><a href="https://draveness.me/golang/docs/part3-runtime/ch06-concurrency/golang-context/">6.1 上下文 Context</a></p>
+<p><a href="https://juejin.cn/post/6844903741842259975">go context剖析之源码分析</a></p>
+<p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/atomic/">5.3 原子操作</a></p>
+<p><a href="https://colobu.com/2021/05/05/triple-gates-of-sync-Once/">Go sync.Once的三重门</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-05-21
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADsync-map%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">并发原语Sync-Map源码剖析</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADcond%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <span class="next-text nav-default">并发原语Cond源码剖析</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
