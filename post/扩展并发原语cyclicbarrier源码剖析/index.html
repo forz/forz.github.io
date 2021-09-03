@@ -1,194 +1,208 @@
 <!DOCTYPE html>
-<html lang="zh-cn">
-<head>
-  <meta charset="utf-8">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
-  <title>扩展并发原语CyclicBarrier源码剖析 - Forz Blog</title>
-  <meta name="renderer" content="webkit" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<html lang="zh-cn" dir="auto">
 
-<meta http-equiv="Cache-Control" content="no-transform" />
-<meta http-equiv="Cache-Control" content="no-siteapp" />
-
-<meta name="theme-color" content="#f8f5ec" />
-<meta name="msapplication-navbutton-color" content="#f8f5ec">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
-
-
-<meta name="author"
-  content="Forz" /><meta name="description" content="CyclicBarrier允许一组 goroutine 彼此等待，到达一个共同的执行点。同时，因为它可以被重复使用，所以叫循环栅栏。具体的机制是，大家都在栅栏前" /><meta name="keywords"
-  content="Hugo, theme, PaperMod" />
-
-
-
-
-
-
-<meta name="generator" content="Hugo 0.87.0 with theme even" />
-
-
+<head><meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<meta name="robots" content="index, follow">
+<title>扩展并发原语CyclicBarrier源码剖析 | Forz Blog</title>
+<meta name="keywords" content="Go源码" />
+<meta name="description" content="CyclicBarrier允许一组 goroutine 彼此等待，到达一个共同的执行点。同时，因为它可以被重复使用，所以叫循环栅栏。具体的机制是，大家都在栅栏前">
+<meta name="author" content="">
 <link rel="canonical" href="/post/%E6%89%A9%E5%B1%95%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADcyclicbarrier%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
-<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link crossorigin="anonymous" href="/assets/css/stylesheet.min.00d5d4fc479b1575183ee8d86b4fb372ba9d9b1904e96fa8e4c40ff7debe2b94.css" integrity="sha256-ANXU/EebFXUYPujYa0&#43;zcrqdmxkE6W&#43;o5MQP996&#43;K5Q=" rel="preload stylesheet" as="style">
+<script defer crossorigin="anonymous" src="/assets/js/highlight.min.7680afc38aa6b15ddf158a4f3780b7b1f7dde7e91d26f073e6229bb7a0793c92.js" integrity="sha256-doCvw4qmsV3fFYpPN4C3sffd5&#43;kdJvBz5iKbt6B5PJI="
+    onload="hljs.initHighlightingOnLoad();"></script>
+<link rel="icon" href="/favicon.ico">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-<link rel="manifest" href="/manifest.json">
-<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
-
-
-<link rel="stylesheet" href="/css/search.css" />
-
-
-<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
-
-
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="mask-icon" href="/safari-pinned-tab.svg">
+<meta name="theme-color" content="#2e2e33">
+<meta name="msapplication-TileColor" content="#2e2e33">
+<meta name="generator" content="Hugo 0.87.0" />
 <meta property="og:title" content="扩展并发原语CyclicBarrier源码剖析" />
 <meta property="og:description" content="CyclicBarrier允许一组 goroutine 彼此等待，到达一个共同的执行点。同时，因为它可以被重复使用，所以叫循环栅栏。具体的机制是，大家都在栅栏前" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/%E6%89%A9%E5%B1%95%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADcyclicbarrier%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
-<meta property="article:published_time" content="2021-05-24T16:26:29+00:00" />
-<meta property="article:modified_time" content="2021-05-24T16:26:29+00:00" />
+<meta property="article:published_time" content="2021-05-24T16:26:29&#43;00:00" />
+<meta property="article:modified_time" content="2021-05-24T16:26:29&#43;00:00" />
 
-<meta itemprop="name" content="扩展并发原语CyclicBarrier源码剖析">
-<meta itemprop="description" content="CyclicBarrier允许一组 goroutine 彼此等待，到达一个共同的执行点。同时，因为它可以被重复使用，所以叫循环栅栏。具体的机制是，大家都在栅栏前"><meta itemprop="datePublished" content="2021-05-24T16:26:29+00:00" />
-<meta itemprop="dateModified" content="2021-05-24T16:26:29+00:00" />
-<meta itemprop="wordCount" content="2731">
-<meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="扩展并发原语CyclicBarrier源码剖析"/>
 <meta name="twitter:description" content="CyclicBarrier允许一组 goroutine 彼此等待，到达一个共同的执行点。同时，因为它可以被重复使用，所以叫循环栅栏。具体的机制是，大家都在栅栏前"/>
 
-<!--[if lte IE 9]>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
-<![endif]-->
 
-<!--[if lt IE 9]>
-  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
-<![endif]-->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position":  1 ,
+      "name": "Posts",
+      "item": "/post/"
+    }
+    {
+      "@type": "ListItem",
+      "position":  1 ,
+      "name": "扩展并发原语CyclicBarrier源码剖析",
+      "item": "/post/%E6%89%A9%E5%B1%95%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADcyclicbarrier%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/"
+    }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "扩展并发原语CyclicBarrier源码剖析",
+  "name": "扩展并发原语CyclicBarrier源码剖析",
+  "description": "CyclicBarrier允许一组 goroutine 彼此等待，到达一个共同的执行点。同时，因为它可以被重复使用，所以叫循环栅栏。具体的机制是，大家都在栅栏前",
+  "keywords": [
+    "Go源码"
+  ],
+  "articleBody": "CyclicBarrier允许一组 goroutine 彼此等待，到达一个共同的执行点。同时，因为它可以被重复使用，所以叫循环栅栏。具体的机制是，大家都在栅栏前等待，等全部都到齐了，就抬起栅栏放行。\n事实上，这个 CyclicBarrier 是参考Java CyclicBarrier和C# Barrier的功能实现的。Java 提供了 CountDownLatch（倒计时器）和 CyclicBarrier（循环栅栏）两个类似的用于保证多线程到达同一个执行点的类，只不过前者是到达 0 的时候放行，后者是到达某个指定的数的时候放行。C# Barrier 功能也是类似的，你可以查看链接，了解它的具体用法。\n你可能会觉得，CyclicBarrier 和 WaitGroup 的功能有点类似，确实是这样。不过，CyclicBarrier 更适合用在“固定数量的 goroutine 等待同一个执行点”的场景中，而且在放行 goroutine 之后，CyclicBarrier 可以重复利用，不像 WaitGroup 重用的时候，必须小心翼翼避免 panic。处理可重用的多 goroutine 等待同一个执行点的场景的时候，CyclicBarrier 和 WaitGroup 方法调用的对应关系如下：\n可以看到，如果使用 WaitGroup 实现的话，调用比较复杂，不像 CyclicBarrier 那么清爽。更重要的是，如果想重用 WaitGroup，你还要保证，将 WaitGroup 的计数值重置到 n 的时候不会出现并发问题。\nWaitGroup 更适合用在“一个 goroutine 等待一组 goroutine 到达同一个执行点”的场景中，或者是不需要重用的场景中。\n实现原理 CyclicBarrier 有两个初始化方法：\n 第一个是 New 方法，它只需要一个参数，来指定循环栅栏参与者的数量； 第二个方法是 NewWithAction，它额外提供一个函数，可以在每一次到达执行点的时候执行一次。具体的时间点是在最后一个参与者到达之后，但是其它的参与者还未被放行之前。我们可以利用它，做放行之前的一些共享状态的更新等操作。  这两个方法的签名如下：\n1 2  func New(parties int) CyclicBarrier func NewWithAction(parties int, barrierAction func() error) CyclicBarrier   CyclicBarrier 是一个接口，定义的方法如下：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16  type CyclicBarrier interface { // 等待所有的参与者到达，如果被ctx.Done()中断，会返回ErrBrokenBarrier  Await(ctx context.Context) error // 重置循环栅栏到初始化状态。如果当前有等待者，那么它们会返回ErrBrokenBarrier  Reset() // 返回当前等待者的数量  GetNumberWaiting() int // 参与者的数量  GetParties() int // 循环栅栏是否处于中断状态  IsBroken() bool }   循环栅栏的使用也很简单。循环栅栏的参与者只需调用 Await 等待，等所有的参与者都到达后，再执行下一步。当执行下一步的时候，循环栅栏的状态又恢复到初始的状态了，可以迎接下一轮同样多的参与者。\n并发趣题：一氧化二氢制造工厂 题目是这样的：\n有一个名叫大自然的搬运工的工厂，生产一种叫做一氧化二氢的神秘液体。这种液体的分子是由一个氧原子和两个氢原子组成的，也就是水。\n这个工厂有多条生产线，每条生产线负责生产氧原子或者是氢原子，每条生产线由一个 goroutine 负责。\n这些生产线会通过一个栅栏，只有一个氧原子生产线和两个氢原子生产线都准备好，才能生成出一个水分子，否则所有的生产线都会处于等待状态。也就是说，一个水分子必须由三个不同的生产线提供原子，而且水分子是一个一个按照顺序产生的，每生产一个水分子，就会打印出 HHO、HOH、OHH 三种形式的其中一种。HHH、OOH、OHO、HOO、OOO 都是不允许的。\n生产线中氢原子的生产线为 2N 条，氧原子的生产线为 N 条。\n你可以先想一下，我们怎么来实现呢？\n首先，我们来定义一个 H2O 辅助数据类型，它包含两个信号量的字段和一个循环栅栏。\n semaH 信号量：控制氢原子。一个水分子需要两个氢原子，所以，氢原子的空槽数资源数设置为 semaO 信号量：控制氧原子。一个水分子需要一个氧原子，所以资源数的空槽数设置为 循环栅栏：等待两个氢原子和一个氧原子填补空槽，直到任务完成。  我们来看下具体的代码：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20  package water import ( \"context\" \"github.com/marusama/cyclicbarrier\" \"golang.org/x/sync/semaphore\" ) // 定义水分子合成的辅助数据结构 type H2O struct { semaH *semaphore.Weighted // 氢原子的信号量  semaO *semaphore.Weighted // 氧原子的信号量  b cyclicbarrier.CyclicBarrier // 循环栅栏，用来控制合成 } func New() *H2O { return \u0026H2O{ semaH: semaphore.NewWeighted(2), //氢原子需要两个  semaO: semaphore.NewWeighted(1), // 氧原子需要一个  b: cyclicbarrier.New(3), // 需要三个原子才能合成  } }   接下来，我们看看各条流水线的处理情况。\n流水线分为氢原子处理流水线和氧原子处理流水线，首先，我们先看一下氢原子的流水线：如果有可用的空槽，氢原子的流水线的处理方法是 hydrogen，hydrogen 方法就会占用一个空槽（h2o.semaH.Acquire），输出一个 H 字符，然后等待栅栏放行。等其它的 goroutine 填补了氢原子的另一个空槽和氧原子的空槽之后，程序才可以继续进行。\n1 2 3 4 5 6 7 8  func (h2o *H2O) hydrogen(releaseHydrogen func()) { h2o.semaH.Acquire(context.Background(), 1) releaseHydrogen() // 输出H  h2o.b.Await(context.Background()) //等待栅栏放行  h2o.semaH.Release(1) // 释放氢原子空槽 }   在栅栏放行之前，只有两个氢原子的空槽位和一个氧原子的空槽位。只有等栅栏放行之后，这些空槽位才会被释放。栅栏放行，就意味着一个水分子组成成功。\n这个算法是不是正确呢？我们来编写一个单元测试检测一下。\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74  package water import ( \"math/rand\" \"sort\" \"sync\" \"testing\" \"time\" ) func TestWaterFactory(t *testing.T) { //用来存放水分子结果的channel  var ch chan string releaseHydrogen := func() { ch  \"H\" } releaseOxygen := func() { ch  \"O\" } // 300个原子，300个goroutine,每个goroutine并发的产生一个原子  var N = 100 ch = make(chan string, N*3) h2o := New() // 用来等待所有的goroutine完成  var wg sync.WaitGroup wg.Add(N * 3) // 200个氢原子goroutine  for i := 0; i  2*N; i++ { go func() { time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond) h2o.hydrogen(releaseHydrogen) wg.Done() }() } // 100个氧原子goroutine  for i := 0; i  N; i++ { go func() { time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond) h2o.oxygen(releaseOxygen) wg.Done() }() } //等待所有的goroutine执行完  wg.Wait() // 结果中肯定是300个原子  if len(ch) != N*3 { t.Fatalf(\"expect %d atom but got %d\", N*3, len(ch)) } // 每三个原子一组，分别进行检查。要求这一组原子中必须包含两个氢原子和一个氧原子，这样才能正确组成一个水分子。  var s = make([]string, 3) for i := 0; i  N; i++ { s[0] = ch s[1] = ch s[2] = ch sort.Strings(s) water := s[0] + s[1] + s[2] if water != \"HHO\" { t.Fatalf(\"expect a water molecule but got %s\", water) } } }   如果你没有学习 CyclicBarrier，你可能只会想到，用 WaitGroup 来实现这个水分子制造工厂的例子。\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42  type H2O struct { semaH *semaphore.Weighted semaO *semaphore.Weighted wg sync.WaitGroup //将循环栅栏替换成WaitGroup } func New() *H2O { var wg sync.WaitGroup wg.Add(3) return \u0026H2O{ semaH: semaphore.NewWeighted(2), semaO: semaphore.NewWeighted(1), wg: wg, } } func (h2o *H2O) hydrogen(releaseHydrogen func()) { h2o.semaH.Acquire(context.Background(), 1) releaseHydrogen() // 标记自己已达到，等待其它goroutine到达  h2o.wg.Done() h2o.wg.Wait() h2o.semaH.Release(1) } func (h2o *H2O) oxygen(releaseOxygen func()) { h2o.semaO.Acquire(context.Background(), 1) releaseOxygen() // 标记自己已达到，等待其它goroutine到达  h2o.wg.Done() h2o.wg.Wait() //都到达后重置wg  h2o.wg.Add(3) h2o.semaO.Release(1) }   你一看代码就知道了，使用 WaitGroup 非常复杂，而且，重用和 Done 方法的调用有并发的问题，程序可能 panic，远远没有使用循环栅栏更加简单直接。\n所以，我建议你多了解一些并发原语，甚至是从其它编程语言、操作系统中学习更多的并发原语，这样可以让你的知识库更加丰富，在面对并发场景的时候，你也能更加游刃有余。\n",
+  "wordCount" : "2731",
+  "inLanguage": "zh-cn",
+  "datePublished": "2021-05-24T16:26:29Z",
+  "dateModified": "2021-05-24T16:26:29Z",
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "/post/%E6%89%A9%E5%B1%95%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADcyclicbarrier%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Forz Blog",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "/favicon.ico"
+    }
+  }
+}
+</script>
 </head>
-<body>
-  <div id="mobile-navbar" class="mobile-navbar">
-  <div class="mobile-header-logo">
-    <a href="/" class="logo">Forz Blog</a>
-  </div>
-  <div class="mobile-navbar-icon">
-    <span></span>
-    <span></span>
-    <span></span>
-  </div>
-</div>
-<nav id="mobile-menu" class="mobile-menu slideout-menu">
-  <ul class="mobile-menu-list">
-    <a href="/">
-        <li class="mobile-menu-item">Home</li>
-      </a><a href="/post/">
-        <li class="mobile-menu-item">Archives</li>
-      </a><a href="/tags/">
-        <li class="mobile-menu-item">Tags</li>
-      </a><a href="/categories/">
-        <li class="mobile-menu-item">Categories</li>
-      </a>
-  </ul>
-</nav>
-  <div class="container" id="mobile-panel">
-    <header id="header" class="header">
-        <div class="clearfix">
-  <div class="logo-wrapper">
-    <a href="/" class="logo">Forz Blog</a>
-  </div>
 
-  <nav class="site-navbar">
-    <ul id="menu" class="menu">
-      <li class="menu-item">
-        <a class="menu-item-link" href="/">Home</a>
-      </li><li class="menu-item">
-        <a class="menu-item-link" href="/post/">Archives</a>
-      </li><li class="menu-item">
-        <a class="menu-item-link" href="/tags/">Tags</a>
-      </li><li class="menu-item">
-        <a class="menu-item-link" href="/categories/">Categories</a>
-      </li>
-    </ul>
-  </nav>
-</div>
-
-
-<div class="search-container">
-  <div class="aa-input-container" id="aa-input-container">
-    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
-        name="search" autocomplete="off" />
-    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
-        <path
-            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
-    </svg>
-</div>
-<script
-    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
-<script
-    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<body class="" id="top">
 <script>
-    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
-    var index = client.initIndex('forz.forzvina.com');
-    autocomplete('#aa-search-input',
-        { hint: false }, {
-        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
-        displayKey: 'name',
-        templates: {
-            suggestion: function (suggestion) {
-                var reg = /([A-Z]+)/ig
-                var title = suggestion.uri.replace(reg, function (m) {
-                    return m.toLowerCase()
-                })
-                return '<span class="search-item">' + '<a href="\/' + title + '">' +
-                    suggestion._highlightResult.title.value + '</a></span>';
+    if (localStorage.getItem("pref-theme") === "dark") {
+        document.body.classList.add('dark');
+    } else if (localStorage.getItem("pref-theme") === "light") {
+        document.body.classList.remove('dark')
+    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.body.classList.add('dark');
+    }
+
+</script>
+<noscript>
+    <style type="text/css">
+        #theme-toggle,
+        .top-link {
+            display: none;
+        }
+
+    </style>
+    <style>
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --theme: #1d1e20;
+                --entry: #2e2e33;
+                --primary: rgba(255, 255, 255, 0.84);
+                --secondary: rgba(255, 255, 255, 0.56);
+                --tertiary: rgba(255, 255, 255, 0.16);
+                --content: rgba(255, 255, 255, 0.74);
+                --hljs-bg: #2e2e33;
+                --code-bg: #37383e;
+                --border: #333;
+            }
+
+            .list {
+                background: var(--theme);
+            }
+
+            .list:not(.dark)::-webkit-scrollbar-track {
+                background: 0 0;
+            }
+
+            .list:not(.dark)::-webkit-scrollbar-thumb {
+                border-color: var(--theme);
             }
         }
-    });
-</script>
-</div>
 
+    </style>
+</noscript>
 
-    </header>
+<header class="header">
+    <nav class="nav">
+        <div class="logo">
+            <a href="/" accesskey="h" title="Forz Blog (Alt + H)">Forz Blog</a>
+            <span class="logo-switches">
+                <button id="theme-toggle" accesskey="t" title="(Alt + T)">
+                    <svg id="moon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                    <svg id="sun" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                    </svg>
+                </button>
+            </span>
+        </div>
+        <ul id="menu">
+            <li>
+                <a href="/" title="Home">
+                    <span>Home</span>
+                </a>
+            </li>
+            <li>
+                <a href="/post/" title="Archives">
+                    <span>Archives</span>
+                </a>
+            </li>
+            <li>
+                <a href="/tags/" title="Tags">
+                    <span>Tags</span>
+                </a>
+            </li>
+            <li>
+                <a href="/categories/" title="Categories">
+                    <span>Categories</span>
+                </a>
+            </li>
+        </ul>
+    </nav>
+</header>
+<main class="main">
 
-    <main id="main" class="main">
-      <div class="content-wrapper">
-        <div id="content" class="content">
-          <article class="post">
+<article class="post-single">
+  <header class="post-header">
     
-    <header class="post-header">
-      <h1 class="post-title">扩展并发原语CyclicBarrier源码剖析</h1>
-
-      <div class="post-meta">
-        <span class="post-time"> 2021-05-24 </span>
-        <div class="post-category">
-            <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
-            </div>
-          <span class="more-meta"> 约 2731 字 </span>
-          <span class="more-meta"> 预计阅读 6 分钟 </span>
-        
-      </div>
-    </header>
-
-    <div class="post-toc" id="post-toc">
-  <h2 class="post-toc-title">文章目录</h2>
-  <div class="post-toc-content always-active">
-    <nav id="TableOfContents">
-  <ul>
-    <li><a href="#实现原理">实现原理</a></li>
-    <li><a href="#并发趣题一氧化二氢制造工厂">并发趣题：一氧化二氢制造工厂</a></li>
-  </ul>
-</nav>
-  </div>
+    <h1 class="post-title">
+      扩展并发原语CyclicBarrier源码剖析
+    </h1>
+    <div class="post-meta">May 24, 2021
 </div>
-    <div class="post-content">
-      <p>CyclicBarrier允许一组 goroutine 彼此等待，到达一个共同的执行点。同时，因为它可以被重复使用，所以叫循环栅栏。具体的机制是，大家都在栅栏前等待，等全部都到齐了，就抬起栅栏放行。</p>
+  </header> 
+  <div class="post-content"><p>CyclicBarrier允许一组 goroutine 彼此等待，到达一个共同的执行点。同时，因为它可以被重复使用，所以叫循环栅栏。具体的机制是，大家都在栅栏前等待，等全部都到齐了，就抬起栅栏放行。</p>
 <p>事实上，这个 CyclicBarrier 是参考Java CyclicBarrier和C# Barrier的功能实现的。Java 提供了 CountDownLatch（倒计时器）和 CyclicBarrier（循环栅栏）两个类似的用于保证多线程到达同一个执行点的类，只不过前者是到达 0 的时候放行，后者是到达某个指定的数的时候放行。C# Barrier 功能也是类似的，你可以查看链接，了解它的具体用法。</p>
 <p>你可能会觉得，CyclicBarrier 和 WaitGroup 的功能有点类似，确实是这样。不过，CyclicBarrier 更适合用在“固定数量的 goroutine 等待同一个执行点”的场景中，而且在放行 goroutine 之后，CyclicBarrier 可以重复利用，不像 WaitGroup 重用的时候，必须小心翼翼避免 panic。处理可重用的多 goroutine 等待同一个执行点的场景的时候，CyclicBarrier 和 WaitGroup 方法调用的对应关系如下：</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210524163830.png" alt=""></p>
+<p><img loading="lazy" src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210524163830.png" alt=""  />
+</p>
 <p>可以看到，如果使用 WaitGroup 实现的话，调用比较复杂，不像 CyclicBarrier 那么清爽。更重要的是，如果想重用 WaitGroup，你还要保证，将 WaitGroup 的计数值重置到 n 的时候不会出现并发问题。</p>
 <p>WaitGroup 更适合用在“一个 goroutine 等待一组 goroutine 到达同一个执行点”的场景中，或者是不需要重用的场景中。</p>
-<h2 id="实现原理">实现原理</h2>
+<h2 id="实现原理">实现原理<a hidden class="anchor" aria-hidden="true" href="#实现原理">#</a></h2>
 <p>CyclicBarrier 有两个初始化方法：</p>
 <ol>
 <li>第一个是 New 方法，它只需要一个参数，来指定循环栅栏参与者的数量；</li>
@@ -245,7 +259,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>循环栅栏的使用也很简单。循环栅栏的参与者只需调用 Await 等待，等所有的参与者都到达后，再执行下一步。当执行下一步的时候，循环栅栏的状态又恢复到初始的状态了，可以迎接下一轮同样多的参与者。</p>
-<h2 id="并发趣题一氧化二氢制造工厂">并发趣题：一氧化二氢制造工厂</h2>
+<h2 id="并发趣题一氧化二氢制造工厂">并发趣题：一氧化二氢制造工厂<a hidden class="anchor" aria-hidden="true" href="#并发趣题一氧化二氢制造工厂">#</a></h2>
 <p>题目是这样的：</p>
 <p>有一个名叫大自然的搬运工的工厂，生产一种叫做一氧化二氢的神秘液体。这种液体的分子是由一个氧原子和两个氢原子组成的，也就是水。</p>
 <p>这个工厂有多条生产线，每条生产线负责生产氧原子或者是氢原子，每条生产线由一个 goroutine 负责。</p>
@@ -579,112 +593,85 @@
 </div><p>你一看代码就知道了，使用 WaitGroup 非常复杂，而且，重用和 Done 方法的调用有并发的问题，程序可能 panic，远远没有使用循环栅栏更加简单直接。</p>
 <p>所以，我建议你多了解一些并发原语，甚至是从其它编程语言、操作系统中学习更多的并发原语，这样可以让你的知识库更加丰富，在面对并发场景的时候，你也能更加游刃有余。</p>
 
-    </div>
 
-    <div class="post-copyright">
-  <p class="copyright-item">
-    <span class="item-title">文章作者</span>
-    <span class="item-content">Forz</span>
-  </p>
-  <p class="copyright-item">
-    <span class="item-title">上次更新</span>
-    <span class="item-content">
-        2021-05-24
-        
-    </span>
-  </p>
-  
-  
-</div>
-<footer class="post-footer">
-      <div class="post-tags">
-          <a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a>
-          </div>
-      <nav class="post-nav">
-        <a class="prev" href="/post/api%E6%8E%A5%E5%8F%A3%E5%AE%89%E5%85%A8%E8%AE%BE%E8%AE%A1%E6%96%B9%E6%A1%88/">
-            <i class="iconfont icon-left"></i>
-            <span class="prev-text nav-default">API接口安全设计方案</span>
-            <span class="prev-text nav-mobile">上一篇</span>
-          </a>
-        <a class="next" href="/post/%E6%89%A9%E5%B1%95%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADsingleflight%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
-            <span class="next-text nav-default">扩展并发原语SingleFlight源码剖析</span>
-            <span class="next-text nav-mobile">下一篇</span>
-            <i class="iconfont icon-right"></i>
-          </a>
-      </nav>
-    </footer>
-  </article>
-        </div>
-        
-
-  
-
-  
-    <script src="https://utteranc.es/client.js"
-            repo="forz/forzblog.talk"
-            issue-term="pathname"
-            theme="github-light"
-            crossorigin="anonymous"
-            async>
-    </script>
-    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
-
-      </div>
-    </main>
-
-    <footer id="footer" class="footer">
-      <div class="social-links">
-  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
-</div>
-
-<div class="copyright">
-  <span class="power-by">
-    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
-  </span>
-  <span class="division">|</span>
-  <span class="theme-info">
-    主题 - 
-    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
-  </span>
-
-  
-
-  <span class="copyright-year">
-    &copy; 
-    2017 - 
-    2021
-    <span class="heart">
-      <i class="iconfont icon-heart"></i>
-    </span>
-    <span class="author">Forz</span>
-  </span>
-</div>
-    </footer>
-
-    <div class="back-to-top" id="back-to-top">
-      <i class="iconfont icon-up"></i>
-    </div>
   </div>
-  
-  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
-<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
-  <script type="text/javascript">
-    window.MathJax = {
-      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
-      showProcessingMessages: false,
-      messageStyle: 'none'
+
+  <footer class="post-footer">
+    <ul class="post-tags">
+      <li><a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a></li>
+    </ul>
+  </footer>
+</article>
+    </main>
+    
+<footer class="footer">
+    <span>&copy; 2021 <a href="/">Forz Blog</a></span>
+    <span>
+        Powered by
+        <a href="https://gohugo.io/" rel="noopener noreferrer" target="_blank">Hugo</a> &
+        <a href="https://git.io/hugopapermod" rel="noopener" target="_blank">PaperMod</a>
+    </span>
+</footer>
+<a href="#top" aria-label="go to top" title="Go to Top (Alt + G)">
+    <button class="top-link" id="top-link" type="button" accesskey="g">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 6" fill="currentColor">
+            <path d="M12 6H0l6-6z" />
+        </svg>
+    </button>
+</a>
+
+<script>
+    let menu = document.getElementById('menu')
+    menu.scrollLeft = localStorage.getItem("menu-scroll-position");
+    menu.onscroll = function () {
+        localStorage.setItem("menu-scroll-position", menu.scrollLeft);
+    }
+
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener("click", function (e) {
+            e.preventDefault();
+            var id = this.getAttribute("href").substr(1);
+            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView({
+                    behavior: "smooth"
+                });
+            } else {
+                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView();
+            }
+            if (id === "top") {
+                history.replaceState(null, null, " ");
+            } else {
+                history.pushState(null, null, `#${id}`);
+            }
+        });
+    });
+
+</script>
+<script>
+    var mybutton = document.getElementById("top-link");
+    window.onscroll = function () {
+        if (document.body.scrollTop > 800 || document.documentElement.scrollTop > 800) {
+            mybutton.style.visibility = "visible";
+            mybutton.style.opacity = "1";
+        } else {
+            mybutton.style.visibility = "hidden";
+            mybutton.style.opacity = "0";
+        }
     };
-  </script>
-  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
 
+</script>
+<script>
+    document.getElementById("theme-toggle").addEventListener("click", () => {
+        if (document.body.className.includes("dark")) {
+            document.body.classList.remove('dark');
+            localStorage.setItem("pref-theme", 'light');
+        } else {
+            document.body.classList.add('dark');
+            localStorage.setItem("pref-theme", 'dark');
+        }
+    })
 
-
-
-
-
-
-
+</script>
 </body>
+
 </html>

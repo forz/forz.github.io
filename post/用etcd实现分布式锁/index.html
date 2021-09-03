@@ -1,191 +1,202 @@
 <!DOCTYPE html>
-<html lang="zh-cn">
-<head>
-  <meta charset="utf-8">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
-  <title>用Etcd实现分布式锁 - Forz Blog</title>
-  <meta name="renderer" content="webkit" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<html lang="zh-cn" dir="auto">
 
-<meta http-equiv="Cache-Control" content="no-transform" />
-<meta http-equiv="Cache-Control" content="no-siteapp" />
-
-<meta name="theme-color" content="#f8f5ec" />
-<meta name="msapplication-navbutton-color" content="#f8f5ec">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
-
-
-<meta name="author"
-  content="Forz" /><meta name="description" content="Etcd的v3版本官方client里有一个concurrency的包，里面实现了分布式锁和选主。本文分析一下它是如何实现的。 分布式锁 在cod" /><meta name="keywords"
-  content="Hugo, theme, PaperMod" />
-
-
-
-
-
-
-<meta name="generator" content="Hugo 0.87.0 with theme even" />
-
-
+<head><meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<meta name="robots" content="index, follow">
+<title>用Etcd实现分布式锁 | Forz Blog</title>
+<meta name="keywords" content="" />
+<meta name="description" content="Etcd的v3版本官方client里有一个concurrency的包，里面实现了分布式锁和选主。本文分析一下它是如何实现的。 分布式锁 在cod">
+<meta name="author" content="">
 <link rel="canonical" href="/post/%E7%94%A8etcd%E5%AE%9E%E7%8E%B0%E5%88%86%E5%B8%83%E5%BC%8F%E9%94%81/" />
-<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link crossorigin="anonymous" href="/assets/css/stylesheet.min.00d5d4fc479b1575183ee8d86b4fb372ba9d9b1904e96fa8e4c40ff7debe2b94.css" integrity="sha256-ANXU/EebFXUYPujYa0&#43;zcrqdmxkE6W&#43;o5MQP996&#43;K5Q=" rel="preload stylesheet" as="style">
+<script defer crossorigin="anonymous" src="/assets/js/highlight.min.7680afc38aa6b15ddf158a4f3780b7b1f7dde7e91d26f073e6229bb7a0793c92.js" integrity="sha256-doCvw4qmsV3fFYpPN4C3sffd5&#43;kdJvBz5iKbt6B5PJI="
+    onload="hljs.initHighlightingOnLoad();"></script>
+<link rel="icon" href="/favicon.ico">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-<link rel="manifest" href="/manifest.json">
-<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
-
-
-<link rel="stylesheet" href="/css/search.css" />
-
-
-<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
-
-
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="mask-icon" href="/safari-pinned-tab.svg">
+<meta name="theme-color" content="#2e2e33">
+<meta name="msapplication-TileColor" content="#2e2e33">
+<meta name="generator" content="Hugo 0.87.0" />
 <meta property="og:title" content="用Etcd实现分布式锁" />
 <meta property="og:description" content="Etcd的v3版本官方client里有一个concurrency的包，里面实现了分布式锁和选主。本文分析一下它是如何实现的。 分布式锁 在cod" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/%E7%94%A8etcd%E5%AE%9E%E7%8E%B0%E5%88%86%E5%B8%83%E5%BC%8F%E9%94%81/" /><meta property="article:section" content="post" />
-<meta property="article:published_time" content="2019-09-06T20:49:18+00:00" />
-<meta property="article:modified_time" content="2019-09-06T20:49:18+00:00" />
+<meta property="article:published_time" content="2019-09-06T20:49:18&#43;00:00" />
+<meta property="article:modified_time" content="2019-09-06T20:49:18&#43;00:00" />
 
-<meta itemprop="name" content="用Etcd实现分布式锁">
-<meta itemprop="description" content="Etcd的v3版本官方client里有一个concurrency的包，里面实现了分布式锁和选主。本文分析一下它是如何实现的。 分布式锁 在cod"><meta itemprop="datePublished" content="2019-09-06T20:49:18+00:00" />
-<meta itemprop="dateModified" content="2019-09-06T20:49:18+00:00" />
-<meta itemprop="wordCount" content="5536">
-<meta itemprop="keywords" content="" /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="用Etcd实现分布式锁"/>
 <meta name="twitter:description" content="Etcd的v3版本官方client里有一个concurrency的包，里面实现了分布式锁和选主。本文分析一下它是如何实现的。 分布式锁 在cod"/>
 
-<!--[if lte IE 9]>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
-<![endif]-->
 
-<!--[if lt IE 9]>
-  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
-<![endif]-->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position":  1 ,
+      "name": "Posts",
+      "item": "/post/"
+    }
+    {
+      "@type": "ListItem",
+      "position":  1 ,
+      "name": "用Etcd实现分布式锁",
+      "item": "/post/%E7%94%A8etcd%E5%AE%9E%E7%8E%B0%E5%88%86%E5%B8%83%E5%BC%8F%E9%94%81/"
+    }
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "用Etcd实现分布式锁",
+  "name": "用Etcd实现分布式锁",
+  "description": "Etcd的v3版本官方client里有一个concurrency的包，里面实现了分布式锁和选主。本文分析一下它是如何实现的。 分布式锁 在cod",
+  "keywords": [
+    
+  ],
+  "articleBody": "Etcd的v3版本官方client里有一个concurrency的包，里面实现了分布式锁和选主。本文分析一下它是如何实现的。\n分布式锁 在code中注释介绍了具体的实现。\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 100 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119 120 121 122 123 124 125 126 127 128 129 130 131 132 133 134 135 136 137 138 139 140 141 142 143 144 145 146 147 148 149 150 151 152 153 154 155 156 157 158 159 160 161 162 163 164 165 166 167 168 169 170 171 172 173 174 175 176 177 178 179 180 181 182 183 184 185 186 187 188 189 190 191 192 193 194  // Copyright 2016 The etcd Authors // // Licensed under the Apache License, Version 2.0 (the \"License\"); // you may not use this file except in compliance with the License. // You may obtain a copy of the License at // // http://www.apache.org/licenses/LICENSE-2.0 // // Unless required by applicable law or agreed to in writing, software // distributed under the License is distributed on an \"AS IS\" BASIS, // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. // See the License for the specific language governing permissions and // limitations under the License.  package concurrency import ( \"context\" \"fmt\" \"sync\" v3 \"github.com/coreos/etcd/clientv3\" pb \"github.com/coreos/etcd/etcdserver/etcdserverpb\" ) // Mutex implements the sync Locker interface with etcd type Mutex struct { s *Session pfx string myKey string myRev int64 hdr *pb.ResponseHeader } func NewMutex(s *Session, pfx string) *Mutex { return \u0026Mutex{s, pfx + \"/\", \"\", -1, nil} } // Lock locks the mutex with a cancelable context. If the context is canceled // while trying to acquire the lock, the mutex tries to clean its stale lock entry. func (m *Mutex) Lock(ctx context.Context) error { s := m.s client := m.s.Client() //m.pfx是前缀，比如\"service/lock/\"  //s.Lease()是一个64位的整数值，etcd v3引入了lease（租约）的概念，concurrency包基于lease封装了session，每一个客户端都有自己的lease，也就是说每个客户端都有一个唯一的64位整形值,  //m.myKey类似于\"service/lock/12345\"  m.myKey = fmt.Sprintf(\"%s%x\", m.pfx, s.Lease()) //etcdv3新引入的多键条件事务，替代了v2中Compare-And-put操作。etcdv3的多键条件事务的语意是先做一个比较（compare）操作，如果比较成立则执行一系列操作，如果比较不成立则执行另外一系列操作。有类似于C语言中的条件表达式。  //接下来的这部分实现了如果不存在这个key，则将这个key写入到etcd，如果存在则读取这个key的值这样的功能。  //下面这一句，是构建了一个compare的条件，比较的是key的createRevision，如果revision是0，则存入一个key，如果revision不为0，则读取这个key。  //revision是etcd一个全局的序列号，每一个对etcd存储进行改动都会分配一个这个序号，在v2中叫index，createRevision是表示这个key创建时被分配的这个序号。当key不存在时，createRivision是0。  ////比较key的revision为0(0表示没有key) \tcmp := v3.Compare(v3.CreateRevision(m.myKey), \"=\", 0) // put self in lock waiters via myKey; oldest waiter holds lock \t//则put key,并设置租约 \tput := v3.OpPut(m.myKey, \"\", v3.WithLease(s.Lease())) // reuse key in case this session already holds the lock \t//否则 获取这个key,重用租约中的锁(这里主要目的是在于重入)  //通过第二次获取锁,判断锁是否存在来支持重入  //所以只要租约一致,那么是可以重入的. \tget := v3.OpGet(m.myKey) // fetch current holder to complete uncontended path with only one RPC \t//通过前缀获取最先创建的key \tgetOwner := v3.OpGet(m.pfx, v3.WithFirstCreate()...) resp, err := client.Txn(ctx).If(cmp).Then(put, getOwner).Else(get, getOwner).Commit() if err != nil { return err } m.myRev = resp.Header.Revision //如果已存在key,获取CreateRevision \t//获取到自身的revision(注意,此处CreateRevision和Revision不一定相等) \tif !resp.Succeeded { m.myRev = resp.Responses[0].GetResponseRange().Kvs[0].CreateRevision } // if no key on prefix / the minimum rev is key, already hold the lock \townerKey := resp.Responses[1].GetResponseRange().Kvs // 比较如果当前没有人获得锁或者锁的owner的createrevision等于当前的kv的revision，则表示已获得锁，就可以退出了 \t// 通过对比自身的revision和最先创建的key的revision得出谁获得了锁  // 例如 自身revision:5,最先创建的key createRevision:3 那么不获得锁,进入waitDeletes  // 自身revision:5,最先创建的key createRevision:5 那么获得锁  if len(ownerKey) == 0 || ownerKey[0].CreateRevision == m.myRev { m.hdr = resp.Header return nil } //如果上面的code操作成功了，则myRev是当前客户端创建的key的revision值。 \t// 走到这里代表没有获得锁，需要等待之前的锁被释放，即等待revision小于当前revision的kv被删除 \t//waitDeletes等待 匹配m.pfx （\"service/lock/\"）这个前缀并且createRivision小于等于m.myRev-1的 keys 被删除 \t//如果没有比当前客户端创建的key的revision小的key，则当前客户端者获得锁 \t// wait for deletion revisions prior to myKey \thdr, werr := waitDeletes(ctx, client, m.pfx, m.myRev-1) // release lock key if wait failed \tif werr != nil { m.Unlock(client.Ctx()) } else { m.hdr = hdr } return werr } func (m *Mutex) Unlock(ctx context.Context) error { client := m.s.Client() if _, err := client.Delete(ctx, m.myKey); err != nil { return err } m.myKey = \"\\x00\" m.myRev = -1 return nil } func (m *Mutex) IsOwner() v3.Cmp { return v3.Compare(v3.CreateRevision(m.myKey), \"=\", m.myRev) } func (m *Mutex) Key() string { return m.myKey } // Header is the response header received from etcd on acquiring the lock. func (m *Mutex) Header() *pb.ResponseHeader { return m.hdr } type lockerMutex struct{ *Mutex } func (lm *lockerMutex) Lock() { client := lm.s.Client() if err := lm.Mutex.Lock(client.Ctx()); err != nil { panic(err) } } func (lm *lockerMutex) Unlock() { client := lm.s.Client() if err := lm.Mutex.Unlock(client.Ctx()); err != nil { panic(err) } } // NewLocker creates a sync.Locker backed by an etcd mutex. func NewLocker(s *Session, pfx string) sync.Locker { return \u0026lockerMutex{NewMutex(s, pfx)} } // 等待持有锁的key删除 // 内部实现为等其他所有比当前createRevision小的key,监听删除事件 // waitDeletes efficiently waits until all keys matching the prefix and no greater // than the create revision. func waitDeletes(ctx context.Context, client *v3.Client, pfx string, maxCreateRev int64) (*pb.ResponseHeader, error) { //WithLastCreate 按照CreateRevision排序,降序 例如 5 4 3 2 1  //WithMaxCreateRev 获取比maxCreateRev小的key \tgetOpts := append(v3.WithLastCreate(), v3.WithMaxCreateRev(maxCreateRev)) for { resp, err := client.Get(ctx, pfx, getOpts...) if err != nil { return nil, err } if len(resp.Kvs) == 0 { return resp.Header, nil } lastKey := string(resp.Kvs[0].Key) //监听删除事件 \tif err = waitDelete(ctx, client, lastKey, resp.Header.Revision); err != nil { return nil, err } } } //从revision开始监听删除事件,因为revision存在,所以也避免了ABA问题 func waitDelete(ctx context.Context, client *v3.Client, key string, rev int64) error { cctx, cancel := context.WithCancel(ctx) defer cancel() var wr v3.WatchResponse wch := client.Watch(cctx, key, v3.WithRev(rev)) for wr = range wch { for _, ev := range wr.Events { //遇到删除事件才返回 \tif ev.Type == mvccpb.DELETE { return nil } } } if err := wr.Err(); err != nil { return err } if err := ctx.Err(); err != nil { return err } return fmt.Errorf(\"lost watcher waiting for delete\") }   总结一下，上面的锁的实现，所有的客户端都在service/lock下创建一个自己的key，createrevision最小的那个客户端获得锁，也就是最早建立key的客户端获得锁，之后按照创建的时间先后依次获得锁。\nCreateRevision: 创建时的revision\nHeader.Revision: etcd server现在的revision\n刚才说了那么多revision,这里我们需要详细的了解一下etcd中的mvcc多版本机制\n那么我们先来明确几个概念:\nmain ID:在etcd中每个事务的唯一id,全局递增不重复.\nsub ID: 在事务中的连续多个修改操作会从0开始编号,这个编号就是sub ID\nrevision: 由(mainID,subID)组成的唯一标识\n所以现在我们的revision就是这么来的啦…\n使用方式:\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75  // Copyright 2017 The etcd Authors // // Licensed under the Apache License, Version 2.0 (the \"License\"); // you may not use this file except in compliance with the License. // You may obtain a copy of the License at // // http://www.apache.org/licenses/LICENSE-2.0 // // Unless required by applicable law or agreed to in writing, software // distributed under the License is distributed on an \"AS IS\" BASIS, // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. // See the License for the specific language governing permissions and // limitations under the License.  package concurrency_test import ( \"context\" \"fmt\" \"log\" \"github.com/coreos/etcd/clientv3\" \"github.com/coreos/etcd/clientv3/concurrency\" ) func ExampleMutex_Lock() { cli, err := clientv3.New(clientv3.Config{Endpoints: endpoints}) if err != nil { log.Fatal(err) } defer cli.Close() // create two separate sessions for lock competition \ts1, err := concurrency.NewSession(cli) if err != nil { log.Fatal(err) } defer s1.Close() m1 := concurrency.NewMutex(s1, \"/my-lock/\") s2, err := concurrency.NewSession(cli) if err != nil { log.Fatal(err) } defer s2.Close() m2 := concurrency.NewMutex(s2, \"/my-lock/\") // acquire lock for s1 \tif err := m1.Lock(context.TODO()); err != nil { log.Fatal(err) } fmt.Println(\"acquired lock for s1\") m2Locked := make(chan struct{}) go func() { defer close(m2Locked) // wait until s1 is locks /my-lock/ \tif err := m2.Lock(context.TODO()); err != nil { log.Fatal(err) } }() if err := m1.Unlock(context.TODO()); err != nil { log.Fatal(err) } fmt.Println(\"released lock for s1\") m2Locked fmt.Println(\"acquired lock for s2\") // Output: \t// acquired lock for s1 \t// released lock for s1 \t// acquired lock for s2 }   易错点 现象 线上程序一直报错，错误信息：lock failed: context deadline exceeded, retry\n排查过程 异常对应代码位置\n很明显的是获取锁超时了，由于用的etcd的分布式锁，就怀疑是etcd出问题了，此时看到大量etcd日志，rejected connection from “ip:port” (error “tls: first record does not look like a TLS handshake”, ServerName “”)，怀疑是不是这个问题导致的，经过查询报错的IP，均为线上容器IP，登陆容器内看发现都是管理员平台的代码，里面也用到了py03的etcd，但是不是导致超时的原因。在排除各种可能之后，最后去etcd查看锁对应的key的情况，发现有两个key\n1 2 3  /notifier/locker/{leaseid} /notifier/locker/rwl/{leaseid}   其中第一个key是notifier自己添加的，第二个key在代码中搜不到，但是看起来像是redis whitelist的简写，先把第一个key删了，然后看notifier日志，仍然获取不到锁，所以怀疑是第二个key已经获得了锁，虽然key不一样。于是删除了第二个key，再看notifier日志，终于获得了锁，开始正常工作，于是得出猜想，etcd的分布式锁，在子目录下加了锁之后，父目录会加锁失败。然后用etcdctl lock来验证了下，确实如此，/a/b下加了锁，/a再加锁就会失败，但是/a下加了锁，/a/b再加锁会成功。基本上可以验证上面的猜想，剩下的就是从etcd源码中找到对应处理的代码了。\netcd源码部分 在查询源码之前，第一反应就是这肯定是在服务端实现的，于是开始了从etcd服务端找相关源码的过程，从etcdctl命令开始追溯到所涉及的服务端，一直没有发现问题。又在网上搜了相关etcd服务端源码实现的文章，结合本地代码均没有想找的代码，于是反过来从client找起。\n首先从etcdctl lock命令开始，挑主要函数展示\n1 2 3 4 5 6 7 8 9 10  // 代码位置go.etcd.io/etcd/etcdctl/ctlv3/command/lock_command.go func lockUntilSignal(c *clientv3.Client, lockname string, cmdArgs []string) error { ... if err := m.Lock(ctx); err != nil { return err } ... }   接下来进入到Lock函数，这是个关键函数，etcd的分布式锁就是在这里实现的\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87  func (m *Mutex) Lock(ctx context.Context) error { s := m.s client := m.s.Client() // 这里的pfx就是prefix，就是传进来的前缀，后面的s.Lease()会返回一个租约，是一个int64的整数，和session有关  m.myKey = fmt.Sprintf(\"%s%x\", m.pfx, s.Lease()) // 这里比较上面prefix/lease的createrevision是否为0，为0表示目前不存在该key，需要执行Put操作，下面可以看到  // 部位0表示已经有对应的key了，只需要执行Get就行  // createrevision是自增的  cmp := v3.Compare(v3.CreateRevision(m.myKey), \"=\", 0) // put self in lock waiters via myKey; oldest waiter holds lock  put := v3.OpPut(m.myKey, \"\", v3.WithLease(s.Lease())) // reuse key in case this session already holds the lock  get := v3.OpGet(m.myKey) // 获取所得持有者  getOwner := v3.OpGet(m.pfx, v3.WithFirstCreate()...) resp, err := client.Txn(ctx).If(cmp).Then(put, getOwner).Else(get, getOwner).Commit() if err != nil { return err } m.myRev = resp.Header.Revision if !resp.Succeeded { m.myRev = resp.Responses[0].GetResponseRange().Kvs[0].CreateRevision } // if no key on prefix / the minimum rev is key, already hold the lock  ownerKey := resp.Responses[1].GetResponseRange().Kvs // 比较如果当前没有人获得锁或者锁的owner的createrevision等于当前的kv的revision，则表示已获得锁，就可以退出了  if len(ownerKey) == 0 || ownerKey[0].CreateRevision == m.myRev { m.hdr = resp.Header return nil } // 为了验证自己加的打印信息  //fmt.Printf(\"ownerKey: %s\\n\", ownerKey)  // 走到这里代表没有获得锁，需要等待之前的锁被释放，即revision小于当前revision的kv被删除  hdr, werr := waitDeletes(ctx, client, m.pfx, m.myRev-1) // release lock key if wait failed  if werr != nil { m.Unlock(client.Ctx()) } else { m.hdr = hdr } return werr } // waitDeletes 等待所有当前比当前key的revision小的key被删除后，锁释放后才返回 func waitDeletes(ctx context.Context, client *v3.Client, pfx string, maxCreateRev int64) (*pb.ResponseHeader, error) { getOpts := append(v3.WithLastCreate(), v3.WithMaxCreateRev(maxCreateRev)) for { resp, err := client.Get(ctx, pfx, getOpts...) if err != nil { return nil, err } if len(resp.Kvs) == 0 { return resp.Header, nil } lastKey := string(resp.Kvs[0].Key) // 为了调试自己加的这句  fmt.Printf(\"wait for %s to delete\\n\", lastKey) if err = waitDelete(ctx, client, lastKey, resp.Header.Revision); err != nil { return nil, err } } } func waitDelete(ctx context.Context, client *v3.Client, key string, rev int64) error { cctx, cancel := context.WithCancel(ctx) defer cancel() var wr v3.WatchResponse // wch是个channel，key被删除后会往这个chan发数据  wch := client.Watch(cctx, key, v3.WithRev(rev)) for wr = range wch { for _, ev := range wr.Events { if ev.Type == mvccpb.DELETE { return nil } } } if err := wr.Err(); err != nil { return err } if err := ctx.Err(); err != nil { return err } return fmt.Errorf(\"lost watcher waiting for delete\") }   看完上面的代码基本知道了etcd分布式锁的实现机制了，但是还没看到哪里和前缀Prefix相关了。其实答案就藏在getOwner里，看上述代码，不管是执行Put还是Get，最终都有个getOwner的过程，看一下这个getOwner，options模式里有个v3.WithFirstCreate函数调用，看下这个函数\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20  // WithFirstCreate gets the key with the oldest creation revision in the request range. func WithFirstCreate() []OpOption { return withTop(SortByCreateRevision, SortAscend) } // withTop gets the first key over the get's prefix given a sort order func withTop(target SortTarget, order SortOrder) []OpOption { return []OpOption{WithPrefix(), WithSort(target, order), WithLimit(1)} } // WithPrefix enables 'Get', 'Delete', or 'Watch' requests to operate // on the keys with matching prefix. For example, 'Get(foo, WithPrefix())' // can return 'foo1', 'foo2', and so on. func WithPrefix() OpOption { return func(op *Op) { if len(op.key) == 0 { op.key, op.end = []byte{0}, []byte{0} return } op.end = getPrefix(op.key) } }   看到上面的是三个函数后，大致就找到了对应的源码的感觉，因为看到了WithPrefix函数，和上面的猜测正好匹配。所以getOwner的具体执行效果是会把虽有以lockkey开头的kv都拿到，且按照createrevision升序排列，取第一个值，这个意思就很明白了，就是要拿到当前以lockkey为prefix的且createrevision最小的那个key，就是目前已经拿到锁的key。\n看了上面的源码就可以明白为什么/a/b加了锁之后，/a加锁会超时了，因为在getOwner时，拿到了/a/b，且createrevision小于/a的revision，于是/a就会等待/a/b被删除后，watch chanel有数据后才能获得锁。\n看到这里还有个需要确认的问题，那就是如果/ab加锁了，那么再对/a加锁会怎么样？/a肯定是/ab的prefix啊，是不是也会加锁失败呢？\n结论是会加锁成功，看下源码\n1 2 3  func NewMutex(s *Session, pfx string) *Mutex { return \u0026Mutex{s, pfx + \"/\", \"\", -1, nil} }   可以看到在NewMutex时并不是直接拿传进来的pfx作为prefix的，而且在后面加了个”/“，所以上线的/ab加了锁，/a加锁还是可以成功的。一般查找prefix或suffix时都会加上固定的分隔符，要不然就会出现误判。\n总结 通过分析问题，看源码，可以了解到etcd锁的实现原理，以及可能存在的小坑。etcd居然把锁的实现放在了client端，也是出乎我的意料，这样的话，可以直接修改client端代码来修改其锁的实现，就可能出现虽然共用一个服务端，但是etcd行为却不一致的问题，不知道为何要这么设计，个人感觉还是要放到服务端更好些。\n参考:\nhttp://likakuli.com/post/2019/01/31/etcd_lock/\n",
+  "wordCount" : "5536",
+  "inLanguage": "zh-cn",
+  "datePublished": "2019-09-06T20:49:18Z",
+  "dateModified": "2019-09-06T20:49:18Z",
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "/post/%E7%94%A8etcd%E5%AE%9E%E7%8E%B0%E5%88%86%E5%B8%83%E5%BC%8F%E9%94%81/"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Forz Blog",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "/favicon.ico"
+    }
+  }
+}
+</script>
 </head>
-<body>
-  <div id="mobile-navbar" class="mobile-navbar">
-  <div class="mobile-header-logo">
-    <a href="/" class="logo">Forz Blog</a>
-  </div>
-  <div class="mobile-navbar-icon">
-    <span></span>
-    <span></span>
-    <span></span>
-  </div>
-</div>
-<nav id="mobile-menu" class="mobile-menu slideout-menu">
-  <ul class="mobile-menu-list">
-    <a href="/">
-        <li class="mobile-menu-item">Home</li>
-      </a><a href="/post/">
-        <li class="mobile-menu-item">Archives</li>
-      </a><a href="/tags/">
-        <li class="mobile-menu-item">Tags</li>
-      </a><a href="/categories/">
-        <li class="mobile-menu-item">Categories</li>
-      </a>
-  </ul>
-</nav>
-  <div class="container" id="mobile-panel">
-    <header id="header" class="header">
-        <div class="clearfix">
-  <div class="logo-wrapper">
-    <a href="/" class="logo">Forz Blog</a>
-  </div>
 
-  <nav class="site-navbar">
-    <ul id="menu" class="menu">
-      <li class="menu-item">
-        <a class="menu-item-link" href="/">Home</a>
-      </li><li class="menu-item">
-        <a class="menu-item-link" href="/post/">Archives</a>
-      </li><li class="menu-item">
-        <a class="menu-item-link" href="/tags/">Tags</a>
-      </li><li class="menu-item">
-        <a class="menu-item-link" href="/categories/">Categories</a>
-      </li>
-    </ul>
-  </nav>
-</div>
-
-
-<div class="search-container">
-  <div class="aa-input-container" id="aa-input-container">
-    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
-        name="search" autocomplete="off" />
-    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
-        <path
-            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
-    </svg>
-</div>
-<script
-    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
-<script
-    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<body class="" id="top">
 <script>
-    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
-    var index = client.initIndex('forz.forzvina.com');
-    autocomplete('#aa-search-input',
-        { hint: false }, {
-        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
-        displayKey: 'name',
-        templates: {
-            suggestion: function (suggestion) {
-                var reg = /([A-Z]+)/ig
-                var title = suggestion.uri.replace(reg, function (m) {
-                    return m.toLowerCase()
-                })
-                return '<span class="search-item">' + '<a href="\/' + title + '">' +
-                    suggestion._highlightResult.title.value + '</a></span>';
+    if (localStorage.getItem("pref-theme") === "dark") {
+        document.body.classList.add('dark');
+    } else if (localStorage.getItem("pref-theme") === "light") {
+        document.body.classList.remove('dark')
+    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        document.body.classList.add('dark');
+    }
+
+</script>
+<noscript>
+    <style type="text/css">
+        #theme-toggle,
+        .top-link {
+            display: none;
+        }
+
+    </style>
+    <style>
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --theme: #1d1e20;
+                --entry: #2e2e33;
+                --primary: rgba(255, 255, 255, 0.84);
+                --secondary: rgba(255, 255, 255, 0.56);
+                --tertiary: rgba(255, 255, 255, 0.16);
+                --content: rgba(255, 255, 255, 0.74);
+                --hljs-bg: #2e2e33;
+                --code-bg: #37383e;
+                --border: #333;
+            }
+
+            .list {
+                background: var(--theme);
+            }
+
+            .list:not(.dark)::-webkit-scrollbar-track {
+                background: 0 0;
+            }
+
+            .list:not(.dark)::-webkit-scrollbar-thumb {
+                border-color: var(--theme);
             }
         }
-    });
-</script>
-</div>
 
+    </style>
+</noscript>
 
-    </header>
+<header class="header">
+    <nav class="nav">
+        <div class="logo">
+            <a href="/" accesskey="h" title="Forz Blog (Alt + H)">Forz Blog</a>
+            <span class="logo-switches">
+                <button id="theme-toggle" accesskey="t" title="(Alt + T)">
+                    <svg id="moon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                    <svg id="sun" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                    </svg>
+                </button>
+            </span>
+        </div>
+        <ul id="menu">
+            <li>
+                <a href="/" title="Home">
+                    <span>Home</span>
+                </a>
+            </li>
+            <li>
+                <a href="/post/" title="Archives">
+                    <span>Archives</span>
+                </a>
+            </li>
+            <li>
+                <a href="/tags/" title="Tags">
+                    <span>Tags</span>
+                </a>
+            </li>
+            <li>
+                <a href="/categories/" title="Categories">
+                    <span>Categories</span>
+                </a>
+            </li>
+        </ul>
+    </nav>
+</header>
+<main class="main">
 
-    <main id="main" class="main">
-      <div class="content-wrapper">
-        <div id="content" class="content">
-          <article class="post">
+<article class="post-single">
+  <header class="post-header">
     
-    <header class="post-header">
-      <h1 class="post-title">用Etcd实现分布式锁</h1>
-
-      <div class="post-meta">
-        <span class="post-time"> 2019-09-06 </span>
-        <div class="post-category">
-            <a href="/categories/etcd/"> etcd </a>
-            </div>
-          <span class="more-meta"> 约 5536 字 </span>
-          <span class="more-meta"> 预计阅读 12 分钟 </span>
-        
-      </div>
-    </header>
-
-    <div class="post-toc" id="post-toc">
-  <h2 class="post-toc-title">文章目录</h2>
-  <div class="post-toc-content always-active">
-    <nav id="TableOfContents">
-  <ul>
-    <li><a href="#现象">现象</a></li>
-    <li><a href="#排查过程">排查过程</a></li>
-    <li><a href="#etcd源码部分">etcd源码部分</a></li>
-    <li><a href="#总结">总结</a></li>
-  </ul>
-</nav>
-  </div>
+    <h1 class="post-title">
+      用Etcd实现分布式锁
+    </h1>
+    <div class="post-meta">September 6, 2019
 </div>
-    <div class="post-content">
-      <p>Etcd的v3版本官方client里有一个concurrency的包，里面实现了分布式锁和选主。本文分析一下它是如何实现的。</p>
-<h1 id="分布式锁">分布式锁</h1>
+  </header> 
+  <div class="post-content"><p>Etcd的v3版本官方client里有一个concurrency的包，里面实现了分布式锁和选主。本文分析一下它是如何实现的。</p>
+<h1 id="分布式锁">分布式锁<a hidden class="anchor" aria-hidden="true" href="#分布式锁">#</a></h1>
 <p>在code中注释介绍了具体的实现。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -747,12 +758,13 @@
 </span><span class="c1"></span><span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h1 id="易错点">易错点</h1>
-<h2 id="现象">现象</h2>
+</div><h1 id="易错点">易错点<a hidden class="anchor" aria-hidden="true" href="#易错点">#</a></h1>
+<h2 id="现象">现象<a hidden class="anchor" aria-hidden="true" href="#现象">#</a></h2>
 <p>线上程序一直报错，错误信息：lock failed: context deadline exceeded, retry</p>
-<h2 id="排查过程">排查过程</h2>
+<h2 id="排查过程">排查过程<a hidden class="anchor" aria-hidden="true" href="#排查过程">#</a></h2>
 <p>异常对应代码位置</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190907163640.png" alt=""></p>
+<p><img loading="lazy" src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190907163640.png" alt=""  />
+</p>
 <p>很明显的是获取锁超时了，由于用的etcd的分布式锁，就怀疑是etcd出问题了，此时看到大量etcd日志，rejected connection from “ip:port” (error “tls: first record does not look like a TLS handshake”, ServerName “”)，怀疑是不是这个问题导致的，经过查询报错的IP，均为线上容器IP，登陆容器内看发现都是管理员平台的代码，里面也用到了py03的etcd，但是不是导致超时的原因。在排除各种可能之后，最后去etcd查看锁对应的key的情况，发现有两个key</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -767,7 +779,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>其中第一个key是notifier自己添加的，第二个key在代码中搜不到，但是看起来像是redis whitelist的简写，先把第一个key删了，然后看notifier日志，仍然获取不到锁，所以怀疑是第二个key已经获得了锁，虽然key不一样。于是删除了第二个key，再看notifier日志，终于获得了锁，开始正常工作，于是得出猜想，etcd的分布式锁，在子目录下加了锁之后，父目录会加锁失败。然后用etcdctl lock来验证了下，确实如此，/a/b下加了锁，/a再加锁就会失败，但是/a下加了锁，/a/b再加锁会成功。基本上可以验证上面的猜想，剩下的就是从etcd源码中找到对应处理的代码了。</p>
-<h2 id="etcd源码部分">etcd源码部分</h2>
+<h2 id="etcd源码部分">etcd源码部分<a hidden class="anchor" aria-hidden="true" href="#etcd源码部分">#</a></h2>
 <p>在查询源码之前，第一反应就是这肯定是在服务端实现的，于是开始了从etcd服务端找相关源码的过程，从etcdctl命令开始追溯到所涉及的服务端，一直没有发现问题。又在网上搜了相关etcd服务端源码实现的文章，结合本地代码均没有想找的代码，于是反过来从client找起。</p>
 <p>首先从etcdctl lock命令开始，挑主要函数展示</p>
 <div class="highlight"><div class="chroma">
@@ -1041,115 +1053,87 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>可以看到在NewMutex时并不是直接拿传进来的pfx作为prefix的，而且在后面加了个”/“，所以上线的/ab加了锁，/a加锁还是可以成功的。一般查找prefix或suffix时都会加上固定的分隔符，要不然就会出现误判。</p>
-<h2 id="总结">总结</h2>
+<h2 id="总结">总结<a hidden class="anchor" aria-hidden="true" href="#总结">#</a></h2>
 <p>通过分析问题，看源码，可以了解到etcd锁的实现原理，以及可能存在的小坑。etcd居然把锁的实现放在了client端，也是出乎我的意料，这样的话，可以直接修改client端代码来修改其锁的实现，就可能出现虽然共用一个服务端，但是etcd行为却不一致的问题，不知道为何要这么设计，个人感觉还是要放到服务端更好些。</p>
 <p>参考:<br>
 <a href="http://likakuli.com/post/2019/01/31/etcd_lock/">http://likakuli.com/post/2019/01/31/etcd_lock/</a></p>
 
-    </div>
 
-    <div class="post-copyright">
-  <p class="copyright-item">
-    <span class="item-title">文章作者</span>
-    <span class="item-content">Forz</span>
-  </p>
-  <p class="copyright-item">
-    <span class="item-title">上次更新</span>
-    <span class="item-content">
-        2019-09-06
-        
-    </span>
-  </p>
-  
-  
-</div>
-<footer class="post-footer">
-      
-      <nav class="post-nav">
-        <a class="prev" href="/post/etcd2%E5%92%8C3%E7%9A%84%E5%8C%BA%E5%88%AB/">
-            <i class="iconfont icon-left"></i>
-            <span class="prev-text nav-default">etcd2和3的区别</span>
-            <span class="prev-text nav-mobile">上一篇</span>
-          </a>
-        <a class="next" href="/post/%E5%88%86%E5%B8%83%E5%BC%8F%E9%94%81%E7%9A%84%E5%AE%9E%E7%8E%B0/">
-            <span class="next-text nav-default">分布式锁的实现</span>
-            <span class="next-text nav-mobile">下一篇</span>
-            <i class="iconfont icon-right"></i>
-          </a>
-      </nav>
-    </footer>
-  </article>
-        </div>
-        
-
-  
-
-  
-    <script src="https://utteranc.es/client.js"
-            repo="forz/forzblog.talk"
-            issue-term="pathname"
-            theme="github-light"
-            crossorigin="anonymous"
-            async>
-    </script>
-    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
-
-      </div>
-    </main>
-
-    <footer id="footer" class="footer">
-      <div class="social-links">
-  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
-</div>
-
-<div class="copyright">
-  <span class="power-by">
-    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
-  </span>
-  <span class="division">|</span>
-  <span class="theme-info">
-    主题 - 
-    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
-  </span>
-
-  
-
-  <span class="copyright-year">
-    &copy; 
-    2017 - 
-    2021
-    <span class="heart">
-      <i class="iconfont icon-heart"></i>
-    </span>
-    <span class="author">Forz</span>
-  </span>
-</div>
-    </footer>
-
-    <div class="back-to-top" id="back-to-top">
-      <i class="iconfont icon-up"></i>
-    </div>
   </div>
-  
-  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
-<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
-  <script type="text/javascript">
-    window.MathJax = {
-      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
-      showProcessingMessages: false,
-      messageStyle: 'none'
+
+  <footer class="post-footer">
+  </footer>
+</article>
+    </main>
+    
+<footer class="footer">
+    <span>&copy; 2021 <a href="/">Forz Blog</a></span>
+    <span>
+        Powered by
+        <a href="https://gohugo.io/" rel="noopener noreferrer" target="_blank">Hugo</a> &
+        <a href="https://git.io/hugopapermod" rel="noopener" target="_blank">PaperMod</a>
+    </span>
+</footer>
+<a href="#top" aria-label="go to top" title="Go to Top (Alt + G)">
+    <button class="top-link" id="top-link" type="button" accesskey="g">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 6" fill="currentColor">
+            <path d="M12 6H0l6-6z" />
+        </svg>
+    </button>
+</a>
+
+<script>
+    let menu = document.getElementById('menu')
+    menu.scrollLeft = localStorage.getItem("menu-scroll-position");
+    menu.onscroll = function () {
+        localStorage.setItem("menu-scroll-position", menu.scrollLeft);
+    }
+
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener("click", function (e) {
+            e.preventDefault();
+            var id = this.getAttribute("href").substr(1);
+            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView({
+                    behavior: "smooth"
+                });
+            } else {
+                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView();
+            }
+            if (id === "top") {
+                history.replaceState(null, null, " ");
+            } else {
+                history.pushState(null, null, `#${id}`);
+            }
+        });
+    });
+
+</script>
+<script>
+    var mybutton = document.getElementById("top-link");
+    window.onscroll = function () {
+        if (document.body.scrollTop > 800 || document.documentElement.scrollTop > 800) {
+            mybutton.style.visibility = "visible";
+            mybutton.style.opacity = "1";
+        } else {
+            mybutton.style.visibility = "hidden";
+            mybutton.style.opacity = "0";
+        }
     };
-  </script>
-  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
 
+</script>
+<script>
+    document.getElementById("theme-toggle").addEventListener("click", () => {
+        if (document.body.className.includes("dark")) {
+            document.body.classList.remove('dark');
+            localStorage.setItem("pref-theme", 'light');
+        } else {
+            document.body.classList.add('dark');
+            localStorage.setItem("pref-theme", 'dark');
+        }
+    })
 
-
-
-
-
-
-
+</script>
 </body>
+
 </html>
