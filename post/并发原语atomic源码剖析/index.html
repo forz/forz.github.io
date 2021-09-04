@@ -1,207 +1,200 @@
 <!DOCTYPE html>
-<html lang="zh-cn" dir="auto">
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>并发原语atomic源码剖析 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 
-<head><meta charset="utf-8">
-<meta http-equiv="X-UA-Compatible" content="IE=edge">
-<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<meta name="robots" content="index, follow">
-<title>并发原语atomic源码剖析 | Forz Blog</title>
-<meta name="keywords" content="Go源码" />
-<meta name="description" content="atomic 原理 在现在的系统中,write 的地址基本上都是对齐的(aligned)。 比如,32 位的操作系统、CPU 以及编译器,write 的地址总是 4 的">
-<meta name="author" content="">
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="atomic 原理 在现在的系统中,write 的地址基本上都是对齐的(aligned)。 比如,32 位的操作系统、CPU 以及编译器,write 的地址总是 4 的" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.87.0 with theme even" />
+
+
 <link rel="canonical" href="/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADatomic%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
-<link crossorigin="anonymous" href="/assets/css/stylesheet.min.00d5d4fc479b1575183ee8d86b4fb372ba9d9b1904e96fa8e4c40ff7debe2b94.css" integrity="sha256-ANXU/EebFXUYPujYa0&#43;zcrqdmxkE6W&#43;o5MQP996&#43;K5Q=" rel="preload stylesheet" as="style">
-<script defer crossorigin="anonymous" src="/assets/js/highlight.min.7680afc38aa6b15ddf158a4f3780b7b1f7dde7e91d26f073e6229bb7a0793c92.js" integrity="sha256-doCvw4qmsV3fFYpPN4C3sffd5&#43;kdJvBz5iKbt6B5PJI="
-    onload="hljs.initHighlightingOnLoad();"></script>
-<link rel="icon" href="/favicon.ico">
-<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="mask-icon" href="/safari-pinned-tab.svg">
-<meta name="theme-color" content="#2e2e33">
-<meta name="msapplication-TileColor" content="#2e2e33">
-<meta name="generator" content="Hugo 0.87.0" />
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
 <meta property="og:title" content="并发原语atomic源码剖析" />
 <meta property="og:description" content="atomic 原理 在现在的系统中,write 的地址基本上都是对齐的(aligned)。 比如,32 位的操作系统、CPU 以及编译器,write 的地址总是 4 的" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADatomic%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
-<meta property="article:published_time" content="2021-05-21T14:39:43&#43;00:00" />
-<meta property="article:modified_time" content="2021-05-21T14:39:43&#43;00:00" />
+<meta property="article:published_time" content="2021-05-21T14:39:43+00:00" />
+<meta property="article:modified_time" content="2021-05-21T14:39:43+00:00" />
 
-<meta name="twitter:card" content="summary"/>
+<meta itemprop="name" content="并发原语atomic源码剖析">
+<meta itemprop="description" content="atomic 原理 在现在的系统中,write 的地址基本上都是对齐的(aligned)。 比如,32 位的操作系统、CPU 以及编译器,write 的地址总是 4 的"><meta itemprop="datePublished" content="2021-05-21T14:39:43+00:00" />
+<meta itemprop="dateModified" content="2021-05-21T14:39:43+00:00" />
+<meta itemprop="wordCount" content="2697">
+<meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="并发原语atomic源码剖析"/>
 <meta name="twitter:description" content="atomic 原理 在现在的系统中,write 的地址基本上都是对齐的(aligned)。 比如,32 位的操作系统、CPU 以及编译器,write 的地址总是 4 的"/>
 
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
 
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "BreadcrumbList",
-  "itemListElement": [
-    {
-      "@type": "ListItem",
-      "position":  1 ,
-      "name": "Posts",
-      "item": "/post/"
-    }
-    {
-      "@type": "ListItem",
-      "position":  1 ,
-      "name": "并发原语atomic源码剖析",
-      "item": "/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADatomic%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/"
-    }
-  ]
-}
-</script>
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "BlogPosting",
-  "headline": "并发原语atomic源码剖析",
-  "name": "并发原语atomic源码剖析",
-  "description": "atomic 原理 在现在的系统中,write 的地址基本上都是对齐的(aligned)。 比如,32 位的操作系统、CPU 以及编译器,write 的地址总是 4 的",
-  "keywords": [
-    "Go源码"
-  ],
-  "articleBody": "atomic 原理 在现在的系统中,write 的地址基本上都是对齐的(aligned)。 比如,32 位的操作系统、CPU 以及编译器,write 的地址总是 4 的倍数,64 位的系统总是 8 的倍数(还记得 WaitGroup 针对 64 位系统和 32 位系统对 state1 的字段不同的处理吗)。对齐地址的写,不会导致其他人看到只写了一半的数据,因为它通过一个指令就可以实现对地址的操作。如果地址不是对齐的话,那么,处理器就需要分成两个指令去处理,如果执行了一个指令,其它人就会看到更新了一半的错误的数据,这被称做撕裂写(torn write) 。所以,你可以认为赋值操作是一个原子操作,这个“原子操作”可以认为是保证数据的完整性。\n但是,对于现代的多处理多核的系统来说,由于 cache、指令重排,可见性等问题,我们对原子操作的意义有了更多的追求。在多核系统中,一个核对地址的值的更改,在更新到主内存中之前,是在多级缓存中存放的。这时,多个核看到的数据可能是不一样的,其它的核可能还没有看到更新的数据,还在使用旧的数据。\n多处理器多核心系统为了处理这类问题,使用了一种叫做内存屏障(memory fence 或 memory barrier)的方式。一个写内存屏障会告诉处理器,必须要等到它管道中的未完成的操作(特别是写操作)都被刷新到内存中,再进行操作。此操作还会让相关的处理器的 CPU 缓存失效,以便让它们从主存中拉取最新的值。\natomic 包提供的方法会提供内存屏障的功能,所以,atomic 不仅仅可以保证赋值的数据完整性,还能保证数据的可见性,一旦一个核更新了该地址的值,其它处理器总是能读取到它的最新值。但是,需要注意的是,因为需要处理器之间保证数据的一致性,atomic 的操作也是会降低性能的。\n原子操作 原子操作依赖硬件指令的支持，但同时还需要运行时调度器的配合。我们以 atomic.CompareAndSwapPointer 为例，介绍 sync/atomic 包提供的同步模式。\nCompareAndSwapPointer 它在包中只有函数定义，没有函数体：\n1  func CompareAndSwapPointer(addr *unsafe.Pointer, old, new unsafe.Pointer) (swapped bool)   其本身由运行时实现。\n我们简单看过了两个属于公共包的方法 atomic.Value 和 atomic.CompareAndSwapPointer， 我们来看一下运行时实现：\n1 2 3 4 5 6 7 8 9 10 11  //go:linkname sync_atomic_CompareAndSwapUintptr sync/atomic.CompareAndSwapUintptr func sync_atomic_CompareAndSwapUintptr(ptr *uintptr, old, new uintptr) bool //go:linkname sync_atomic_CompareAndSwapPointer sync/atomic.CompareAndSwapPointer //go:nosplit func sync_atomic_CompareAndSwapPointer(ptr *unsafe.Pointer, old, new unsafe.Pointer) bool { if writeBarrier.enabled { atomicwb(ptr, new) } return sync_atomic_CompareAndSwapUintptr((*uintptr)(noescape(unsafe.Pointer(ptr))), uintptr(old), uintptr(new)) }   可以看到 sync_atomic_CompareAndSwapUintptr 函数在运行时中也是没有方法本体的， 说明其实现由编译器完成。那么我们来看一下编译器究竟干了什么：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15  package main import ( \"sync/atomic\" \"unsafe\" ) func main() { var p unsafe.Pointer newP := 42 atomic.CompareAndSwapPointer(\u0026p, nil, unsafe.Pointer(\u0026newP)) v := (*int)(p) println(*v) }   编译结果：\n1 2 3 4 5 6 7 8 9  TEXT sync/atomic.CompareAndSwapUintptr(SB) /usr/local/Cellar/go/1.11/libexec/src/sync/atomic/asm.s asm.s:31\t0x1001070\te91b0b0000\tJMP runtime/internal/atomic.Casuintptr(SB) :-1\t0x1001075\tcc\tINT $0x3 (...) TEXT runtime/internal/atomic.Casuintptr(SB) /usr/local/Cellar/go/1.11/libexec/src/runtime/internal/atomic/asm_amd64.s asm_amd64.s:44\t0x1001b90\te9dbffffff\tJMP runtime/internal/atomic.Cas64(SB) :-1\t0x1001b95\tcc\tINT $0x3 (...)   可以看到 atomic.CompareAndSwapUintptr 本质上转到了 runtime/internal/atomic.Cas64，我们来看一下它的实现：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16  // bool\truntime∕internal∕atomic·Cas64(uint64 *val, uint64 old, uint64 new) // Atomically: //\tif(*val == *old){ //\t*val = new; //\treturn 1; //\t} else { //\treturn 0; //\t} TEXT runtime∕internal∕atomic·Cas64(SB), NOSPLIT, $0-25 MOVQ\tptr+0(FP), BX MOVQ\told+8(FP), AX MOVQ\tnew+16(FP), CX LOCK CMPXCHGQ\tCX, 0(BX) SETEQ\tret+24(FP) RET   可以看到，实现的本质是使用 CPU 的 LOCK+CMPXCHGQ 指令：首先将 ptr 的值放入 BX，将假设的旧值放入 AX， 要比较的新值放入 CX。然后 LOCK CMPXCHGQ 与累加器 AX 比较并交换 CX 和 BX。\n因此原子操作本质上均为使用 CPU 指令进行实现（理所当然）。由于原子操作的方式比较单一，很容易举一反三， 其他操作不再穷举。\n原子值 原子值需要运行时的支持，在原子值进行修改时，Goroutine 不应该被抢占，因此需要锁定 MP 之间的绑定关系：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23  //go:linkname sync_runtime_procPin sync.runtime_procPin //go:nosplit func sync_runtime_procPin() int { return procPin() } //go:nosplit func procPin() int { _g_:= getg() mp :=_g_.m mp.locks++ return int(mp.p.ptr().id) } //go:linkname sync_atomic_runtime_procUnpin sync/atomic.runtime_procUnpin //go:nosplit func sync_atomic_runtime_procUnpin() { procUnpin() } //go:nosplit func procUnpin() { _g_:= getg() _g_.m.locks-- }   原子值 atomic.Value 提供了一种具备原子存取的结构。其自身的结构非常简单， 只包含一个存放数据的 interface{}：\n1 2 3  type Value struct { v interface{} }   它仅仅只是对要存储的值进行了一层封装。要对这个值进行原子的读取，依赖 Load 方法：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26  // LoadPointer atomically loads *addr. func LoadPointer(addr *unsafe.Pointer) (val unsafe.Pointer) func (v *Value) Load() (x interface{}) { // 获得 interface 结构的指针 \t// 在 go 中，interface 的内存布局有类型指针和数据指针两部分表示 \tvp := (*ifaceWords)(unsafe.Pointer(v)) // 获得存储值的类型指针 \ttyp := LoadPointer(\u0026vp.typ) if typ == nil || uintptr(typ) == ^uintptr(0) { return nil } // 获得存储值的实际数据 \tdata := LoadPointer(\u0026vp.data) // 将复制得到的 typ 和 data 给到 x \txp := (*ifaceWords)(unsafe.Pointer(\u0026x)) xp.typ = typ xp.data = data return } // ifaceWords 定义了 interface{} 的内部表示。 type ifaceWords struct { typ unsafe.Pointer data unsafe.Pointer }   从这个 Load 方法实际上使用了 Go 运行时类型系统中的 interface{} 这一类型本质上由 两段内容组成，一个是类型 typ 区域，另一个是实际数据 data 区域。 这个 Load 方法的实现，本质上就是将内部存储的类型和数据都复制一份并返回。\n再来看 Store。存储的思路与读取其实是类似的，但由于类型系统的两段式表示（typ 和 data） 的存在，存储操作比读取操作的实现要更加小心，要考虑当两个不同的 Goroutine 对两段值进行写入时， 如何才能避免写竞争：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48  // StorePointer atomically stores val into *addr. func StorePointer(addr *unsafe.Pointer, val unsafe.Pointer) func (v *Value) Store(x interface{}) { if x == nil { panic(\"sync/atomic: store of nil value into Value\") } // Value 存储值的指针和要存储的 x 的指针 \tvp := (*ifaceWords)(unsafe.Pointer(v)) xp := (*ifaceWords)(unsafe.Pointer(\u0026x)) for { typ := LoadPointer(\u0026vp.typ) // v 还未被写入过任何数据 \tif typ == nil { // 禁止抢占当前 Goroutine 来确保存储顺利完成 \truntime_procPin() // 先存一个标志位，宣告正在有人操作此值 \tif !CompareAndSwapPointer(\u0026vp.typ, nil, unsafe.Pointer(^uintptr(0))) { // 如果没有成功，取消不可抢占，下次再试 \truntime_procUnpin() continue } // 如果标志位设置成功，说明其他人都不会向 interface{} 中写入数据 \tStorePointer(\u0026vp.data, xp.data) StorePointer(\u0026vp.typ, xp.typ) // 存储成功，再标志位可抢占，直接返回 \truntime_procUnpin() return } // 有其他 Goroutine 正在对 v 进行写操作 \tif uintptr(typ) == ^uintptr(0) { continue } // 如果本次存入的类型与前次存储的类型不同 \tif typ != xp.typ { panic(\"sync/atomic: store of inconsistently typed value into Value\") } // 类型已经写入，直接保存数据 \tStorePointer(\u0026vp.data, xp.data) return } }   可以看到 atomic.Value 的存取通过 unsafe.Pointer(^uintptr(0)) 作为第一次存取的标志位， 当 atomic.Value 第一次写入数据时，会将当前 Goroutine 设置为不可抢占， 并将要存储类型进行标记，再存入实际的数据与类型。当存储完毕后，即可解除不可抢占，返回。\n在不可抢占期间，且有并发的 Goroutine 再此存储时，如果标记没有被类型替换掉， 则说明第一次存储还未完成，形成 CompareAndSwap 循环进行等待。\n真正的赋值，无论是第一次，还是后续的 data 赋值，在 Store 内，只涉及到指针的原子操作，不涉及到数据拷贝；\n如果 p.Store( /* */ ) 传入的不是指针，而是一个结构体呢？编译器识别到这种情况，编译期间就会多生成一段代码，用 runtime.convT2E 函数把结构体赋值转化成 eface （注意，这里会涉及到结构体数据的拷贝）；然后再调用 Value.Store 方法，所以就 Store 方法而言，行为还是不变；\n再思考一个问题：既然是指针的操作，为什么还要有个 for 循环，还要有个 CompareAndSwapPointer ？这是因为 ifaceWords 是两个字段的结构体，初始赋值的时候，要赋值类型和数据指针两部分。atomic.Value 是服务所有类型，此类需求的，通用封装。\n参考 https://colobu.com/2017/07/11/dive-into-sync-Map\nhttps://segmentfault.com/a/1190000015242373\nhttps://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/\nhttp://www.qiuxiaobing.cn/%E7%BC%96%E7%A8%8B%E8%AF%AD%E8%A8%80/2018/03/09/go-sync-map.html\nhttp://www.gogodjzhu.com/index.php/code/basic/397/\nhttp://russellluo.com/2017/06/go-sync-map-diagram.html\n5.4 条件变量\n5.5 同步组\nGo 标准库源码分析 - sync 包的Pool\n5.7 并发安全散列表\n6.1 上下文 Context\ngo context剖析之源码分析\n5.3 原子操作\n",
-  "wordCount" : "2697",
-  "inLanguage": "zh-cn",
-  "datePublished": "2021-05-21T14:39:43Z",
-  "dateModified": "2021-05-21T14:39:43Z",
-  "mainEntityOfPage": {
-    "@type": "WebPage",
-    "@id": "/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADatomic%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/"
-  },
-  "publisher": {
-    "@type": "Organization",
-    "name": "Forz Blog",
-    "logo": {
-      "@type": "ImageObject",
-      "url": "/favicon.ico"
-    }
-  }
-}
-</script>
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
 </head>
-
-<body class="" id="top">
-<script>
-    if (localStorage.getItem("pref-theme") === "dark") {
-        document.body.classList.add('dark');
-    } else if (localStorage.getItem("pref-theme") === "light") {
-        document.body.classList.remove('dark')
-    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        document.body.classList.add('dark');
-    }
-
-</script>
-<noscript>
-    <style type="text/css">
-        #theme-toggle,
-        .top-link {
-            display: none;
-        }
-
-    </style>
-    <style>
-        @media (prefers-color-scheme: dark) {
-            :root {
-                --theme: #1d1e20;
-                --entry: #2e2e33;
-                --primary: rgba(255, 255, 255, 0.84);
-                --secondary: rgba(255, 255, 255, 0.56);
-                --tertiary: rgba(255, 255, 255, 0.16);
-                --content: rgba(255, 255, 255, 0.74);
-                --hljs-bg: #2e2e33;
-                --code-bg: #37383e;
-                --border: #333;
-            }
-
-            .list {
-                background: var(--theme);
-            }
-
-            .list:not(.dark)::-webkit-scrollbar-track {
-                background: 0 0;
-            }
-
-            .list:not(.dark)::-webkit-scrollbar-thumb {
-                border-color: var(--theme);
-            }
-        }
-
-    </style>
-</noscript>
-
-<header class="header">
-    <nav class="nav">
-        <div class="logo">
-            <a href="/" accesskey="h" title="Forz Blog (Alt + H)">Forz Blog</a>
-            <span class="logo-switches">
-                <button id="theme-toggle" accesskey="t" title="(Alt + T)">
-                    <svg id="moon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
-                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round">
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-                    </svg>
-                    <svg id="sun" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
-                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="5"></circle>
-                        <line x1="12" y1="1" x2="12" y2="3"></line>
-                        <line x1="12" y1="21" x2="12" y2="23"></line>
-                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                        <line x1="1" y1="12" x2="3" y2="12"></line>
-                        <line x1="21" y1="12" x2="23" y2="12"></line>
-                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                    </svg>
-                </button>
-            </span>
-        </div>
-        <ul id="menu">
-            <li>
-                <a href="/" title="Home">
-                    <span>Home</span>
-                </a>
-            </li>
-            <li>
-                <a href="/post/" title="Archives">
-                    <span>Archives</span>
-                </a>
-            </li>
-            <li>
-                <a href="/tags/" title="Tags">
-                    <span>Tags</span>
-                </a>
-            </li>
-            <li>
-                <a href="/categories/" title="Categories">
-                    <span>Categories</span>
-                </a>
-            </li>
-        </ul>
-    </nav>
-</header>
-<main class="main">
-
-<article class="post-single">
-  <header class="post-header">
-    
-    <h1 class="post-title">
-      并发原语atomic源码剖析
-    </h1>
-    <div class="post-meta">May 21, 2021
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
 </div>
-  </header> 
-  <div class="post-content"><h2 id="atomic">atomic<a hidden class="anchor" aria-hidden="true" href="#atomic">#</a></h2>
-<h3 id="原理">原理<a hidden class="anchor" aria-hidden="true" href="#原理">#</a></h3>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">并发原语atomic源码剖析</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-05-21 </span>
+        <div class="post-category">
+            <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
+            </div>
+          <span class="more-meta"> 约 2697 字 </span>
+          <span class="more-meta"> 预计阅读 6 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#atomic">atomic</a>
+      <ul>
+        <li><a href="#原理">原理</a></li>
+        <li><a href="#原子操作">原子操作</a></li>
+        <li><a href="#原子值">原子值</a></li>
+      </ul>
+    </li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="atomic">atomic</h2>
+<h3 id="原理">原理</h3>
 <p>在现在的系统中,write 的地址基本上都是对齐的(aligned)。 比如,32 位的操作系统、CPU 以及编译器,write 的地址总是 4 的倍数,64 位的系统总是 8 的倍数(还记得 WaitGroup 针对 64 位系统和 32 位系统对 state1 的字段不同的处理吗)。对齐地址的写,不会导致其他人看到只写了一半的数据,因为它通过一个指令就可以实现对地址的操作。如果地址不是对齐的话,那么,处理器就需要分成两个指令去处理,如果执行了一个指令,其它人就会看到更新了一半的错误的数据,这被称做撕裂写(torn write) 。所以,你可以认为赋值操作是一个原子操作,这个“原子操作”可以认为是保证数据的完整性。</p>
 <p>但是,对于现代的多处理多核的系统来说,由于 cache、指令重排,可见性等问题,我们对原子操作的意义有了更多的追求。在多核系统中,一个核对地址的值的更改,在更新到主内存中之前,是在多级缓存中存放的。这时,多个核看到的数据可能是不一样的,其它的核可能还没有看到更新的数据,还在使用旧的数据。</p>
 <p>多处理器多核心系统为了处理这类问题,使用了一种叫做内存屏障(memory fence 或 memory barrier)的方式。一个写内存屏障会告诉处理器,必须要等到它管道中的未完成的操作(特别是写操作)都被刷新到内存中,再进行操作。此操作还会让相关的处理器的 CPU 缓存失效,以便让它们从主存中拉取最新的值。</p>
 <p>atomic 包提供的方法会提供内存屏障的功能,所以,atomic 不仅仅可以保证赋值的数据完整性,还能保证数据的可见性,一旦一个核更新了该地址的值,其它处理器总是能读取到它的最新值。但是,需要注意的是,因为需要处理器之间保证数据的一致性,atomic 的操作也是会降低性能的。</p>
-<h3 id="原子操作">原子操作<a hidden class="anchor" aria-hidden="true" href="#原子操作">#</a></h3>
+<h3 id="原子操作">原子操作</h3>
 <p>原子操作依赖硬件指令的支持，但同时还需要运行时调度器的配合。我们以 atomic.CompareAndSwapPointer 为例，介绍 sync/atomic 包提供的同步模式。</p>
 <p>CompareAndSwapPointer 它在包中只有函数定义，没有函数体：</p>
 <div class="highlight"><div class="chroma">
@@ -345,7 +338,7 @@
 </div>
 </div><p>可以看到，实现的本质是使用 CPU 的 LOCK<code>+CMPXCHGQ</code> 指令：首先将 ptr 的值放入 BX，将假设的旧值放入 AX， 要比较的新值放入 CX。然后 LOCK CMPXCHGQ 与累加器 AX 比较并交换 CX 和 BX。</p>
 <p>因此原子操作本质上均为使用 CPU 指令进行实现（理所当然）。由于原子操作的方式比较单一，很容易举一反三， 其他操作不再穷举。</p>
-<h3 id="原子值">原子值<a hidden class="anchor" aria-hidden="true" href="#原子值">#</a></h3>
+<h3 id="原子值">原子值</h3>
 <p>原子值需要运行时的支持，在原子值进行修改时，Goroutine 不应该被抢占，因此需要锁定 MP 之间的绑定关系：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -580,7 +573,7 @@
 <p>真正的赋值，无论是第一次，还是后续的 data 赋值，在 Store 内，只涉及到指针的原子操作，不涉及到数据拷贝；</p>
 <p>如果 <code>p.Store( /* */ )</code> 传入的不是指针，而是一个结构体呢？编译器识别到这种情况，编译期间就会多生成一段代码，用 runtime.convT2E  函数把结构体赋值转化成 eface （注意，这里会涉及到结构体数据的拷贝）；然后再调用 Value.Store 方法，所以就 Store 方法而言，行为还是不变；</p>
 <p>再思考一个问题：既然是指针的操作，为什么还要有个 for 循环，还要有个  CompareAndSwapPointer  ？这是因为 ifaceWords 是两个字段的结构体，初始赋值的时候，要赋值类型和数据指针两部分。<code>atomic.Value</code> 是服务所有类型，此类需求的，通用封装。</p>
-<h2 id="参考">参考<a hidden class="anchor" aria-hidden="true" href="#参考">#</a></h2>
+<h2 id="参考">参考</h2>
 <p><a href="https://colobu.com/2017/07/11/dive-into-sync-Map">https://colobu.com/2017/07/11/dive-into-sync-Map</a></p>
 <p><a href="https://segmentfault.com/a/1190000015242373">https://segmentfault.com/a/1190000015242373</a></p>
 <p><a href="https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/">https://pathbox.github.io/2018/04/05/understand-sync.Map-in-Goalng/</a></p>
@@ -595,85 +588,112 @@
 <p><a href="https://juejin.cn/post/6844903741842259975">go context剖析之源码分析</a></p>
 <p><a href="https://golang.design/under-the-hood/zh-cn/part1basic/ch05sync/atomic/">5.3 原子操作</a></p>
 
+    </div>
 
-  </div>
-
-  <footer class="post-footer">
-    <ul class="post-tags">
-      <li><a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a></li>
-    </ul>
-  </footer>
-</article>
-    </main>
-    
-<footer class="footer">
-    <span>&copy; 2021 <a href="/">Forz Blog</a></span>
-    <span>
-        Powered by
-        <a href="https://gohugo.io/" rel="noopener noreferrer" target="_blank">Hugo</a> &
-        <a href="https://git.io/hugopapermod" rel="noopener" target="_blank">PaperMod</a>
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-05-21
+        
     </span>
-</footer>
-<a href="#top" aria-label="go to top" title="Go to Top (Alt + G)">
-    <button class="top-link" id="top-link" type="button" accesskey="g">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 6" fill="currentColor">
-            <path d="M12 6H0l6-6z" />
-        </svg>
-    </button>
-</a>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/channel%E4%BD%BF%E7%94%A8%E5%AE%9E%E8%B7%B5/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Channel使用实践</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADcontext%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <span class="next-text nav-default">并发原语context源码剖析</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
 
-<script>
-    let menu = document.getElementById('menu')
-    menu.scrollLeft = localStorage.getItem("menu-scroll-position");
-    menu.onscroll = function () {
-        localStorage.setItem("menu-scroll-position", menu.scrollLeft);
-    }
+  
 
-    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-        anchor.addEventListener("click", function (e) {
-            e.preventDefault();
-            var id = this.getAttribute("href").substr(1);
-            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView({
-                    behavior: "smooth"
-                });
-            } else {
-                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView();
-            }
-            if (id === "top") {
-                history.replaceState(null, null, " ");
-            } else {
-                history.pushState(null, null, `#${id}`);
-            }
-        });
-    });
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
 
-</script>
-<script>
-    var mybutton = document.getElementById("top-link");
-    window.onscroll = function () {
-        if (document.body.scrollTop > 800 || document.documentElement.scrollTop > 800) {
-            mybutton.style.visibility = "visible";
-            mybutton.style.opacity = "1";
-        } else {
-            mybutton.style.visibility = "hidden";
-            mybutton.style.opacity = "0";
-        }
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
     };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
 
-</script>
-<script>
-    document.getElementById("theme-toggle").addEventListener("click", () => {
-        if (document.body.className.includes("dark")) {
-            document.body.classList.remove('dark');
-            localStorage.setItem("pref-theme", 'light');
-        } else {
-            document.body.classList.add('dark');
-            localStorage.setItem("pref-theme", 'dark');
-        }
-    })
 
-</script>
+
+
+
+
+
+
 </body>
-
 </html>

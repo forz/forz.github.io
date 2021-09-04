@@ -1,208 +1,215 @@
 <!DOCTYPE html>
-<html lang="zh-cn" dir="auto">
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Go的网络轮询器源码剖析 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 
-<head><meta charset="utf-8">
-<meta http-equiv="X-UA-Compatible" content="IE=edge">
-<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<meta name="robots" content="index, follow">
-<title>Go的网络轮询器源码剖析 | Forz Blog</title>
-<meta name="keywords" content="Go源码" />
-<meta name="description" content="导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的">
-<meta name="author" content="">
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.87.0 with theme even" />
+
+
 <link rel="canonical" href="/post/go%E7%9A%84%E7%BD%91%E7%BB%9C%E8%BD%AE%E8%AF%A2%E5%99%A8%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
-<link crossorigin="anonymous" href="/assets/css/stylesheet.min.00d5d4fc479b1575183ee8d86b4fb372ba9d9b1904e96fa8e4c40ff7debe2b94.css" integrity="sha256-ANXU/EebFXUYPujYa0&#43;zcrqdmxkE6W&#43;o5MQP996&#43;K5Q=" rel="preload stylesheet" as="style">
-<script defer crossorigin="anonymous" src="/assets/js/highlight.min.7680afc38aa6b15ddf158a4f3780b7b1f7dde7e91d26f073e6229bb7a0793c92.js" integrity="sha256-doCvw4qmsV3fFYpPN4C3sffd5&#43;kdJvBz5iKbt6B5PJI="
-    onload="hljs.initHighlightingOnLoad();"></script>
-<link rel="icon" href="/favicon.ico">
-<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="mask-icon" href="/safari-pinned-tab.svg">
-<meta name="theme-color" content="#2e2e33">
-<meta name="msapplication-TileColor" content="#2e2e33">
-<meta name="generator" content="Hugo 0.87.0" />
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
 <meta property="og:title" content="Go的网络轮询器源码剖析" />
 <meta property="og:description" content="导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/go%E7%9A%84%E7%BD%91%E7%BB%9C%E8%BD%AE%E8%AF%A2%E5%99%A8%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
-<meta property="article:published_time" content="2020-11-14T22:52:29&#43;00:00" />
-<meta property="article:modified_time" content="2020-11-14T22:52:29&#43;00:00" />
+<meta property="article:published_time" content="2020-11-14T22:52:29+00:00" />
+<meta property="article:modified_time" content="2020-11-14T22:52:29+00:00" />
 
-<meta name="twitter:card" content="summary"/>
+<meta itemprop="name" content="Go的网络轮询器源码剖析">
+<meta itemprop="description" content="导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的"><meta itemprop="datePublished" content="2020-11-14T22:52:29+00:00" />
+<meta itemprop="dateModified" content="2020-11-14T22:52:29+00:00" />
+<meta itemprop="wordCount" content="14088">
+<meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的网络轮询器源码剖析"/>
 <meta name="twitter:description" content="导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的"/>
 
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
 
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "BreadcrumbList",
-  "itemListElement": [
-    {
-      "@type": "ListItem",
-      "position":  1 ,
-      "name": "Posts",
-      "item": "/post/"
-    }
-    {
-      "@type": "ListItem",
-      "position":  1 ,
-      "name": "Go的网络轮询器源码剖析",
-      "item": "/post/go%E7%9A%84%E7%BD%91%E7%BB%9C%E8%BD%AE%E8%AF%A2%E5%99%A8%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/"
-    }
-  ]
-}
-</script>
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "BlogPosting",
-  "headline": "Go的网络轮询器源码剖析",
-  "name": "Go的网络轮询器源码剖析",
-  "description": "导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的",
-  "keywords": [
-    "Go源码"
-  ],
-  "articleBody": "导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的是同步的模式去编写异步的逻辑，极大地降低了开发者编写网络应用时的心智负担，且借助于 Go runtime scheduler 对 goroutines 的高效调度，这个原生网络模型不论从适用性还是性能上都足以满足绝大部分的应用场景。\n然而，在工程性上能做到如此高的普适性和兼容性，最终暴露给开发者提供接口/模式如此简洁，其底层必然是基于非常复杂的封装，做了很多取舍，也有可能放弃了一些追求极致性能的设计和理念。事实上 Go netpoller 底层就是基于 epoll/kqueue/iocp 这些 I/O 多路复用技术来做封装的，最终暴露出 goroutine-per-connection 这样的极简的开发模式给使用者。\nGo netpoller 在不同的操作系统，其底层使用的 I/O 多路复用技术也不一样，可以从 Go 源码目录结构和对应代码文件了解 Go 在不同平台下的网络 I/O 模式的实现。比如，在 Linux 系统下基于 epoll，freeBSD 系统下基于 kqueue，以及 Windows 系统下基于 iocp。\n本文将基于 Linux 平台来解析 Go netpoller 之 I/O 多路复用的底层是如何基于 epoll 封装实现的，从源码层层推进，全面而深度地解析 Go netpoller 的设计理念和实现原理，以及 Go 是如何利用 netpoller 来构建它的原生网络模型的。\nGo runtime已经实现了netpoller，这使得即便G发起网络I/O操作也不会导致M被阻塞（仅阻塞G），从而不会导致大量M被创建出来。但是对于regular file的I/O操作一旦阻塞，那么M将进入sleep状态，等待I/O返回后被唤醒；这种情况下P将与sleep的M分离，再选择一个idle的M。如果此时没有idle的M，则会新创建一个M，这就是为何大量I/O操作导致大量Thread被创建的原因。\nIan Lance Taylor在Go 1.9 dev周期中增加了一个Poller for os package的功能，这个功能可以像netpoller那样，在G操作支持pollable的fd时，仅阻塞G，而不阻塞M。不过该功能依然不能对regular file有效，regular file不是pollable的。不过，对于scheduler而言，这也算是一个进步了。\n基本原理 Go netpoller 通过在底层对 epoll/kqueue/iocp 的封装，从而实现了使用同步编程模式达到异步执行的效果。总结来说，所有的网络操作都以网络描述符 netFD 为中心实现。netFD 与底层 PollDesc 结构绑定，当在一个 netFD 上读写遇到 EAGAIN 错误时，就将当前 goroutine 存储到这个 netFD 对应的 PollDesc 中，同时调用 gopark 把当前 goroutine 给 park 住，直到这个 netFD 上再次发生读写事件，才将此 goroutine 给 ready 激活重新运行。显然，在底层通知 goroutine 再次发生读写等事件的方式就是 epoll/kqueue/iocp 等事件驱动机制。\n总所周知，Go 是一门跨平台的编程语言，而不同平台针对特定的功能有不用的实现，这当然也包括了 I/O 多路复用技术，比如 Linux 里的 I/O 多路复用有 select、poll 和 epoll，而 freeBSD 或者 MacOS 里则是 kqueue，而 Windows 里则是基于异步 I/O 实现的 iocp，等等；因此，Go 为了实现底层 I/O 多路复用的跨平台，分别基于上述的这些不同平台的系统调用实现了多版本的 netpollers，具体的源码路径如下：\n1 2 3 4 5 6  src/runtime/netpoll_epoll.go src/runtime/netpoll_kqueue.go src/runtime/netpoll_solaris.go src/runtime/netpoll_windows.go src/runtime/netpoll_aix.go src/runtime/netpoll_fake.go   本文的解析基于 epoll 版本，如果读者对其他平台的 netpoller 底层实现感兴趣，可以在阅读完本文后自行翻阅其他 netpoller 源码，所有实现版本的机制和原理基本类似，所以了解了 epoll 版本的实现后再去学习其他版本实现应该没什么障碍。\nepoll、kqueue、solaries 等多路复用模块都要实现以下五个函数，这五个函数构成一个虚拟的接口：\n1 2 3 4 5  func netpollinit() func netpollopen(fd uintptr, pd *pollDesc) int32 func netpoll(delta int64) gList func netpollBreak() func netpollIsPollDescriptor(fd uintptr) bool   上述函数在网络轮询器中分别扮演了不同的作用：\n runtime.netpollinit — 初始化网络轮询器，通过 sync.Once 和 netpollInited 变量保证函数只会调用一次； runtime.netpollopen — 监听文件描述符上的边缘触发事件，创建事件并加入监听； runtime.netpoll — 轮询网络并返回一组已经准备就绪的 Goroutine，传入的参数会决定它的行为；  如果参数小于 0，无限期等待文件描述符就绪； 如果参数等于 0，非阻塞地轮询网络； 如果参数大于 0，阻塞特定时间轮询网络；   runtime.netpollBreak — 唤醒网络轮询器，例如：计时器向前修改时间时会通过该函数中断网络轮询器； runtime.netpollIsPollDescriptor — 判断文件描述符是否被轮询器使用；  接下来让我们全面剖析一下整个 Go netpoller 的运行机制和流程。\npollDesc 操作系统中 I/O 多路复用函数会监控文件描述符的可读或者可写，而 Go 语言网络轮询器会监听 runtime.pollDesc 结构体的状态，该结构会封装操作系统的文件描述符：\n前面提到了 pollDesc 是底层事件驱动的封装，netFD 通过它来完成各种 I/O 相关的操作，它的定义如下：\n1 2 3  type pollDesc struct { runtimeCtx uintptr }   这里的 struct 只包含了一个指针，而通过 pollDesc 的 init 方法，我们可以找到它具体的定义是在 runtime.pollDesc 这里：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29  // Network poller descriptor. // // No heap pointers. // //go:notinheap type pollDesc struct { link *pollDesc // in pollcache, protected by pollcache.lock  // The lock protects pollOpen, pollSetDeadline, pollUnblock and deadlineimpl operations. \t// This fully covers seq, rt and wt variables. fd is constant throughout the PollDesc lifetime. \t// pollReset, pollWait, pollWaitCanceled and runtime·netpollready (IO readiness notification) \t// proceed w/o taking the lock. So closing, everr, rg, rd, wg and wd are manipulated \t// in a lock-free way by all operations. \t// NOTE(dvyukov): the following code uses uintptr to store *g (rg/wg), \t// that will blow up when GC starts moving objects. \tlock mutex // protects the following fields \tfd uintptr closing bool everr bool // marks event scanning error happened \tuser uint32 // user settable cookie \trseq uintptr // protects from stale read timers \trg uintptr // pdReady, pdWait, G waiting for read or nil \trt timer // read deadline timer (set if rt.f != nil) \trd int64 // read deadline \twseq uintptr // protects from stale write timers \twg uintptr // pdReady, pdWait, G waiting for write or nil \twt timer // write deadline timer \twd int64 // write deadline }   该结构体中包含用于监控可读和可写状态的变量，我们按照功能将它们分成以下四组：\n rseq 和 wseq — 表示文件描述符被重用或者计时器被重置5； rg 和 wg — 表示二进制的信号量，可能为 pdReady、pdWait、等待文件描述符可读或者可写的 Goroutine 以及 nil；它们是实现唤醒 goroutine 的关键。 rd 和 wd — 等待文件描述符可读或者可写的截止日期； rt 和 wt — 用于等待文件描述符的计时器；  pollCache runtime.pollDesc 包含自身类型的一个指针，用来保存下一个 runtime.pollDesc 的地址，以此来实现链表，可以减少数据结构的大小，所有的 runtime.pollDesc 保存在 runtime.pollCache 结构中，定义如下：\n1 2 3 4 5 6 7 8 9  type pollCache struct { lock mutex first *pollDesc // PollDesc objects must be type-stable, \t// because we can get ready notification from epoll/kqueue \t// after the descriptor is closed/reused. \t// Stale notifications are detected using seq variable, \t// seq is incremented when deadlines are changed or descriptor is reused. }   因为 runtime.pollCache 是一个在 runtime 包里的全局变量，因此需要用一个互斥锁来避免 data race 问题，从它的名字也能看出这是一个用于缓存的数据结构，也就是用来提高性能的，具体如何实现呢？\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25  const pollBlockSize = 4 *1024 func (c *pollCache) alloc() *pollDesc { lock(\u0026c.lock) if c.first == nil { const pdSize = unsafe.Sizeof(pollDesc{}) n := pollBlockSize / pdSize if n == 0 { n = 1 } // Must be in non-GC memory because can be referenced \t// only from epoll/kqueue internals. \tmem := persistentalloc(n*pdSize, 0, \u0026memstats.other_sys) for i := uintptr(0); i  n; i++ { pd := (*pollDesc)(add(mem, i*pdSize)) pd.link = c.first c.first = pd } } pd := c.first c.first = pd.link lockInit(\u0026pd.lock, lockRankPollDesc) unlock(\u0026c.lock) return pd }   Go runtime 会在调用 poll_runtime_pollOpen 往 epoll 实例注册 fd 之时首次调用 runtime.pollCache.alloc方法时批量初始化大小 4KB 的 runtime.pollDesc 结构体的链表，初始化过程中会调用 runtime.persistentalloc 来为这些数据结构分配不会被 GC 回收的内存，确保这些数据结构只能被 epoll和kqueue 在内核空间去引用。\n再往后每次调用这个方法则会先判断链表头是否已经分配过值了，若是，则直接返回表头这个 pollDesc，这种批量初始化数据进行缓存而后每次都直接从缓存取数据的方式是一种很常见的性能优化手段，在这里这种方式可以有效地提升 netpoller 的吞吐量。\nGo runtime 会在关闭 pollDesc 之时调用 runtime.pollCache.free 释放内存,它会直接将结构体插入链表的最前面：\n1 2 3 4 5 6  func (c *pollCache) free(pd *pollDesc) { lock(\u0026c.lock) pd.link = c.first c.first = pd unlock(\u0026c.lock) }   上述方法没有重置 runtime.pollDesc 结构体中的字段，该结构体被重复利用时才会由 runtime.poll_runtime_pollOpen 函数重置。\n运行机制 网络轮询器实际上就是对 I/O 多路复用技术的封装，本节将通过以下的三个过程分析网络轮询器的实现原理：\n 网络轮询器的初始化； 如何向网络轮询器中加入待监控的任务； 如何从网络轮询器中获取触发的事件；  上述三个过程包含了网络轮询器相关的方方面面，能够让我们对其实现有完整的理解。需要注意的是，我们在分析实现时会遵循以下两个规则：\n 因为不同 I/O 多路复用模块的实现大同小异，本节会使用 Linux 操作系统上的 epoll 实现； 因为处理读事件和写事件的逻辑类似，本节会省略写事件相关的代码；  初始化 因为文件 I/O、网络 I/O 以及计时器都依赖网络轮询器，所以 Go 语言会通过以下两条不同路径初始化网络轮询器：\n internal/poll.pollDesc.init — 通过 net.netFD.init 和 os.newFile 初始化网络 I/O 和文件 I/O 的轮询信息时； runtime.doaddtimer — 向处理器中增加新的计时器时；  网络轮询器的初始化会使用 runtime.poll_runtime_pollServerInit 和 runtime.netpollGenericInit 两个函数：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17  // 使用 sync.Once 来确保一个 listener 只持有一个 epoll 实例 var serverInit sync.Once // 它会创建 epoll 实例并把 listener fd 加入监听队列 func (pd *pollDesc) init(fd *FD) error { serverInit.Do(runtime_pollServerInit) ctx, errno := runtime_pollOpen(uintptr(fd.Sysfd)) if errno != 0 { if ctx != 0 { runtime_pollUnblock(ctx) runtime_pollClose(ctx) } return errnoErr(syscall.Errno(errno)) } pd.runtimeCtx = ctx return nil }   1 2 3 4 5 6 7 8 9 10 11 12 13 14 15  func runtime_pollServerInit() func poll_runtime_pollServerInit() { netpollGenericInit() } func netpollGenericInit() { if atomic.Load(\u0026netpollInited) == 0 { lock(\u0026netpollInitLock) if netpollInited == 0 { netpollinit() atomic.Store(\u0026netpollInited, 1) } unlock(\u0026netpollInitLock) } }   runtime.netpollGenericInit 会调用平台上特定实现的 runtime.netpollinit 函数，即 Linux 上的 epoll，它主要做了以下几件事情：\n 调用 epollcreate1 创建一个新的 epoll 文件描述符，这个文件描述符会在整个程序的生命周期中使用； 通过 runtime.nonblockingPipe 创建一个用于通信的管道； 使用 epollctl 将用于读取数据的文件描述符打包成 epollevent 事件加入监听；  1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45  var ( // 全局唯一的 epoll fd，只在 listener fd 初始化之时被指定一次 \tepfd int32 = -1 // epoll descriptor ) // netpollinit 会创建一个 epoll 实例，然后把 epoll fd 赋值给 epfd， // 后续 listener 以及它 accept 的所有 sockets 有关 epoll 的操作都是基于这个全局的 epfd func netpollinit() { epfd = epollcreate1(_EPOLL_CLOEXEC) if epfd  0 { epfd = epollcreate(1024) if epfd  0 { println(\"runtime: epollcreate failed with\", -epfd) throw(\"runtime: netpollinit failed\") } closeonexec(epfd) } r, w, errno := nonblockingPipe() if errno != 0 { println(\"runtime: pipe failed with\", -errno) throw(\"runtime: pipe failed\") } ev := epollevent{ events: _EPOLLIN, } *(**uintptr)(unsafe.Pointer(\u0026ev.data)) = \u0026netpollBreakRd errno = epollctl(epfd, _EPOLL_CTL_ADD, r, \u0026ev) if errno != 0 { println(\"runtime: epollctl failed with\", -errno) throw(\"runtime: epollctl failed\") } netpollBreakRd = uintptr(r) netpollBreakWr = uintptr(w) } func nonblockingPipe() (r, w int32, errno int32) { r, w, errno = pipe() if errno != 0 { return -1, -1, errno } closeonexec(r) setNonblock(r) closeonexec(w) setNonblock(w) return r, w, errno }   初始化的管道为我们提供了中断多路复用等待文件描述符中事件的方法，runtime.netpollBreak 函数会向管道中写入数据唤醒 epoll：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15  func netpollBreak() { for { var b byte n := write(netpollBreakWr, unsafe.Pointer(\u0026b), 1) if n == 1 { break } if n == -_EINTR { continue } if n == -_EAGAIN { return } } }   因为目前的计时器由网络轮询器管理和触发，它能够让网络轮询器立刻返回并让运行时检查是否有需要触发的计时器。\n轮询事件 调用 internal/poll.pollDesc.init 初始化文件描述符时不只会初始化网络轮询器，还会通过 runtime.poll_runtime_pollOpen 函数重置轮询信息 runtime.pollDesc 并调用 runtime.netpollopen 初始化轮询事件：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21  func runtime_pollOpen(fd uintptr) (uintptr, int) func poll_runtime_pollOpen(fd uintptr) (*pollDesc, int) { pd := pollcache.alloc() lock(\u0026pd.lock) if pd.wg != 0 \u0026\u0026 pd.wg != pdReady { throw(\"runtime: blocked write on free polldesc\") } ... pd.fd = fd pd.closing = false pd.everr = false ... pd.wseq++ pd.wg = 0 pd.wd = 0 unlock(\u0026pd.lock) var errno int32 errno = netpollopen(fd, pd) return pd, int(errno) }   runtime.netpollopen 的实现非常简单，它会调用 epollctl 向全局的轮询文件描述符 epfd 中加入新的轮询事件监听文件描述符的可读和可写状态：\n1 2 3 4 5 6 7 8 9  // netpollopen 会被 runtime_pollOpen 调用，注册 fd 到 epoll 实例， // 注意这里使用的是 epoll 的 ET 模式，同时会利用万能指针把 pollDesc 保存到 epollevent 的一个 8 位的字节数组 data 里 func netpollopen(fd uintptr, pd *pollDesc) int32 { var ev epollevent ev.events = _EPOLLIN | _EPOLLOUT | _EPOLLRDHUP | _EPOLLET *(**pollDesc)(unsafe.Pointer(\u0026ev.data)) = pd return -epollctl(epfd, _EPOLL_CTL_ADD, int32(fd), \u0026ev) }   从全局的 epfd 中删除待监听的文件描述符可以使用 runtime.netpollclose 函数，因为该函数的实现与 runtime.netpollopen 比较相似，所以这里就不展开分析了。\n1 2 3 4 5 6 7 8 9 10 11 12 13 14  //go:linkname poll_runtime_pollClose internal/poll.runtime_pollClose func poll_runtime_pollClose(pd *pollDesc) { if !pd.closing { throw(\"runtime: close polldesc w/o unblock\") } if pd.wg != 0 \u0026\u0026 pd.wg != pdReady { throw(\"runtime: blocked write on closing polldesc\") } if pd.rg != 0 \u0026\u0026 pd.rg != pdReady { throw(\"runtime: blocked read on closing polldesc\") } netpollclose(pd.fd) pollcache.free(pd) }   1 2 3 4  func netpollclose(fd uintptr) int32 { var ev epollevent return -epollctl(epfd, _EPOLL_CTL_DEL, int32(fd), \u0026ev) }   事件循环 本节将继续介绍网络轮询器的核心逻辑，也就是事件循环。我们将从以下的两个部分介绍事件循环的实现原理：\n Goroutine 让出线程并等待读写事件； 多路复用等待读写事件的发生并返回；  上述过程连接了操作系统中的 I/O 多路复用机制和 Go 语言的运行时，在两个不同体系之间构建了桥梁，我们将分别介绍上述的两个过程。\n等待事件 当我们在文件描述符上执行读写操作时，如果文件描述符不可读或者不可写，当前 Goroutine 就会执行 runtime.poll_runtime_pollWait 检查 runtime.pollDesc 的状态并调用 runtime.netpollblock 等待文件描述符的可读或者可写：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75  //go:linkname poll_runtime_pollWait internal/poll.runtime_pollWait func poll_runtime_pollWait(pd *pollDesc, mode int) int { err := netpollcheckerr(pd, int32(mode)) if err != pollNoError { return err } // As for now only Solaris, illumos, and AIX use level-triggered IO. \tif GOOS == \"solaris\" || GOOS == \"illumos\" || GOOS == \"aix\" { netpollarm(pd, mode) } // 进入 netpollblock 并且判断是否有期待的 I/O 事件发生， \t// 这里的 for 循环是为了一直等到 io ready \tfor !netpollblock(pd, int32(mode), false) { err = netpollcheckerr(pd, int32(mode)) if err != 0 { return err } // Can happen if timeout has fired and unblocked us, \t// but before we had a chance to run, timeout has been reset. \t// Pretend it has not happened and retry. \t} return 0 } // returns true if IO is ready, or false if timedout or closed // waitio - wait only for completed IO, ignore errors func netpollblock(pd *pollDesc, mode int32, waitio bool) bool { // gpp 保存的是 goroutine 的数据结构 g，这里会根据 mode 的值决定是 rg 还是 wg， \t// 前面提到过，rg 和 wg 是用来保存等待 I/O 就绪的 gorouine 的，后面调用 gopark 之后， \t// 会把当前的 goroutine 的抽象数据结构 g 存入 gpp 这个指针，也就是 rg 或者 wg \tgpp := \u0026pd.rg if mode == 'w' { gpp = \u0026pd.wg } // set the gpp semaphore to WAIT \t// 这个 for 循环是为了等待 io ready 或者 io wait \tfor { old := *gpp // gpp == pdReady 表示此时已有期待的 I/O 事件发生， \t// 可以直接返回 unblock 当前 goroutine 并执行响应的 I/O 操作 \tif old == pdReady { *gpp = 0 return true } if old != 0 { throw(\"runtime: double wait\") } // 如果没有期待的 I/O 事件发生，则通过原子操作把 gpp 的值置为 pdWait 并退出 for 循环 \tif atomic.Casuintptr(gpp, 0, pdWait) { break } } // need to recheck error states after setting gpp to WAIT \t// this is necessary because runtime_pollUnblock/runtime_pollSetDeadline/deadlineimpl \t// do the opposite: store to closing/rd/wd, membarrier, load of rg/wg  // waitio 此时是 false，netpollcheckerr 方法会检查当前 pollDesc 对应的 fd 是否是正常的， \t// 通常来说 netpollcheckerr(pd, mode) == 0 是成立的，所以这里会执行 gopark \t// 把当前 goroutine 给 park 住，直至对应的 fd 上发生可读/可写或者其他『期待的』I/O 事件为止， \t// 然后 unpark 返回，在 gopark 内部会把当前 goroutine 的抽象数据结构 g 存入 \t// gpp(pollDesc.rg/pollDesc.wg) 指针里，以便在后面的 netpoll 函数取出 pollDesc 之后， \t// 把 g 添加到链表里返回，接着重新调度 goroutine \tif waitio || netpollcheckerr(pd, mode) == 0 { // 注册 netpollblockcommit 回调给 gopark，在 gopark 内部会执行它，保存当前 goroutine 到 gpp \tgopark(netpollblockcommit, unsafe.Pointer(gpp), waitReasonIOWait, traceEvGoBlockNet, 5) } // be careful to not lose concurrent READY notification \told := atomic.Xchguintptr(gpp, 0) if old  pdWait { throw(\"runtime: corrupted polldesc\") } return old == pdReady }   gopark 会停住当前的 goroutine 并且调用传递进来的回调函数 unlockf，从上面的源码我们可以知道这个函数是netpollblockcommit,调用 netpollblockcommit，把当前的 goroutine，也就是 g 数据结构保存到 pollDesc 的 rg 或者 wg 指针里\ngopark 最终会调用 park_m，在这个函数内部会调用 unlockf，也就是 netpollblockcommit，然后会把当前的 goroutine，也就是 g 数据结构保存到 pollDesc 的 rg 或者 wg 指针里\n1 2 3 4 5 6 7 8 9 10 11 12 13  // netpollblockcommit 在 gopark 函数里被调用 func netpollblockcommit(gp*g, gpp unsafe.Pointer) bool { // 通过原子操作把当前 goroutine 抽象的数据结构 g，也就是这里的参数 gp 存入 gpp 指针， \t// 此时 gpp 的值是 pollDesc 的 rg 或者 wg 指针 \tr := atomic.Casuintptr((*uintptr)(gpp), pdWait, uintptr(unsafe.Pointer(gp))) if r { // Bump the count of goroutines waiting for the poller. \t// The scheduler uses this to decide whether to block \t// waiting for the poller if there is nothing else to do. \tatomic.Xadd(\u0026netpollWaiters, 1) } return r }   runtime.netpollblock 是 Goroutine 等待 I/O 事件的关键函数，它会使用运行时提供的 runtime.gopark 让出当前线程，将 Goroutine 转换到休眠状态并等待运行时的唤醒。\n轮询等待 Go 语言的运行时会在调度或者系统监控中调用 runtime.netpoll 轮询网络，该函数的执行过程可以分成以下几个部分：\n 根据调用方的入参 delay，设置对应的调用 epollwait 的 timeout 值； 调用 epollwait 等待发生了可读/可写事件的 fd； 循环 epollwait 返回的事件列表，处理对应的事件类型，组装可运行的 goroutine 链表并返回。  1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94  // netpoll checks for ready network connections. // Returns list of goroutines that become runnable. // delay // delay == 0: does not block, just polls // delay  0: block for up to that many nanoseconds func netpoll(delay int64) gList { if epfd == -1 { return gList{} } // 根据特定的规则把 delay 值转换为 epollwait 的 timeout 值 \t//因为传入 delay 的单位是纳秒，下面这段代码会将纳秒转换成毫秒： \tvar waitms int32 if delay  0 { waitms = -1 } else if delay == 0 { waitms = 0 } else if delay  1e6 { waitms = 1 } else if delay  1e15 { waitms = int32(delay / 1e6) } else { // An arbitrary cap on how long to wait for a timer. \t// 1e9 ms == ~11.5 days. \twaitms = 1e9 } //计算了需要等待的时间之后，runtime.netpoll 会执行 epollwait 等待文件描述符转换成可读或者可写，如果该函数返回了负值，就可能返回空的 Goroutine 列表或者重新调用 epollwait 陷入等待： \tvar events [128]epollevent retry: // 超时等待就绪的 fd 读写事件 \tn := epollwait(epfd, \u0026events[0], int32(len(events)), waitms) if n  0 { if n != -_EINTR { println(\"runtime: epollwait on fd\", epfd, \"failed with\", -n) throw(\"runtime: netpoll failed\") } // If a timed sleep was interrupted, just return to \t// recalculate how long we should sleep now. \tif waitms  0 { return gList{} } goto retry } //当 epollwait 函数返回的值大于 0 时，就意味着被监控的文件描述符出现了待处理的事件，我们在如下所示的循环中就会依次处理这些事件： \t// toRun 是一个 g 的链表，存储要恢复的 goroutines，最后返回给调用方 \tvar toRun gList for i := int32(0); i  n; i++ { ev := \u0026events[i] if ev.events == 0 { continue } // Go scheduler 在调用 findrunnable() 寻找 goroutine 去执行的时候， \t// 在调用 netpoll 之时会检查当前是否有其他线程同步阻塞在 netpoll， \t// 若是，则调用 netpollBreak 来唤醒那个线程，避免它长时间阻塞 \tif *(**uintptr)(unsafe.Pointer(\u0026ev.data)) == \u0026netpollBreakRd { if ev.events != _EPOLLIN { println(\"runtime: netpoll: break fd ready for\", ev.events) throw(\"runtime: netpoll: break fd ready for something unexpected\") } if delay != 0 { // netpollBreak could be picked up by a \t// nonblocking poll. Only read the byte \t// if blocking. \tvar tmp [16]byte read(int32(netpollBreakRd), noescape(unsafe.Pointer(\u0026tmp[0])), int32(len(tmp))) atomic.Store(\u0026netpollWakeSig, 0) } continue } // 判断发生的事件类型，读类型或者写类型等，然后给 mode 复制相应的值， \t// mode 用来决定从 pollDesc 里的 rg 还是 wg 里取出 goroutine \tvar mode int32 if ev.events\u0026(_EPOLLIN|_EPOLLRDHUP|_EPOLLHUP|_EPOLLERR) != 0 { mode += 'r' } if ev.events\u0026(_EPOLLOUT|_EPOLLHUP|_EPOLLERR) != 0 { mode += 'w' } if mode != 0 { // 取出保存在 epollevent 里的 pollDesc \tpd := *(**pollDesc)(unsafe.Pointer(\u0026ev.data)) pd.everr = false if ev.events == _EPOLLERR { pd.everr = true } // 调用 netpollready，传入就绪 fd 的 pollDesc， \t// 把 fd 对应的 goroutine 添加到链表 toRun 中 \tnetpollready(\u0026toRun, pd, mode) } } return toRun }   处理的事件总共包含两种:\n一种是调用 runtime.netpollBreak 函数触发的事件，该函数的作用是中断网络轮询器；\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22  // netpollBreak 往通信管道里写入信号去唤醒 epollwait func netpollBreak() { // 通过 CAS 避免重复的唤醒信号被写入管道， \t// 从而减少系统调用并节省一些系统资源 \tif atomic.Cas(\u0026netpollWakeSig, 0, 1) { for { var b byte n := write(netpollBreakWr, unsafe.Pointer(\u0026b), 1) if n == 1 { break } if n == -_EINTR { continue } if n == -_EAGAIN { return } println(\"runtime: netpollBreak write failed with\", -n) throw(\"runtime: netpollBreak write failed\") } } }   另一种是其他文件描述符的正常读写事件，对于这些事件，我们会交给 runtime.netpollready 处理：\n1 2 3 4 5 6 7 8 9 10 11 12  // netpollready 调用 netpollunblock 返回就绪 fd 对应的 goroutine 的抽象数据结构 g func netpollready(toRun *gList, pd*pollDesc, mode int32) { var rg, wg *g ... if mode == 'w' || mode == 'r'+'w' { wg = netpollunblock(pd, 'w', true) } ... if wg != nil { toRun.push(wg) } }   runtime.netpollunblock 会在读写事件发生时，将 runtime.pollDesc 中的读或者写信号量转换成 pdReady 并返回其中存储的 Goroutine；如果返回的 Goroutine 不会为空，那么该 Goroutine 就会被加入 toRun 列表，运行时会将列表中的全部 Goroutine 加入运行队列并等待调度器的调度。\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36  // netpollunblock 会依据传入的 mode 决定从 pollDesc 的 rg 或者 wg 取出当时 gopark 之时存入的 // goroutine 抽象数据结构 g 并返回 func netpollunblock(pd *pollDesc, mode int32, ioready bool) *g { // mode == 'r' 代表当时 gopark 是为了等待读事件，而 mode == 'w' 则代表是等待写事件 \tgpp := \u0026pd.rg if mode == 'w' { gpp = \u0026pd.wg } for { // 取出 gpp 存储的 g \told := *gpp if old == pdReady { return nil } if old == 0 \u0026\u0026 !ioready { // Only set READY for ioready. runtime_pollWait \t// will check for timeout/cancel before waiting. \treturn nil } var new uintptr if ioready { new = pdReady } // 重置 pollDesc 的 rg 或者 wg \tif atomic.Casuintptr(gpp, old, new) { // 如果该 goroutine 还是必须等待，则返回 nil \tif old == pdWait { old = 0 } // 通过万能指针还原成 g 并返回 \treturn (*g)(unsafe.Pointer(old)) } } }   netpoll 里会调用 epoll_wait 从 epoll 的 eventpoll.rdllist 就绪双向链表返回，从而得到 I/O 就绪的 socket fd 列表，并根据取出最初调用 epoll_ctl 时保存的上下文信息，恢复 g。所以执行完netpoll 之后，会返回一个就绪 fd 列表对应的 goroutine 链表.\nruntime.netpoll 函数返回的 Goroutine 列表都会被 runtime.injectglist 注入到处理器或者全局的运行队列上，其中因为系统监控 Goroutine 直接运行在线程上，所以它获取的 Goroutine 列表会直接加入全局的运行队列，其他 Goroutine 获取的列表都会加入 Goroutine 所在处理器的运行队列上。\nnetpoll 通过 park goroutine 从而达到阻塞 Accept/Read/Write 的效果，而通过调用 gopark，goroutine 会被放置在某个等待队列中，这里是放到了 epoll 的 “interest list” 里，底层数据结构是由红黑树实现的 eventpoll.rbr，此时 G 的状态由 _Grunning为_Gwaitting ，因此 G 必须被手动唤醒(通过 goready )，否则会丢失任务，应用层阻塞通常使用这种方式。\nGo 在多种场景下都可能会调用 netpoll 检查文件描述符状态:\n 在 Go runtime scheduler 的核心方法 runtime.schedule() 里会调用一个叫 runtime.findrunable() 的方法获取可运行的 goroutine 来执行，而在 runtime.findrunable() 方法里就调用了 runtime.netpoll 获取已就绪的 fd 列表对应的 goroutine 列表 sysmon 监控线程会在循环过程中检查距离上一次 runtime.netpoll 被调用是否超过了 10ms，若是则会去调用它拿到可运行的 goroutine 列表并通过调用 injectglist 把 g 列表放入全局调度队列或者当前 P 本地调度队列等待被执行.  截止日期 网络轮询器和计时器的关系非常紧密，这不仅仅是因为网络轮询器负责计时器的唤醒，还因为文件和网络 I/O 的截止日期也由网络轮询器负责处理。截止日期在 I/O 操作中，尤其是网络调用中很关键，网络请求存在很高的不确定因素，我们需要设置一个截止日期保证程序的正常运行，这时就需要用到网络轮询器中的 runtime.poll_runtime_pollSetDeadline 函数：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23  func poll_runtime_pollSetDeadline(pd *pollDesc, d int64, mode int) { rd0, wd0 := pd.rd, pd.wd if d  0 { d += nanotime() } pd.rd = d ... if pd.rt.f == nil { if pd.rd  0 { pd.rt.f = netpollReadDeadline pd.rt.arg = pd pd.rt.seq = pd.rseq resettimer(\u0026pd.rt, pd.rd) } } else if pd.rd != rd0 { pd.rseq++ if pd.rd  0 { modtimer(\u0026pd.rt, pd.rd, 0, rtf, pd, pd.rseq) } else { deltimer(\u0026pd.rt) pd.rt.f = nil } }   该函数会先使用截止日期计算出过期的时间点，然后根据 runtime.pollDesc 的状态做出以下不同的处理：\n 如果结构体中的计时器没有设置执行的函数时，该函数会设置计时器到期后执行的函数、传入的参数并调用 runtime.resettimer 重置计时器； 如果结构体的读截止日期已经被改变，我们会根据新的截止日期做出不同的处理：  如果新的截止日期大于 0，调用 runtime.modtimer 修改计时器； 如果新的截止日期小于 0，调用 runtime.deltimer 删除计时器；    在 runtime.poll_runtime_pollSetDeadline 函数的最后，会重新检查轮询信息中存储的截止日期：\n1 2 3 4 5 6 7 8 9 10 11 12  var rg *g if pd.rd  0 { if pd.rd  0 { rg = netpollunblock(pd, 'r', false) } ... } if rg != nil { netpollgoready(rg, 3) } ... }   如果截止日期小于 0，上述代码会调用 runtime.netpollgoready 直接唤醒对应的 Goroutine。\n在 runtime.poll_runtime_pollSetDeadline 函数中直接调用 runtime.netpollgoready 是相对比较特殊的情况。在正常情况下，运行时都会在计时器到期时调用 runtime.netpollDeadline、runtime.netpollReadDeadline 和 runtime.netpollWriteDeadline 三个函数：\n上述三个函数都会通过 runtime.netpolldeadlineimpl 调用 runtime.netpollgoready 直接唤醒相应的 Goroutine:\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20  func netpolldeadlineimpl(pd *pollDesc, seq uintptr, read, write bool) { currentSeq := pd.rseq if !read { currentSeq = pd.wseq } if seq != currentSeq { return } var rg *g if read { pd.rd = -1 atomic.StorepNoWB(unsafe.Pointer(\u0026pd.rt.f), nil) rg = netpollunblock(pd, 'r', false) } ... if rg != nil { netpollgoready(rg, 0) } ... }   Goroutine 在被唤醒之后就会意识到当前的 I/O 操作已经超时，可以根据需要选择重试请求或者中止调用。\nTCP Server 使用 Go 编写一个典型的 TCP echo server:\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41  package main import ( \"log\" \"net\" ) func main() { listen, err := net.Listen(\"tcp\", \":8888\") if err != nil { log.Println(\"listen error: \", err) return } for { conn, err := listen.Accept() if err != nil { log.Println(\"accept error: \", err) break } // start a new goroutine to handle the new connection. \tgo HandleConn(conn) } } func HandleConn(conn net.Conn) { defer conn.Close() packet := make([]byte, 1024) for { // block here if socket is not available for reading data. \tn, err := conn.Read(packet) if err != nil { log.Println(\"read socket error: \", err) return } // same as above, block here if socket is not available for writing. \t_,_ = conn.Write(packet[:n]) } }   上面是一个基于 Go 原生网络模型（基于 netpoller）编写的一个 TCP server，模式是 goroutine-per-connection ，在这种模式下，开发者使用的是同步的模式去编写异步的逻辑而且对于开发者来说 I/O 是否阻塞是无感知的，也就是说开发者无需考虑 goroutines 甚至更底层的线程、进程的调度和上下文切换。而 Go netpoller 最底层的事件驱动技术肯定是基于 epoll/kqueue/iocp 这一类的 I/O 事件驱动技术，只不过是把这些调度和上下文切换的工作转移到了 runtime 的 Go scheduler，让它来负责调度 goroutines，从而极大地降低了程序员的心智负担！\nGo 的这种同步模式的网络服务器的基本架构通常如下：\n上面的示例代码中相关的在源码里的几个数据结构和方法：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79  // TCPListener is a TCP network listener. Clients should typically // use variables of type Listener instead of assuming TCP. type TCPListener struct { fd *netFD lc ListenConfig } // Accept implements the Accept method in the Listener interface; it // waits for the next call and returns a generic Conn. func (l*TCPListener) Accept() (Conn, error) { if !l.ok() { return nil, syscall.EINVAL } c, err := l.accept() if err != nil { return nil, \u0026OpError{Op: \"accept\", Net: l.fd.net, Source: nil, Addr: l.fd.laddr, Err: err} } return c, nil } func (ln *TCPListener) accept() (*TCPConn, error) { fd, err := ln.fd.accept() if err != nil { return nil, err } tc := newTCPConn(fd) if ln.lc.KeepAlive = 0 { setKeepAlive(fd, true) ka := ln.lc.KeepAlive if ln.lc.KeepAlive == 0 { ka = defaultTCPKeepAlive } setKeepAlivePeriod(fd, ka) } return tc, nil } // TCPConn is an implementation of the Conn interface for TCP network // connections. type TCPConn struct { conn } // Conn type conn struct { fd *netFD } type conn struct { fd*netFD } func (c *conn) ok() bool { return c != nil \u0026\u0026 c.fd != nil } // Implementation of the Conn interface.  // Read implements the Conn Read method. func (c*conn) Read(b []byte) (int, error) { if !c.ok() { return 0, syscall.EINVAL } n, err := c.fd.Read(b) if err != nil \u0026\u0026 err != io.EOF { err = \u0026OpError{Op: \"read\", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err} } return n, err } // Write implements the Conn Write method. func (c *conn) Write(b []byte) (int, error) { if !c.ok() { return 0, syscall.EINVAL } n, err := c.fd.Write(b) if err != nil { err = \u0026OpError{Op: \"write\", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err} } return n, err }   netFD 1  net.Listen(\"tcp\", \":8888\")   方法返回了一个 *TCPListener，它是一个实现了 net.Listener 接口的 struct，而通过 listener.Accept() 接收的新连接*TCPConn 则是一个实现了 net.Conn 接口的 struct，它内嵌了 net.conn struct。\n仔细阅读上面的源码可以发现，不管是 Listener 的 Accept 还是 Conn 的 Read/Write 方法，都是基于一个 netFD 的数据结构的操作， netFD 是一个网络描述符，类似于 Linux 的文件描述符的概念，netFD 中包含一个 poll.FD 数据结构，而 poll.FD 中包含两个重要的数据结构 Sysfd 和 pollDesc，前者是真正的系统文件描述符，后者对是底层事件驱动的封装，所有的读写超时等操作都是通过调用后者的对应方法实现的。\nnetFD 和 poll.FD 的源码：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47  // Network file descriptor. type netFD struct { pfd poll.FD // immutable until Close \tfamily int sotype int isConnected bool // handshake completed or use of association with peer \tnet string laddr Addr raddr Addr } // FD is a file descriptor. The net and os packages use this type as a // field of a larger type representing a network connection or OS file. type FD struct { // Lock sysfd and serialize access to Read and Write methods. \tfdmu fdMutex // System file descriptor. Immutable until Close. \tSysfd int // I/O poller. \tpd pollDesc // Writev cache. \tiovecs *[]syscall.Iovec // Semaphore signaled when file is closed. \tcsema uint32 // Non-zero if this file has been set to blocking mode. \tisBlocking uint32 // Whether this is a streaming descriptor, as opposed to a \t// packet-based descriptor like a UDP socket. Immutable. \tIsStream bool // Whether a zero byte read indicates EOF. This is false for a \t// message based socket connection. \tZeroReadIsEOF bool // Whether this is a file rather than a network socket. \tisFile bool }   net.Listen 调用 net.Listen 之后，底层调用 Linux 的系统调用 socket.\nsocket方法创建一个 fd 分配给 listener，并用以来初始化 listener 的 netFD ，接着调用 netFD 的 listenStream 方法完成对 socket 的 bind\u0026listen 操作以及对 netFD 的初始化（主要是对 netFD 里的 pollDesc 的初始化），调用链是 runtime.runtime_pollServerInit -- runtime.poll_runtime_pollServerInit -- runtime.netpollGenericInit.\nruntime.netpollGenericInit 会调用平台上特定实现的 runtime.netpollinit 函数，即 Linux 上的 epoll，\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 100 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119 120 121 122 123 124 125 126 127 128 129 130 131 132 133 134 135 136 137 138 139 140 141 142 143 144 145 146 147 148 149 150 151 152 153 154 155 156 157 158 159 160 161 162 163 164 165 166 167 168 169 170 171 172 173 174 175 176 177 178 179 180 181 182 183 184 185 186 187 188 189 190 191 192 193 194 195 196 197  func Listen(network, address string) (Listener, error) { var lc ListenConfig return lc.Listen(context.Background(), network, address) } // Listen announces on the local network address. // // See func Listen for a description of the network and address // parameters. func (lc *ListenConfig) Listen(ctx context.Context, network, address string) (Listener, error) { addrs, err := DefaultResolver.resolveAddrList(ctx, \"listen\", network, address, nil) if err != nil { return nil, \u0026OpError{Op: \"listen\", Net: network, Source: nil, Addr: nil, Err: err} } sl := \u0026sysListener{ ListenConfig: *lc, network: network, address: address, } var l Listener la := addrs.first(isIPv4) switch la := la.(type) { case *TCPAddr: l, err = sl.listenTCP(ctx, la) case *UnixAddr: l, err = sl.listenUnix(ctx, la) default: return nil, \u0026OpError{Op: \"listen\", Net: sl.network, Source: nil, Addr: la, Err: \u0026AddrError{Err: \"unexpected address type\", Addr: address}} } if err != nil { return nil, \u0026OpError{Op: \"listen\", Net: sl.network, Source: nil, Addr: la, Err: err} // l is non-nil interface containing nil pointer \t} return l, nil } func (sl *sysListener) listenTCP(ctx context.Context, laddr *TCPAddr) (*TCPListener, error) { fd, err := internetSocket(ctx, sl.network, laddr, nil, syscall.SOCK_STREAM, 0, \"listen\", sl.ListenConfig.Control) if err != nil { return nil, err } return \u0026TCPListener{fd: fd, lc: sl.ListenConfig}, nil } func internetSocket(ctx context.Context, net string, laddr, raddr sockaddr, sotype, proto int, mode string, ctrlFn func(string, string, syscall.RawConn) error) (fd *netFD, err error) { if (runtime.GOOS == \"aix\" || runtime.GOOS == \"windows\" || runtime.GOOS == \"openbsd\") \u0026\u0026 mode == \"dial\" \u0026\u0026 raddr.isWildcard() { raddr = raddr.toLocal(net) } family, ipv6only := favoriteAddrFamily(net, laddr, raddr, mode) return socket(ctx, net, family, sotype, proto, ipv6only, laddr, raddr, ctrlFn) } // socket returns a network file descriptor that is ready for // asynchronous I/O using the network poller. func socket(ctx context.Context, net string, family, sotype, proto int, ipv6only bool, laddr, raddr sockaddr, ctrlFn func(string, string, syscall.RawConn) error) (fd *netFD, err error) { s, err := sysSocket(family, sotype, proto) if err != nil { return nil, err } if err = setDefaultSockopts(s, family, sotype, ipv6only); err != nil { poll.CloseFunc(s) return nil, err } // 用上面创建的 listener fd 初始化 listener netFD \tif fd, err = newFD(s, family, sotype, net); err != nil { poll.CloseFunc(s) return nil, err } // This function makes a network file descriptor for the \t// following applications: \t// \t// - An endpoint holder that opens a passive stream \t// connection, known as a stream listener \t// \t// - An endpoint holder that opens a destination-unspecific \t// datagram connection, known as a datagram listener \t// \t// - An endpoint holder that opens an active stream or a \t// destination-specific datagram connection, known as a \t// dialer \t// \t// - An endpoint holder that opens the other connection, such \t// as talking to the protocol stack inside the kernel \t// \t// For stream and datagram listeners, they will only require \t// named sockets, so we can assume that it's just a request \t// from stream or datagram listeners when laddr is not nil but \t// raddr is nil. Otherwise we assume it's just for dialers or \t// the other connection holders.  if laddr != nil \u0026\u0026 raddr == nil { switch sotype { case syscall.SOCK_STREAM, syscall.SOCK_SEQPACKET: // 对 listener fd 进行 bind\u0026listen 操作，并且调用 init 方法完成初始化 \tif err := fd.listenStream(laddr, listenerBacklog(), ctrlFn); err != nil { fd.Close() return nil, err } return fd, nil case syscall.SOCK_DGRAM: if err := fd.listenDatagram(laddr, ctrlFn); err != nil { fd.Close() return nil, err } return fd, nil } } if err := fd.dial(ctx, laddr, raddr, ctrlFn); err != nil { fd.Close() return nil, err } return fd, nil } var ( testHookDialChannel = func() {} // for golang.org/issue/5349 \ttestHookCanceledDial = func() {} // for golang.org/issue/16523  // Placeholders for socket system calls. \tsocketFunc func(int, int, int) (int, error) = syscall.Socket connectFunc func(int, syscall.Sockaddr) error = syscall.Connect listenFunc func(int, int) error = syscall.Listen getsockoptIntFunc func(int, int, int) (int, error) = syscall.GetsockoptInt ) // Wrapper around the socket system call that marks the returned file // descriptor as nonblocking and close-on-exec. func sysSocket(family, sotype, proto int) (int, error) { // 调用 linux 系统调用 socket 创建 listener fd 并设置为为阻塞 I/O \ts, err := socketFunc(family, sotype|syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC, proto) // On Linux the SOCK_NONBLOCK and SOCK_CLOEXEC flags were \t// introduced in 2.6.27 kernel and on FreeBSD both flags were \t// introduced in 10 kernel. If we get an EINVAL error on Linux \t// or EPROTONOSUPPORT error on FreeBSD, fall back to using \t// socket without them. \tswitch err { case nil: return s, nil default: return -1, os.NewSyscallError(\"socket\", err) case syscall.EPROTONOSUPPORT, syscall.EINVAL: } // See ../syscall/exec_unix.go for description of ForkLock. \tsyscall.ForkLock.RLock() s, err = socketFunc(family, sotype, proto) if err == nil { syscall.CloseOnExec(s) } syscall.ForkLock.RUnlock() if err != nil { return -1, os.NewSyscallError(\"socket\", err) } if err = syscall.SetNonblock(s, true); err != nil { poll.CloseFunc(s) return -1, os.NewSyscallError(\"setnonblock\", err) } return s, nil } func newFD(sysfd, family, sotype int, net string) (*netFD, error) { ret := \u0026netFD{ pfd: poll.FD{ Sysfd: sysfd, IsStream: sotype == syscall.SOCK_STREAM, ZeroReadIsEOF: sotype != syscall.SOCK_DGRAM \u0026\u0026 sotype != syscall.SOCK_RAW, }, family: family, sotype: sotype, net: net, } return ret, nil } // 对 listener fd 进行 bind\u0026listen 操作，并且调用 init 方法完成初始化 func (fd *netFD) listenStream(laddr sockaddr, backlog int, ctrlFn func(string, string, syscall.RawConn) error) error { ... // 完成绑定操作 \tif err = syscall.Bind(fd.pfd.Sysfd, lsa); err != nil { return os.NewSyscallError(\"bind\", err) } // 完成监听操作 \tif err = listenFunc(fd.pfd.Sysfd, backlog); err != nil { return os.NewSyscallError(\"listen\", err) } // 调用 init，内部会调用 poll.FD.Init，最后调用 pollDesc.init \tif err = fd.init(); err != nil { return err } lsa, _ = syscall.Getsockname(fd.pfd.Sysfd) fd.setAddr(fd.addrFunc()(lsa), nil) return nil }   Listener.Accept netpoll accept socket 的工作流程如下：\n 服务端的 netFD 在 listen 时会创建 epoll 的实例，并将 listenerFD 加入 epoll 的事件队列 netFD 在 accept 时将返回的 connFD 也加入 epoll 的事件队列 netFD 在读写时出现 syscall.EAGAIN 错误，通过 pollDesc 的 waitRead 方法将当前的 goroutine park 住，直到 ready，从 pollDesc 的 waitRead 中返回  Listener.Accept() 接收来自客户端的新连接，具体还是调用 netFD.accept 方法来完成这个功能：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53  // Accept implements the Accept method in the Listener interface; it // waits for the next call and returns a generic Conn. func (l *TCPListener) Accept() (Conn, error) { if !l.ok() { return nil, syscall.EINVAL } c, err := l.accept() if err != nil { return nil, \u0026OpError{Op: \"accept\", Net: l.fd.net, Source: nil, Addr: l.fd.laddr, Err: err} } return c, nil } func (ln *TCPListener) accept() (*TCPConn, error) { fd, err := ln.fd.accept() if err != nil { return nil, err } tc := newTCPConn(fd) if ln.lc.KeepAlive = 0 { setKeepAlive(fd, true) ka := ln.lc.KeepAlive if ln.lc.KeepAlive == 0 { ka = defaultTCPKeepAlive } setKeepAlivePeriod(fd, ka) } return tc, nil } func (fd *netFD) accept() (netfd *netFD, err error) { // 调用 poll.FD 的 Accept 方法接受新的 socket 连接，返回 socket 的 fd \td, rsa, errcall, err := fd.pfd.Accept() if err != nil { if errcall != \"\" { err = wrapSyscallError(errcall, err) } return nil, err } // 以 socket fd 构造一个新的 netFD，代表这个新的 socket \tif netfd, err = newFD(d, fd.family, fd.sotype, fd.net); err != nil { poll.CloseFunc(d) return nil, err } // 调用 netFD 的 init 方法完成初始化 \tif err = netfd.init(); err != nil { fd.Close() return nil, err } lsa, _ := syscall.Getsockname(netfd.pfd.Sysfd)fff netfd.setAddr(netfd.addrFunc()(lsa), netfd.addrFunc()(rsa)) return netfd, nil }   netFD.accept 方法里会再调用 poll.FD.Accept ，最后会使用 Linux 的系统调用 accept 来完成新连接的接收，并且会把 accept 的 socket 设置成非阻塞 I/O 模式：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46  // Accept wraps the accept network call. func (fd *FD) Accept() (int, syscall.Sockaddr, string, error) { if err := fd.readLock(); err != nil { return -1, nil, \"\", err } defer fd.readUnlock() if err := fd.pd.prepareRead(fd.isFile); err != nil { return -1, nil, \"\", err } for { // 使用 linux 系统调用 accept 接收新连接，创建对应的 socket \ts, rsa, errcall, err := accept(fd.Sysfd) // 因为 listener fd 在创建的时候已经设置成非阻塞的了， \t// 所以 accept 方法会直接返回，不管有没有新连接到来；如果 err == nil 则表示正常建立新连接，直接返回 \tif err == nil { return s, rsa, \"\", err } // 如果 err != nil，则判断 err == syscall.EAGAIN，符合条件则进入 pollDesc.waitRead 方法 \tswitch err { case syscall.EAGAIN: if fd.pd.pollable() { // 如果当前没有发生期待的 I/O 事件，那么 waitRead 会通过 park goroutine 让逻辑 block 在这里 \tif err = fd.pd.waitRead(fd.isFile); err == nil { continue } } case syscall.ECONNABORTED: // This means that a socket on the listen \t// queue was closed before we Accept()ed it; \t// it's a silly error, so try again. \tcontinue } return -1, nil, errcall, err } } // 使用 linux 的 accept 系统调用接收新连接并把这个 socket fd 设置成非阻塞 I/O ns, sa, err := Accept4Func(s, syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC) // On Linux the accept4 system call was introduced in 2.6.28 // kernel and on FreeBSD it was introduced in 10 kernel. If we // get an ENOSYS error on both Linux and FreeBSD, or EINVAL // error on Linux, fall back to using accept.  // Accept4Func is used to hook the accept4 call. var Accept4Func func(int, int) (int, syscall.Sockaddr, error) = syscall.Accept4   pollDesc.waitRead 方法主要负责检测当前这个 pollDesc 的上层 netFD 对应的 fd 是否有『期待的』I/O 事件发生，如果有就直接返回，否则就 park 住当前的 goroutine 并持续等待直至对应的 fd 上发生可读/可写或者其他『期待的』I/O 事件为止，然后它就会返回到外层的 for 循环，让 goroutine 继续执行逻辑。\npoll.FD.Accept() 返回之后，会构造一个对应这个新 socket 的 netFD，然后调用 init() 方法完成初始化，这个 init 过程和前面 net.Listen() 是一样的，调用链：netFD.init() – poll.FD.Init() – poll.pollDesc.init()\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25  // Init initializes the FD. The Sysfd field should already be set. // This can be called multiple times on a single FD. // The net argument is a network name from the net package (e.g., \"tcp\"), // or \"file\". // Set pollable to true if fd should be managed by runtime netpoll. // netFD.init 会调用 poll.FD.Init 并最终调用到 pollDesc.init， func (fd *FD) Init(net string, pollable bool) error { // We don't actually care about the various network types. \tif net == \"file\" { fd.isFile = true } if !pollable { fd.isBlocking = 1 return nil } // netFD.init 会调用 poll.FD.Init 并最终调用到 pollDesc.init， \t// 它会创建 epoll 实例并把 listener fd 加入监听队列 \terr := fd.pd.init(fd) if err != nil { // If we could not initialize the runtime poller, \t// assume we are using blocking mode. \tfd.isBlocking = 1 } return err }   然后把这个 socket fd 注册到 listener 的 epoll 实例的事件队列中去，等待 I/O 事件。\nConn.Read/Conn.Write 我们先来看看 Conn.Read 方法是如何实现的，原理其实和 Listener.Accept 是一样的，具体调用链还是首先调用 conn 的 netFD.Read ，然后内部再调用 poll.FD.Read ，最后使用 Linux 的系统调用 read: syscall.Read 完成数据读取：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65  // Implementation of the Conn interface.  // Read implements the Conn Read method. func (c *conn) Read(b []byte) (int, error) { if !c.ok() { return 0, syscall.EINVAL } n, err := c.fd.Read(b) if err != nil \u0026\u0026 err != io.EOF { err = \u0026OpError{Op: \"read\", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err} } return n, err } func (fd*netFD) Read(p []byte) (n int, err error) { n, err = fd.pfd.Read(p) runtime.KeepAlive(fd) return n, wrapSyscallError(\"read\", err) } // Read implements io.Reader. func (fd *FD) Read(p []byte) (int, error) { if err := fd.readLock(); err != nil { return 0, err } defer fd.readUnlock() if len(p) == 0 { // If the caller wanted a zero byte read, return immediately \t// without trying (but after acquiring the readLock). \t// Otherwise syscall.Read returns 0, nil which looks like \t// io.EOF. \t// TODO(bradfitz): make it wait for readability? (Issue 15735) \treturn 0, nil } if err := fd.pd.prepareRead(fd.isFile); err != nil { return 0, err } if fd.IsStream \u0026\u0026 len(p)  maxRW { p = p[:maxRW] } for { // 尝试从该 socket 读取数据，因为 socket 在被 listener accept 的时候设置成 \t// 了非阻塞 I/O，所以这里同样也是直接返回，不管有没有可读的数据 \tn, err := syscall.Read(fd.Sysfd, p) if err != nil { n = 0 // err == syscall.EAGAIN 表示当前没有期待的 I/O 事件发生，也就是 socket 不可读 \tif err == syscall.EAGAIN \u0026\u0026 fd.pd.pollable() { // 如果当前没有发生期待的 I/O 事件，那么 waitRead \t// 会通过 park goroutine 让逻辑 block 在这里 \tif err = fd.pd.waitRead(fd.isFile); err == nil { continue } } // On MacOS we can see EINTR here if the user \t// pressed ^Z. See issue #22838. \tif runtime.GOOS == \"darwin\" \u0026\u0026 err == syscall.EINTR { continue } } err = fd.eofError(n, err) return n, err } }   conn.Write 和 conn.Read 的原理是一致的，它也是通过类似 pollDesc.waitRead 的 pollDesc.waitWrite 来 park 住 goroutine 直至期待的 I/O 事件发生才返回恢复执行。\npollDesc.waitRead 内部调用了 poll.runtime_pollWait – runtime.poll_runtime_pollWait 来达成无 I/O 事件时 park 住 goroutine 的目的\npollDesc.waitWrite 的内部实现原理和 pollDesc.waitRead 是一样的，都是基于 poll.runtime_pollWait – runtime.poll_runtime_pollWait，这里就不再赘述。\n总结 所以我们现在可以来从整体的层面来概括 Go 的网络业务 goroutine 是如何被规划调度的了：\n首先，client 连接 server 的时候，listener 通过 accept 调用接收新 connection，每一个新 connection 都启动一个 goroutine 处理，accept 调用会把该 connection 的 fd 连带所在的 goroutine 上下文信息封装注册到 epoll 的监听列表里去，当 goroutine 调用 conn.Read 或者 conn.Write 等需要阻塞等待的函数时，会被 gopark 给封存起来并使之休眠，让 P 去执行本地调度队列里的下一个可执行的 goroutine，往后 Go scheduler 会在循环调度的 runtime.schedule() 函数以及 sysmon 监控线程中调用 runtime.nepoll 以获取可运行的 goroutine 列表并通过调用 injectglist 把剩下的 g 放入全局调度队列或者当前 P 本地调度队列去重新执行。\n综上，Go 借助于 epoll/kqueue/iocp 和 runtime scheduler 等的帮助，设计出了自己的 I/O 多路复用 netpoller，成功地让 Listener.Accept / conn.Read / conn.Write 等方法从开发者的角度看来是同步模式。\n价值 通过前面对源码的分析，我们现在知道 Go netpoller 依托于 runtime scheduler，为开发者提供了一种强大的同步网络编程模式；然而，Go netpoller 存在的意义却远不止于此，Go netpoller I/O 多路复用搭配 Non-blocking I/O 而打造出来的这个原生网络模型，它最大的价值是把网络 I/O 的控制权牢牢掌握在 Go 自己的 runtime 里.\nG 在运行过程中如果被阻塞在某个 system call 操作上，那么不光 G 会阻塞，执行该 G 的 M 也会解绑 P，与 G 一起进入 sleep 状态。\n如果此时有 idle 的 M，则 P 与其绑定继续执行其他 G；如果没有 idle M，但仍然有其他 G 要去执行，那么就会创建一个新的 M。当阻塞在 system call 上的 G 完成 syscall 调用后，G 会去尝试获取一个可用的 P，如果没有可用的 P，那么 G 会被标记为 _Grunnable 并把它放入全局的 runqueue 中等待调度，之前的那个 sleep 的 M 将再次进入 sleep。\n现在清楚为什么 netpoll 为什么一定要使用非阻塞 I/O 了吧？\n就是为了避免让操作网络 I/O 的 goroutine 陷入到系统调用从而进入内核态，因为一旦进入内核态，整个程序的控制权就会发生转移(到内核)，不再属于用户进程了，那么也就无法借助于 Go 强大的 runtime scheduler 来调度业务程序的并发了.\n而有了 netpoll 之后，借助于非阻塞 I/O ，G 就再也不会因为系统调用的读写而 (长时间) 陷入内核态，当 G 被阻塞在某个 network I/O 操作上时，实际上它不是因为陷入内核态被阻塞住了，而是被 Go runtime 调用 gopark 给 park 住了，此时 G 会被放置到某个 wait queue 中，而 M 会尝试运行下一个 _Grunnable 的 G，如果此时没有_Grunnable 的 G 供 M 运行，那么 M 将解绑 P，并进入 sleep 状态。\n当 I/O available，在 epoll 的 eventpoll.rdr 中等待的 G 会被放到 eventpoll.rdllist 链表里并通过 netpoll 中的 epoll_wait 系统调用返回放置到全局调度队列或者 P 的本地调度队列，标记为_Grunnable ，等待 P 绑定 M 恢复执行。\n参考 6.6 网络轮询器 go netpoller 原生网络模型之源码全面解析\n",
-  "wordCount" : "14088",
-  "inLanguage": "zh-cn",
-  "datePublished": "2020-11-14T22:52:29Z",
-  "dateModified": "2020-11-14T22:52:29Z",
-  "mainEntityOfPage": {
-    "@type": "WebPage",
-    "@id": "/post/go%E7%9A%84%E7%BD%91%E7%BB%9C%E8%BD%AE%E8%AF%A2%E5%99%A8%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/"
-  },
-  "publisher": {
-    "@type": "Organization",
-    "name": "Forz Blog",
-    "logo": {
-      "@type": "ImageObject",
-      "url": "/favicon.ico"
-    }
-  }
-}
-</script>
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
 </head>
-
-<body class="" id="top">
-<script>
-    if (localStorage.getItem("pref-theme") === "dark") {
-        document.body.classList.add('dark');
-    } else if (localStorage.getItem("pref-theme") === "light") {
-        document.body.classList.remove('dark')
-    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        document.body.classList.add('dark');
-    }
-
-</script>
-<noscript>
-    <style type="text/css">
-        #theme-toggle,
-        .top-link {
-            display: none;
-        }
-
-    </style>
-    <style>
-        @media (prefers-color-scheme: dark) {
-            :root {
-                --theme: #1d1e20;
-                --entry: #2e2e33;
-                --primary: rgba(255, 255, 255, 0.84);
-                --secondary: rgba(255, 255, 255, 0.56);
-                --tertiary: rgba(255, 255, 255, 0.16);
-                --content: rgba(255, 255, 255, 0.74);
-                --hljs-bg: #2e2e33;
-                --code-bg: #37383e;
-                --border: #333;
-            }
-
-            .list {
-                background: var(--theme);
-            }
-
-            .list:not(.dark)::-webkit-scrollbar-track {
-                background: 0 0;
-            }
-
-            .list:not(.dark)::-webkit-scrollbar-thumb {
-                border-color: var(--theme);
-            }
-        }
-
-    </style>
-</noscript>
-
-<header class="header">
-    <nav class="nav">
-        <div class="logo">
-            <a href="/" accesskey="h" title="Forz Blog (Alt + H)">Forz Blog</a>
-            <span class="logo-switches">
-                <button id="theme-toggle" accesskey="t" title="(Alt + T)">
-                    <svg id="moon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
-                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round">
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-                    </svg>
-                    <svg id="sun" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
-                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="5"></circle>
-                        <line x1="12" y1="1" x2="12" y2="3"></line>
-                        <line x1="12" y1="21" x2="12" y2="23"></line>
-                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                        <line x1="1" y1="12" x2="3" y2="12"></line>
-                        <line x1="21" y1="12" x2="23" y2="12"></line>
-                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                    </svg>
-                </button>
-            </span>
-        </div>
-        <ul id="menu">
-            <li>
-                <a href="/" title="Home">
-                    <span>Home</span>
-                </a>
-            </li>
-            <li>
-                <a href="/post/" title="Archives">
-                    <span>Archives</span>
-                </a>
-            </li>
-            <li>
-                <a href="/tags/" title="Tags">
-                    <span>Tags</span>
-                </a>
-            </li>
-            <li>
-                <a href="/categories/" title="Categories">
-                    <span>Categories</span>
-                </a>
-            </li>
-        </ul>
-    </nav>
-</header>
-<main class="main">
-
-<article class="post-single">
-  <header class="post-header">
-    
-    <h1 class="post-title">
-      Go的网络轮询器源码剖析
-    </h1>
-    <div class="post-meta">November 14, 2020
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
 </div>
-  </header> 
-  <div class="post-content"><h2 id="导言">导言<a hidden class="anchor" aria-hidden="true" href="#导言">#</a></h2>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Go的网络轮询器源码剖析</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2020-11-14 </span>
+        <div class="post-category">
+            <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
+            </div>
+          <span class="more-meta"> 约 14088 字 </span>
+          <span class="more-meta"> 预计阅读 29 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#导言">导言</a></li>
+    <li><a href="#基本原理">基本原理</a></li>
+    <li><a href="#polldesc">pollDesc</a></li>
+    <li><a href="#pollcache">pollCache</a></li>
+    <li><a href="#运行机制">运行机制</a>
+      <ul>
+        <li><a href="#初始化">初始化</a></li>
+        <li><a href="#轮询事件">轮询事件</a></li>
+        <li><a href="#事件循环">事件循环</a></li>
+      </ul>
+    </li>
+    <li><a href="#tcp-server">TCP Server</a>
+      <ul>
+        <li><a href="#netfd">netFD</a></li>
+        <li><a href="#netlisten">net.Listen</a></li>
+        <li><a href="#listeneraccept">Listener.Accept</a></li>
+        <li><a href="#connreadconnwrite">Conn.Read/Conn.Write</a></li>
+        <li><a href="#总结">总结</a></li>
+      </ul>
+    </li>
+    <li><a href="#价值">价值</a></li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="导言">导言</h2>
 <p>Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的是同步的模式去编写异步的逻辑，极大地降低了开发者编写网络应用时的心智负担，且借助于 Go runtime scheduler 对 goroutines 的高效调度，这个原生网络模型不论从适用性还是性能上都足以满足绝大部分的应用场景。</p>
 <p>然而，在工程性上能做到如此高的普适性和兼容性，最终暴露给开发者提供接口/模式如此简洁，其底层必然是基于非常复杂的封装，做了很多取舍，也有可能放弃了一些追求极致性能的设计和理念。事实上 Go netpoller 底层就是基于 epoll/kqueue/iocp 这些 I/O 多路复用技术来做封装的，最终暴露出 goroutine-per-connection 这样的极简的开发模式给使用者。</p>
 <p>Go netpoller 在不同的操作系统，其底层使用的 I/O 多路复用技术也不一样，可以从 Go 源码目录结构和对应代码文件了解 Go 在不同平台下的网络 I/O 模式的实现。比如，在 Linux 系统下基于 epoll，freeBSD 系统下基于 kqueue，以及 Windows 系统下基于 iocp。</p>
 <p>本文将基于 Linux 平台来解析 Go netpoller 之 I/O 多路复用的底层是如何基于 epoll 封装实现的，从源码层层推进，全面而深度地解析 Go netpoller 的设计理念和实现原理，以及 Go 是如何利用 netpoller 来构建它的原生网络模型的。</p>
 <p>Go runtime已经实现了netpoller，这使得即便G发起网络I/O操作也不会导致M被阻塞（仅阻塞G），从而不会导致大量M被创建出来。但是对于regular file的I/O操作一旦阻塞，那么M将进入sleep状态，等待I/O返回后被唤醒；这种情况下P将与sleep的M分离，再选择一个idle的M。如果此时没有idle的M，则会新创建一个M，这就是为何大量I/O操作导致大量Thread被创建的原因。</p>
 <p>Ian Lance Taylor在Go 1.9 dev周期中增加了一个Poller for os package的功能，这个功能可以像netpoller那样，在G操作支持pollable的fd时，仅阻塞G，而不阻塞M。不过该功能依然不能对regular file有效，regular file不是pollable的。不过，对于scheduler而言，这也算是一个进步了。</p>
-<h2 id="基本原理">基本原理<a hidden class="anchor" aria-hidden="true" href="#基本原理">#</a></h2>
+<h2 id="基本原理">基本原理</h2>
 <p>Go netpoller 通过在底层对 epoll/kqueue/iocp 的封装，从而实现了使用同步编程模式达到异步执行的效果。总结来说，所有的网络操作都以网络描述符 netFD 为中心实现。netFD 与底层 PollDesc 结构绑定，当在一个 netFD 上读写遇到 EAGAIN 错误时，就将当前 goroutine 存储到这个 netFD 对应的 PollDesc 中，同时调用 gopark 把当前 goroutine 给 park 住，直到这个 netFD 上再次发生读写事件，才将此 goroutine 给 ready 激活重新运行。显然，在底层通知 goroutine 再次发生读写等事件的方式就是 epoll/kqueue/iocp 等事件驱动机制。</p>
 <p>总所周知，Go 是一门跨平台的编程语言，而不同平台针对特定的功能有不用的实现，这当然也包括了 I/O 多路复用技术，比如 Linux 里的 I/O 多路复用有 select、poll 和 epoll，而 freeBSD 或者 MacOS 里则是 kqueue，而 Windows 里则是基于异步 I/O 实现的 iocp，等等；因此，Go 为了实现底层 I/O 多路复用的跨平台，分别基于上述的这些不同平台的系统调用实现了多版本的 netpollers，具体的源码路径如下：</p>
 <div class="highlight"><div class="chroma">
@@ -256,7 +263,7 @@
 <li>runtime.netpollIsPollDescriptor — 判断文件描述符是否被轮询器使用；</li>
 </ul>
 <p>接下来让我们全面剖析一下整个 Go netpoller 的运行机制和流程。</p>
-<h2 id="polldesc">pollDesc<a hidden class="anchor" aria-hidden="true" href="#polldesc">#</a></h2>
+<h2 id="polldesc">pollDesc</h2>
 <p>操作系统中 I/O 多路复用函数会监控文件描述符的可读或者可写，而 Go 语言网络轮询器会监听 runtime.pollDesc 结构体的状态，该结构会封装操作系统的文件描述符：</p>
 <p>前面提到了 pollDesc 是底层事件驱动的封装，netFD 通过它来完成各种 I/O 相关的操作，它的定义如下：</p>
 <div class="highlight"><div class="chroma">
@@ -343,7 +350,7 @@
 <li>rd 和 wd — 等待文件描述符可读或者可写的截止日期；</li>
 <li>rt 和 wt — 用于等待文件描述符的计时器；</li>
 </ul>
-<h2 id="pollcache">pollCache<a hidden class="anchor" aria-hidden="true" href="#pollcache">#</a></h2>
+<h2 id="pollcache">pollCache</h2>
 <p>runtime.pollDesc 包含自身类型的一个指针，用来保存下一个 runtime.pollDesc 的地址，以此来实现链表，可以减少数据结构的大小，所有的 runtime.pollDesc 保存在 runtime.pollCache 结构中，定义如下：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -448,7 +455,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>上述方法没有重置 runtime.pollDesc 结构体中的字段，该结构体被重复利用时才会由 runtime.poll_runtime_pollOpen 函数重置。</p>
-<h2 id="运行机制">运行机制<a hidden class="anchor" aria-hidden="true" href="#运行机制">#</a></h2>
+<h2 id="运行机制">运行机制</h2>
 <p>网络轮询器实际上就是对 I/O 多路复用技术的封装，本节将通过以下的三个过程分析网络轮询器的实现原理：</p>
 <ol>
 <li>网络轮询器的初始化；</li>
@@ -460,7 +467,7 @@
 <li>因为不同 I/O 多路复用模块的实现大同小异，本节会使用 Linux 操作系统上的 epoll 实现；</li>
 <li>因为处理读事件和写事件的逻辑类似，本节会省略写事件相关的代码；</li>
 </ol>
-<h3 id="初始化">初始化<a hidden class="anchor" aria-hidden="true" href="#初始化">#</a></h3>
+<h3 id="初始化">初始化</h3>
 <p>因为文件 I/O、网络 I/O 以及计时器都依赖网络轮询器，所以 Go 语言会通过以下两条不同路径初始化网络轮询器：</p>
 <ol>
 <li>internal/poll.pollDesc.init — 通过 net.netFD.init 和 os.newFile 初始化网络 I/O 和文件 I/O 的轮询信息时；</li>
@@ -683,7 +690,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>因为目前的计时器由网络轮询器管理和触发，它能够让网络轮询器立刻返回并让运行时检查是否有需要触发的计时器。</p>
-<h3 id="轮询事件">轮询事件<a hidden class="anchor" aria-hidden="true" href="#轮询事件">#</a></h3>
+<h3 id="轮询事件">轮询事件</h3>
 <p>调用 internal/poll.pollDesc.init 初始化文件描述符时不只会初始化网络轮询器，还会通过 runtime.poll_runtime_pollOpen 函数重置轮询信息 runtime.pollDesc 并调用 runtime.netpollopen 初始化轮询事件：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -807,14 +814,14 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="事件循环">事件循环<a hidden class="anchor" aria-hidden="true" href="#事件循环">#</a></h3>
+</div><h3 id="事件循环">事件循环</h3>
 <p>本节将继续介绍网络轮询器的核心逻辑，也就是事件循环。我们将从以下的两个部分介绍事件循环的实现原理：</p>
 <ul>
 <li>Goroutine 让出线程并等待读写事件；</li>
 <li>多路复用等待读写事件的发生并返回；</li>
 </ul>
 <p>上述过程连接了操作系统中的 I/O 多路复用机制和 Go 语言的运行时，在两个不同体系之间构建了桥梁，我们将分别介绍上述的两个过程。</p>
-<h4 id="等待事件">等待事件<a hidden class="anchor" aria-hidden="true" href="#等待事件">#</a></h4>
+<h4 id="等待事件">等待事件</h4>
 <p>当我们在文件描述符上执行读写操作时，如果文件描述符不可读或者不可写，当前 Goroutine 就会执行 runtime.poll_runtime_pollWait 检查 runtime.pollDesc 的状态并调用 runtime.netpollblock 等待文件描述符的可读或者可写：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1007,7 +1014,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>runtime.netpollblock 是 Goroutine 等待 I/O 事件的关键函数，它会使用运行时提供的 runtime.gopark 让出当前线程，将 Goroutine 转换到休眠状态并等待运行时的唤醒。</p>
-<h4 id="轮询等待">轮询等待<a hidden class="anchor" aria-hidden="true" href="#轮询等待">#</a></h4>
+<h4 id="轮询等待">轮询等待</h4>
 <p>Go 语言的运行时会在调度或者系统监控中调用 runtime.netpoll 轮询网络，该函数的执行过程可以分成以下几个部分：</p>
 <ol>
 <li>根据调用方的入参 delay，设置对应的调用 epollwait 的 timeout 值；</li>
@@ -1378,7 +1385,7 @@
 <li>在 Go runtime scheduler 的核心方法 runtime.schedule() 里会调用一个叫 runtime.findrunable() 的方法获取可运行的 goroutine 来执行，而在 runtime.findrunable() 方法里就调用了 runtime.netpoll 获取已就绪的 fd 列表对应的 goroutine 列表</li>
 <li>sysmon 监控线程会在循环过程中检查距离上一次 runtime.netpoll 被调用是否超过了 10ms，若是则会去调用它拿到可运行的 goroutine 列表并通过调用 injectglist 把 g 列表放入全局调度队列或者当前 P 本地调度队列等待被执行.</li>
 </ol>
-<h4 id="截止日期">截止日期<a hidden class="anchor" aria-hidden="true" href="#截止日期">#</a></h4>
+<h4 id="截止日期">截止日期</h4>
 <p>网络轮询器和计时器的关系非常紧密，这不仅仅是因为网络轮询器负责计时器的唤醒，还因为文件和网络 I/O 的截止日期也由网络轮询器负责处理。截止日期在 I/O 操作中，尤其是网络调用中很关键，网络请求存在很高的不确定因素，我们需要设置一个截止日期保证程序的正常运行，这时就需要用到网络轮询器中的 runtime.poll_runtime_pollSetDeadline 函数：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1475,8 +1482,7 @@
 </div>
 </div><p>如果截止日期小于 0，上述代码会调用 runtime.netpollgoready 直接唤醒对应的 Goroutine。</p>
 <p>在 runtime.poll_runtime_pollSetDeadline 函数中直接调用 runtime.netpollgoready 是相对比较特殊的情况。在正常情况下，运行时都会在计时器到期时调用 runtime.netpollDeadline、runtime.netpollReadDeadline 和 runtime.netpollWriteDeadline 三个函数：</p>
-<p><img loading="lazy" src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201119224335.png" alt=""  />
-</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201119224335.png" alt=""></p>
 <p>上述三个函数都会通过 runtime.netpolldeadlineimpl 调用 runtime.netpollgoready 直接唤醒相应的 Goroutine:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1525,7 +1531,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>Goroutine 在被唤醒之后就会意识到当前的 I/O 操作已经超时，可以根据需要选择重试请求或者中止调用。</p>
-<h2 id="tcp-server">TCP Server<a hidden class="anchor" aria-hidden="true" href="#tcp-server">#</a></h2>
+<h2 id="tcp-server">TCP Server</h2>
 <p>使用 Go 编写一个典型的 TCP echo server:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1617,8 +1623,7 @@
 </div>
 </div><p>上面是一个基于 Go 原生网络模型（基于 netpoller）编写的一个 TCP server，模式是 goroutine-per-connection ，在这种模式下，开发者使用的是同步的模式去编写异步的逻辑而且对于开发者来说 I/O 是否阻塞是无感知的，也就是说开发者无需考虑 goroutines 甚至更底层的线程、进程的调度和上下文切换。而 Go netpoller 最底层的事件驱动技术肯定是基于 epoll/kqueue/iocp 这一类的 I/O 事件驱动技术，只不过是把这些调度和上下文切换的工作转移到了 runtime 的 Go scheduler，让它来负责调度 goroutines，从而极大地降低了程序员的心智负担！</p>
 <p>Go 的这种同步模式的网络服务器的基本架构通常如下：</p>
-<p><img loading="lazy" src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201119150735.png" alt=""  />
-</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201119150735.png" alt=""></p>
 <p>上面的示例代码中相关的在源码里的几个数据结构和方法：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1784,7 +1789,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="netfd">netFD<a hidden class="anchor" aria-hidden="true" href="#netfd">#</a></h3>
+</div><h3 id="netfd">netFD</h3>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt">1
@@ -1896,7 +1901,7 @@
 
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="netlisten">net.Listen<a hidden class="anchor" aria-hidden="true" href="#netlisten">#</a></h3>
+</div><h3 id="netlisten">net.Listen</h3>
 <p>调用 net.Listen 之后，底层调用 Linux 的系统调用 socket.</p>
 <p>socket方法创建一个 fd 分配给 listener，并用以来初始化 listener 的 netFD ，接着调用 netFD 的 listenStream 方法完成对 socket 的 bind&amp;listen 操作以及对 netFD 的初始化（主要是对 netFD 里的 pollDesc 的初始化），调用链是 <code>runtime.runtime_pollServerInit --&gt; runtime.poll_runtime_pollServerInit --&gt; runtime.netpollGenericInit</code>.</p>
 <p>runtime.netpollGenericInit 会调用平台上特定实现的 runtime.netpollinit 函数，即 Linux 上的 epoll，</p>
@@ -2300,7 +2305,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="listeneraccept">Listener.Accept<a hidden class="anchor" aria-hidden="true" href="#listeneraccept">#</a></h3>
+</div><h3 id="listeneraccept">Listener.Accept</h3>
 <p>netpoll accept socket 的工作流程如下：</p>
 <ol>
 <li>服务端的 netFD 在 listen 时会创建 epoll 的实例，并将 listenerFD 加入 epoll 的事件队列</li>
@@ -2578,7 +2583,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>然后把这个 socket fd 注册到 listener 的 epoll 实例的事件队列中去，等待 I/O 事件。</p>
-<h3 id="connreadconnwrite">Conn.Read/Conn.Write<a hidden class="anchor" aria-hidden="true" href="#connreadconnwrite">#</a></h3>
+<h3 id="connreadconnwrite">Conn.Read/Conn.Write</h3>
 <p>我们先来看看 Conn.Read 方法是如何实现的，原理其实和 Listener.Accept 是一样的，具体调用链还是首先调用 conn 的 netFD.Read ，然后内部再调用 poll.FD.Read ，最后使用 Linux 的系统调用 read: syscall.Read 完成数据读取：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2719,13 +2724,12 @@
 </div><p>conn.Write 和 conn.Read 的原理是一致的，它也是通过类似 pollDesc.waitRead 的 pollDesc.waitWrite 来 park 住 goroutine 直至期待的 I/O 事件发生才返回恢复执行。</p>
 <p>pollDesc.waitRead 内部调用了 poll.runtime_pollWait &ndash;&gt; runtime.poll_runtime_pollWait 来达成无 I/O 事件时 park 住 goroutine 的目的</p>
 <p>pollDesc.waitWrite 的内部实现原理和 pollDesc.waitRead 是一样的，都是基于 poll.runtime_pollWait &ndash;&gt; runtime.poll_runtime_pollWait，这里就不再赘述。</p>
-<h3 id="总结">总结<a hidden class="anchor" aria-hidden="true" href="#总结">#</a></h3>
+<h3 id="总结">总结</h3>
 <p>所以我们现在可以来从整体的层面来概括 Go 的网络业务 goroutine 是如何被规划调度的了：</p>
-<p><img loading="lazy" src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201119153905.png" alt=""  />
-</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201119153905.png" alt=""></p>
 <p>首先，client 连接 server 的时候，listener 通过 accept 调用接收新 connection，每一个新 connection 都启动一个 goroutine 处理，accept 调用会把该 connection 的 fd 连带所在的 goroutine 上下文信息封装注册到 epoll 的监听列表里去，当 goroutine 调用 conn.Read 或者 conn.Write 等需要阻塞等待的函数时，会被 gopark 给封存起来并使之休眠，让 P 去执行本地调度队列里的下一个可执行的 goroutine，往后 Go scheduler 会在循环调度的 runtime.schedule() 函数以及 sysmon 监控线程中调用 runtime.nepoll 以获取可运行的 goroutine 列表并通过调用 injectglist 把剩下的 g 放入全局调度队列或者当前 P 本地调度队列去重新执行。</p>
 <p>综上，Go 借助于 epoll/kqueue/iocp 和 runtime scheduler 等的帮助，设计出了自己的 I/O 多路复用 netpoller，成功地让 Listener.Accept / conn.Read / conn.Write 等方法从开发者的角度看来是同步模式。</p>
-<h2 id="价值">价值<a hidden class="anchor" aria-hidden="true" href="#价值">#</a></h2>
+<h2 id="价值">价值</h2>
 <p>通过前面对源码的分析，我们现在知道 Go netpoller 依托于 runtime scheduler，为开发者提供了一种强大的同步网络编程模式；然而，Go netpoller 存在的意义却远不止于此，Go netpoller I/O 多路复用搭配 Non-blocking I/O 而打造出来的这个原生网络模型，它最大的价值是把网络 I/O 的控制权牢牢掌握在 Go 自己的 runtime 里.</p>
 <p>G 在运行过程中如果被阻塞在某个 system call 操作上，那么不光 G 会阻塞，执行该 G 的 M 也会解绑 P，与 G 一起进入 sleep 状态。</p>
 <p>如果此时有 idle 的 M，则 P 与其绑定继续执行其他 G；如果没有 idle M，但仍然有其他 G 要去执行，那么就会创建一个新的 M。当阻塞在 system call 上的 G 完成 syscall 调用后，G 会去尝试获取一个可用的 P，如果没有可用的 P，那么 G 会被标记为 _Grunnable 并把它放入全局的 runqueue 中等待调度，之前的那个 sleep 的 M 将再次进入 sleep。</p>
@@ -2733,89 +2737,116 @@
 <p>就是为了避免让操作网络 I/O 的 goroutine 陷入到系统调用从而进入内核态，因为一旦进入内核态，整个程序的控制权就会发生转移(到内核)，不再属于用户进程了，那么也就无法借助于 Go 强大的 runtime scheduler 来调度业务程序的并发了.</p>
 <p>而有了 netpoll 之后，借助于非阻塞 I/O ，G 就再也不会因为系统调用的读写而 (长时间) 陷入内核态，当 G 被阻塞在某个 network I/O 操作上时，实际上它不是因为陷入内核态被阻塞住了，而是被 Go runtime 调用 gopark 给 park 住了，此时 G 会被放置到某个 wait queue 中，而 M 会尝试运行下一个 _Grunnable 的 G，如果此时没有_Grunnable 的 G 供 M 运行，那么 M 将解绑 P，并进入 sleep 状态。</p>
 <p>当 I/O available，在 epoll 的 eventpoll.rdr 中等待的 G 会被放到 eventpoll.rdllist 链表里并通过 netpoll 中的 epoll_wait 系统调用返回放置到全局调度队列或者 P 的本地调度队列，标记为_Grunnable ，等待 P 绑定 M 恢复执行。</p>
-<h2 id="参考">参考<a hidden class="anchor" aria-hidden="true" href="#参考">#</a></h2>
+<h2 id="参考">参考</h2>
 <p><a href="https://draveness.me/golang/docs/part3-runtime/ch06-concurrency/golang-netpoller/">6.6 网络轮询器</a>
 <a href="https://strikefreedom.top/go-netpoll-io-multiplexing-reactor#b3_solo_h2_16%EF%BC%8C%E4%BB%8E%E5%85%A8%E9%9D%A2%E6%80%A7%E5%92%8C%E5%8F%AF%E9%9D%A0%E6%80%A7%E6%9D%A5%E8%AF%B4%E6%88%91%E8%BF%98%E6%98%AF%E5%BB%BA%E8%AE%AE%E4%BD%BF%E7%94%A8">go netpoller 原生网络模型之源码全面解析</a></p>
 
+    </div>
 
-  </div>
-
-  <footer class="post-footer">
-    <ul class="post-tags">
-      <li><a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a></li>
-    </ul>
-  </footer>
-</article>
-    </main>
-    
-<footer class="footer">
-    <span>&copy; 2021 <a href="/">Forz Blog</a></span>
-    <span>
-        Powered by
-        <a href="https://gohugo.io/" rel="noopener noreferrer" target="_blank">Hugo</a> &
-        <a href="https://git.io/hugopapermod" rel="noopener" target="_blank">PaperMod</a>
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2020-11-14
+        
     </span>
-</footer>
-<a href="#top" aria-label="go to top" title="Go to Top (Alt + G)">
-    <button class="top-link" id="top-link" type="button" accesskey="g">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 6" fill="currentColor">
-            <path d="M12 6H0l6-6z" />
-        </svg>
-    </button>
-</a>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go%E6%BA%90%E7%A0%81/">Go源码</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/go%E8%BF%9B%E7%A8%8B%E7%9A%84%E7%94%9F%E5%91%BD%E5%91%A8%E6%9C%9F%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Go进程的生命周期源码剖析</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/go%E7%9A%84sysmon%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <span class="next-text nav-default">Go的sysmon源码剖析</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
 
-<script>
-    let menu = document.getElementById('menu')
-    menu.scrollLeft = localStorage.getItem("menu-scroll-position");
-    menu.onscroll = function () {
-        localStorage.setItem("menu-scroll-position", menu.scrollLeft);
-    }
+  
 
-    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-        anchor.addEventListener("click", function (e) {
-            e.preventDefault();
-            var id = this.getAttribute("href").substr(1);
-            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView({
-                    behavior: "smooth"
-                });
-            } else {
-                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView();
-            }
-            if (id === "top") {
-                history.replaceState(null, null, " ");
-            } else {
-                history.pushState(null, null, `#${id}`);
-            }
-        });
-    });
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
 
-</script>
-<script>
-    var mybutton = document.getElementById("top-link");
-    window.onscroll = function () {
-        if (document.body.scrollTop > 800 || document.documentElement.scrollTop > 800) {
-            mybutton.style.visibility = "visible";
-            mybutton.style.opacity = "1";
-        } else {
-            mybutton.style.visibility = "hidden";
-            mybutton.style.opacity = "0";
-        }
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
     };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
 
-</script>
-<script>
-    document.getElementById("theme-toggle").addEventListener("click", () => {
-        if (document.body.className.includes("dark")) {
-            document.body.classList.remove('dark');
-            localStorage.setItem("pref-theme", 'light');
-        } else {
-            document.body.classList.add('dark');
-            localStorage.setItem("pref-theme", 'dark');
-        }
-    })
 
-</script>
+
+
+
+
+
+
 </body>
-
 </html>

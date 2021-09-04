@@ -1,203 +1,231 @@
 <!DOCTYPE html>
-<html lang="zh-cn" dir="auto">
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Go的timer源码剖析 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 
-<head><meta charset="utf-8">
-<meta http-equiv="X-UA-Compatible" content="IE=edge">
-<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<meta name="robots" content="index, follow">
-<title>Go的timer源码剖析 | Forz Blog</title>
-<meta name="keywords" content="Go, 计时器" />
-<meta name="description" content="前言 准确的时间对于任何一个正在运行的应用非常重要，但是在分布式系统中我们很难保证各个节点的绝对时间一致，哪怕通过 NTP 这种标准的对时协议也只能把">
-<meta name="author" content="">
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author"
+  content="Forz" /><meta name="description" content="前言 准确的时间对于任何一个正在运行的应用非常重要，但是在分布式系统中我们很难保证各个节点的绝对时间一致，哪怕通过 NTP 这种标准的对时协议也只能把" /><meta name="keywords"
+  content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.87.0 with theme even" />
+
+
 <link rel="canonical" href="/post/go%E7%9A%84timer%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
-<link crossorigin="anonymous" href="/assets/css/stylesheet.min.00d5d4fc479b1575183ee8d86b4fb372ba9d9b1904e96fa8e4c40ff7debe2b94.css" integrity="sha256-ANXU/EebFXUYPujYa0&#43;zcrqdmxkE6W&#43;o5MQP996&#43;K5Q=" rel="preload stylesheet" as="style">
-<script defer crossorigin="anonymous" src="/assets/js/highlight.min.7680afc38aa6b15ddf158a4f3780b7b1f7dde7e91d26f073e6229bb7a0793c92.js" integrity="sha256-doCvw4qmsV3fFYpPN4C3sffd5&#43;kdJvBz5iKbt6B5PJI="
-    onload="hljs.initHighlightingOnLoad();"></script>
-<link rel="icon" href="/favicon.ico">
-<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="mask-icon" href="/safari-pinned-tab.svg">
-<meta name="theme-color" content="#2e2e33">
-<meta name="msapplication-TileColor" content="#2e2e33">
-<meta name="generator" content="Hugo 0.87.0" />
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+<link rel="stylesheet" href="/css/search.css" />
+
+
+<link href="/dist/even.c2a46f00.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
 <meta property="og:title" content="Go的timer源码剖析" />
 <meta property="og:description" content="前言 准确的时间对于任何一个正在运行的应用非常重要，但是在分布式系统中我们很难保证各个节点的绝对时间一致，哪怕通过 NTP 这种标准的对时协议也只能把" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/go%E7%9A%84timer%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
-<meta property="article:published_time" content="2019-10-21T15:23:59&#43;00:00" />
-<meta property="article:modified_time" content="2019-10-21T15:23:59&#43;00:00" />
+<meta property="article:published_time" content="2019-10-21T15:23:59+00:00" />
+<meta property="article:modified_time" content="2019-10-21T15:23:59+00:00" />
 
-<meta name="twitter:card" content="summary"/>
+<meta itemprop="name" content="Go的timer源码剖析">
+<meta itemprop="description" content="前言 准确的时间对于任何一个正在运行的应用非常重要，但是在分布式系统中我们很难保证各个节点的绝对时间一致，哪怕通过 NTP 这种标准的对时协议也只能把"><meta itemprop="datePublished" content="2019-10-21T15:23:59+00:00" />
+<meta itemprop="dateModified" content="2019-10-21T15:23:59+00:00" />
+<meta itemprop="wordCount" content="16548">
+<meta itemprop="keywords" content="Go,计时器," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的timer源码剖析"/>
 <meta name="twitter:description" content="前言 准确的时间对于任何一个正在运行的应用非常重要，但是在分布式系统中我们很难保证各个节点的绝对时间一致，哪怕通过 NTP 这种标准的对时协议也只能把"/>
 
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
 
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "BreadcrumbList",
-  "itemListElement": [
-    {
-      "@type": "ListItem",
-      "position":  1 ,
-      "name": "Posts",
-      "item": "/post/"
-    }
-    {
-      "@type": "ListItem",
-      "position":  1 ,
-      "name": "Go的timer源码剖析",
-      "item": "/post/go%E7%9A%84timer%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/"
-    }
-  ]
-}
-</script>
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "BlogPosting",
-  "headline": "Go的timer源码剖析",
-  "name": "Go的timer源码剖析",
-  "description": "前言 准确的时间对于任何一个正在运行的应用非常重要，但是在分布式系统中我们很难保证各个节点的绝对时间一致，哪怕通过 NTP 这种标准的对时协议也只能把",
-  "keywords": [
-    "Go", "计时器"
-  ],
-  "articleBody": "前言 准确的时间对于任何一个正在运行的应用非常重要，但是在分布式系统中我们很难保证各个节点的绝对时间一致，哪怕通过 NTP 这种标准的对时协议也只能把各个节点上时间的误差控制在毫秒级，所以准确的相对时间在分布式系统中显得更为重要，本节会分析用于获取相对时间的计时器的设计与实现原理。\n设计原理 Go 语言从实现计时器到现在经历过很多个版本的迭代，到最新的版本为止，计时器的实现分别经历了以下几个过程：\n Go 1.9 版本之前，所有的计时器由全局唯一的四叉堆维护； Go 1.10 ~ 1.13，全局使用 64 个四叉堆维护全部的计时器，每个处理器（P）创建的计时器会由对应的四叉堆维护； Go 1.14 版本之后，每个处理器单独管理计时器并通过网络轮询器触发；  我们在这一节会分别介绍计时器在不同版本的不同设计，梳理计时器实现的演进过程。\n全局四叉堆 Go 1.10 之前的计时器都使用最小四叉堆实现，所有的计时器都会存储在如下所示的结构体 runtime.timers:093adee 中：\n1 2 3 4 5 6 7 8 9 10  var timers struct { lock mutex gp *g created bool sleeping bool rescheduling bool sleepUntil int64 waitnote note t []*timer }   这个结构体中的字段 t 就是最小四叉堆，运行时创建的所有计时器都会加入到四叉堆中。runtime.timerproc:093adee Goroutine 会运行时间驱动的事件，运行时会在发生以下事件时唤醒计时器：\n 四叉堆中的计时器到期； 四叉堆中加入了触发时间更早的新计时器；  然而全局四叉堆共用的互斥锁对计时器的影响非常大，计时器的各种操作都需要获取全局唯一的互斥锁，这会严重影响计时器的性能.\n分片四叉堆 Go 1.10 将全局的四叉堆分割成了 64 个更小的四叉堆。在理想情况下，四叉堆的数量应该等于处理器的数量，但是这需要实现动态的分配过程，所以经过权衡最终选择初始化 64 个四叉堆，以牺牲内存占用的代价换取性能的提升。\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16  const timersLen = 64 var timers [timersLen]struct { timersBucket } type timersBucket struct { lock mutex gp *g created bool sleeping bool rescheduling bool sleepUntil int64 waitnote note t []*timer }   如果当前机器上的处理器 P 的个数超过了 64，多个处理器上的计时器就可能存储在同一个桶中。每一个计时器桶都由一个运行 runtime.timerproc:76f4fd8 函数的 Goroutine 处理。\n将全局计时器分片的方式，虽然能够降低锁的粒度，提高计时器的性能，但是 runtime.timerproc:76f4fd8 造成的处理器和线程之间频繁的上下文切换却成为了影响计时器性能的首要因素\ntimer 1.14  调整:  Timerheap和GMP中的P绑定 去除唤醒 goroutine: timerproc   检查:  检查 timer 到期在特殊函数 checkTimers 中进行 检查 timer 操作移至调度循环中进行   工作窃取:  在 work-stealing 中，会从其它 P 那里偷 timer   兜底:  runtime.sysmon 中会为 timer 未被触发(timeSleepUntil)兜底，启动新线程    在最新版本的实现中，计时器桶已经被移除，所有的计时器都以最小四叉堆的形式存储在处理器 runtime.p 中。\n处理器 runtime.p 中与计时器相关的有以下字段：\n timersLock — 用于保护计时器的互斥锁； timers — 存储计时器的最小四叉堆； numTimers — 处理器中的计时器数量； adjustTimers — 处理器中处于 timerModifiedEarlier 状态的计时器数量； deletedTimers — 处理器中处于 timerDeleted 状态的计时器数量；  1 2 3 4 5 6 7 8 9 10 11 12 13 14  type p struct { ... // 互斥锁  timersLock mutex // 存储计时器的最小四叉堆  timers []*timer // 计时器数量  numTimers uint32 // 处于 timerModifiedEarlier 状态的计时器数量  adjustTimers uint32 // 处于 timerDeleted 状态的计时器数量  deletedTimers uint32 ... }   原本用于管理计时器的 runtime.timerproc:76f4fd8 也已经被移除，目前计时器都交由处理器的网络轮询器和调度器触发，这种方式能够充分利用本地性、减少上下文的切换开销，也是目前性能最好的实现方式。\n数据结构 timer runtime.timer 是 Go 语言计时器的内部表示，每一个计时器都存储在对应处理器的最小四叉堆中，下面是运行时计时器对应的结构体：\n1 2 3 4 5 6 7 8 9 10 11  type timer struct { pp puintptr when int64 period int64 f func(interface{}, uintptr) arg interface{} seq uintptr nextwhen int64 status uint32 }    when — 当前计时器被唤醒的时间； period — 唤醒间隔时间，定时器为Timer数据类型时，此字段值为 0 时，否则为 Ticker 数据类型. f — 唤醒后执行的函数，不能为 闭包匿名函数 arg — 计时器被唤醒时调用 f 传入的参数； nextWhen — 当定时器状态为 timerModifiedEarlier 或 timerModifiedLater 时，需要使用此字段值刷新为 when 字段 status — 计时器的状态； pp - 当前对应的处理器P的指针  Timer Timer 类型代表单次时间事件。当 Timer 到期时，当时的时间会被发送给 C (channel)，除非 Timer 是被 AfterFunc 函数创建的。\n注意：Timer 的实例必须通过 NewTimer 或 AfterFunc 获得。\n然而这里的 runtime.timer 只是计时器运行时的私有结构体，对外暴露的计时器使用 time.Timer 结构体：\n1 2 3 4 5 6 7 8 9  // src/runtime/sleep.go // The Timer type represents a single event. // When the Timer expires, the current time will be sent on C, // unless the Timer was created by AfterFunc. // A Timer must be created with NewTimer or AfterFunc. type Timer struct { C chan Time r runtimeTimer }   time.Timer 计时器必须通过 time.NewTimer、time.AfterFunc 或者 time.After 函数创建。 当计时器失效时，订阅计时器 Channel 的 Goroutine 会收到计时器失效的时间。\nC 已经解释了，我们看看 runtimeTimer。它定义在 sleep.go 文件中，必须和 runtime 包中 time.go 文件中的 timer 必须保持一致：\n1 2 3 4 5 6 7 8 9 10 11 12  // Interface to timers implemented in package runtime. // Must be in sync with ../runtime/time.go:/^type timer type runtimeTimer struct { tb uintptr i int when int64 period int64 f func(interface{}, uintptr) // NOTE: must not be closure \targ interface{} seq uintptr }   四叉小顶堆 四叉堆高度上比二叉堆要矮一些。一个节点的所有(最多有4个)孩子节点都比这个节点要大。一个节点的(只有一个)父节点一定比当前节点小。下面是填好值之后的一个典型的四叉堆:\n和二叉堆一样，对于一个节点的要求只有和其父节点以及子节点之间的大小关系。相邻节点之间没有任何关系。\n向上调整 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35  // Heap maintenance algorithms. // These algorithms check for slice index errors manually. // Slice index error can happen if the program is using racy // access to timers. We don't want to panic here, because // it will cause the program to crash with a mysterious // \"panic holding locks\" message. Instead, we panic while not // holding a lock.  func siftupTimer(t []*timer, i int) { if i = len(t) { badTimer() } // 先暂存当前刚插入到数组尾部的节点 \twhen := t[i].when if when  0 { badTimer() } tmp := t[i] // 从当前插入节点的父节点开始  // 如果最新插入的那个节点的触发时间要比父节点的触发时间更早  // 那么就把这个父节点下移 \tfor i  0 { p := (i - 1) / 4 // parent \tif when = t[p].when { break } t[i] = t[p] i = p } // 如果发生过移动，用最新插入的节点  // 覆盖掉最后一个下移的父节点 \tif tmp != t[i] { t[i] = tmp } }   向下调整 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43  // 在所有孩子节点中先找出最小的那一个，如果最小的比当前要下移的节点还要大，那么就 break。反之，则将最小的节点上移，然后再判断这个最小节点的 4 个子节点是否都比要下移的节点大。 func siftdownTimer(t []*timer, i int) { n := len(t) if i = n { badTimer() } when := t[i].when if when  0 { badTimer() } tmp := t[i] for { c := i*4 + 1 // left child \tc3 := c + 2 // mid child \tif c = n { break } w := t[c].when if c+1  n \u0026\u0026 t[c+1].when  w { w = t[c+1].when c++ } if c3  n { w3 := t[c3].when if c3+1  n \u0026\u0026 t[c3+1].when  w3 { w3 = t[c3+1].when c3++ } if w3  w { w = w3 c = c3 } } if w = when { break } t[i] = t[c] i = c } if tmp != t[i] { t[i] = tmp } }   状态机 运行时使用状态机的方式处理全部的计时器，其中包括 10 种状态和几种操作。由于 Go 语言的计时器需要同时支持增加、删除、修改和重置等操作，所以它的状态非常复杂，目前会包含以下 10 种可能：\n   状态 解释     timerNoStatus 还没有设置状态   timerWaiting 等待计时器启动,定时器在P堆中   timerRunning 定时器运行中，只很短暂的时间持有此状态   timerDeleted 定时器删除状态，后期不会运行，但仍会存在于P堆中   timerRemoving 正在移除，只有很短暂的时间持有此状态   timerRemoved 已移除，不在P堆中   timerModifying 正在修改中，只有很短暂的时间持有此状态   timerModifiedEarlier 定时器已修改为较早的时间，此时新的when值存储于 nextwhen 字段中。在P堆中，但有可以存储在错误的地方   timerModifiedLater 定时器修改为相同或较晚的状态，此时新的when值存储于 nextwhen 字段中。在P堆中，但有可以存储在错误的地方   timerMoving 定时器已修改并正在动    上述表格已经展示了不同状态的含义，但是我们还需要展示一些重要的信息，例如状态的存在时间、计时器是否在堆上等：\n timerRunning、timerRemoving、timerModifying 和 timerMoving — 停留的时间都比较短； timerWaiting、timerRunning、timerDeleted、timerRemoving、timerModifying、timerModifiedEarlier、timerModifiedLater 和 timerMoving — 计时器在处理器的堆上； timerNoStatus 和 timerRemoved — 计时器不在堆上； timerModifiedEarlier 和 timerModifiedLater — 计时器虽然在堆上，但是可能位于错误的位置上，需要重新排序；  当我们操作计时器时，运行时会根据状态的不同而做出反应，所以在分析计时器时会将状态作为切入点分析其实现原理。计时器的状态机中包含如下所示的 7 种不同操作，它们分别承担了不同的职责：\n runtime.addtimer — 向当前处理器增加新的计时器； runtime.deltimer — 将计时器标记成 timerDeleted 删除处理器中的计时器； runtime.modtimer — 网络轮询器会调用该函数修改计时器10； runtime.cleantimers — 清除队列头中的计时器，能够提升程序创建和删除计时器的性能； runtime.adjusttimers — 调整处理器持有的计时器堆，包括移动会稍后触发的计时器、删除标记为 timerDeleted 的计时器； runtime.runtimer — 检查队列头中的计时器，在其准备就绪时运行该计时器；  我们在这里会依次分析计时器的上述 7 个不同操作。\naddtimer 当我们调用 time.NewTimer 增加新的计时器时，会执行程序中的 runtime.addtimer 函数根据以下的规则处理计时器：\n timerNoStatus - timerWaiting 其他状态 - 崩溃：不合法的状态  1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42  // addtimer adds a timer to the current P. // This should only be called with a newly created timer. // That avoids the risk of changing the when field of a timer in some P's heap, // which could cause the heap to become unsorted. func addtimer(t *timer) { // addtimer 会对 timer 被唤醒的时间 when 进行校验，以及校验 status 必须是新出初始化的 timer；  // 定时器被唤醒的时间的时间不能为负数 \t// when must be positive. A negative value will cause runtimer to \t// overflow during its delta calculation and never expire other runtime \t// timers. Zero will cause checkTimers to fail to notice the timer. \tif t.when  0 { throw(\"timer when must be positive\") } if t.period  0 { throw(\"timer period must be non-negative\") } // 状态必须为初始化 \tif t.status != timerNoStatus { throw(\"addtimer called with initialized timer\") } // 设置为等待调度 \tt.status = timerWaiting when := t.when // Disable preemption while using pp to avoid changing another P's heap. \tmp := acquirem() // 获取当前 P \tpp := getg().m.p.ptr() // 接着会在加锁后调用 cleantimers 对 P 中对应的 timer 列表的头节点进行清理工作，清理完后调用 doaddtimer 将 timer 加入到 P 的最小堆中，并释放锁； \tlock(\u0026pp.timersLock) // 清理 P 的 timer 列表头中的 timer \tcleantimers(pp) // 将 timer 加入到 P 的最小堆中 \tdoaddtimer(pp, t) unlock(\u0026pp.timersLock) // 唤醒 netpoller 中休眠的线程  // 调用 wakeNetPoller 唤醒 netpoller 中休眠的线程。 \twakeNetPoller(when) releasem(mp) }   操作顺序为\n 检查定时器状态和当前P的状态(初始化状态)是否满足条件 获取当前G所在的P 加P加 timerLock 锁 调用 cleantimers() 函数清除P队列头中的 timers，并将 timer 添加的P的最小堆中 解 timerLock 锁 调用 wakeNetPoller 函数，唤醒网络轮询器中休眠的线程,检查计时器被唤醒的时间（when）是否在当前轮询预期运行的时间（pollerPollUntil）内，若是则唤醒。  每次增加新的计时器都会中断正在阻塞的轮询，触发调度器检查是否有计时器到期，我们会在后面详细介绍计时器的触发过程。\ndoaddtimer doaddtimer 函数实际上很简单，主要是将 timer 与 P 设置关联关系，并将 timer 加入到 P 的 timer 列表中，并维护 timer 列表最小堆的顺序。\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27  // doaddtimer adds t to the current P's heap. // The caller must have locked the timers for pp. func doaddtimer(pp *p, t *timer) { // Timers rely on the network poller, so make sure the poller \t// has started.  // Timers 依赖于 netpoller  // 所以如果 netpoller 没有启动，需要启动一下 \tif netpollInited == 0 { netpollGenericInit() } // 校验是否早已在 timer 列表中 \tif t.pp != 0 { throw(\"doaddtimer: P already set in timer\") } // 设置 timer 与 P 的关联 \tt.pp.set(pp) i := len(pp.timers) // 将 timer 加入到 P 的 timer 列表中 \tpp.timers = append(pp.timers, t) // 维护 timer 在 最小堆中的位置 \tsiftupTimer(pp.timers, i) // 如果 timer 是列表中头节点，需要设置一下 timer0When \tif t == pp.timers[0] { atomic.Store64(\u0026pp.timer0When, uint64(t.when)) } atomic.Xadd(\u0026pp.numTimers, 1) }   wakeNetPoller wakeNetPoller 主要是将 timer 下次调度的时间和 netpoller 的下一次轮询时间相比，如果小于的话，调用 netpollBreak 向 netpollBreakWr 里面写入数据，立即中断netpoll.\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23  // wakeNetPoller wakes up the thread sleeping in the network poller if it isn't // going to wake up before the when argument; or it wakes an idle P to service // timers and the network poller if there isn't one already. func wakeNetPoller(when int64) { // 如果计时器的触发时间小于netpoller的下一次轮询时间 \tif atomic.Load64(\u0026sched.lastpoll) == 0 { // In findrunnable we ensure that when polling the pollUntil \t// field is either zero or the time to which the current \t// poll is expected to run. This can have a spurious wakeup \t// but should never miss a wakeup. \tpollerPollUntil := int64(atomic.Load64(\u0026sched.pollUntil)) if pollerPollUntil == 0 || pollerPollUntil  when { // 向netpollBreakWr里面写入数据，立即中断netpoll \tnetpollBreak() } } else { // There are no threads in the network poller, try to get \t// one there so it can handle new timers. \tif GOOS != \"plan9\" { // Temporary workaround - see issue #42303. \twakep() } } }   1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17  // netpollBreak interrupts a kevent. func netpollBreak() { if atomic.Cas(\u0026netpollWakeSig, 0, 1) { for { var b byte n := write(netpollBreakWr, unsafe.Pointer(\u0026b), 1) if n == 1 || n == -_EAGAIN { break } if n == -_EINTR { continue } println(\"runtime: netpollBreak write failed with\", -n) throw(\"runtime: netpollBreak write failed\") } } }   那么它是如何做到的？我们下面先来看一个官方的例子：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32  func TestNetpollBreak(t *testing.T) { if runtime.GOMAXPROCS(0) == 1 { t.Skip(\"skipping: GOMAXPROCS=1\") } // 初始化 netpoll  runtime.NetpollGenericInit() start := time.Now() c := make(chan bool, 2) go func() { c  true // netpoll 等待时间  runtime.Netpoll(10 * time.Second.Nanoseconds()) c  true }() c loop: for { runtime.Usleep(100) // 中断netpoll 等待  runtime.NetpollBreak() runtime.NetpollBreak() select { case c: break loop default: } } if dur := time.Since(start); dur  5*time.Second { t.Errorf(\"netpollBreak did not interrupt netpoll: slept for: %v\", dur) } }   在上面这个例子中，首先会调用 runtime.Netpoll进行阻塞等待，然后循环调度 runtime.NetpollBreak进行中断阻塞。\nruntime.netpoll\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49  func netpoll(delay int64) gList { if epfd == -1 { return gList{} } var waitms int32 // 因为传入delay单位是纳秒，下面将纳秒转换成毫秒  if delay  0 { waitms = -1 } else if delay == 0 { waitms = 0 } else if delay  1e6 { waitms = 1 } else if delay  1e15 { waitms = int32(delay / 1e6) } else { waitms = 1e9 } var events [128]epollevent retry: // 等待文件描述符转换成可读或者可写  n := epollwait(epfd, \u0026events[0], int32(len(events)), waitms) // 返回负值，那么重新调用epollwait进行等待  if n  0 { ... goto retry } var toRun gList for i := int32(0); i  n; i++ { ev := \u0026events[i] if ev.events == 0 { continue } // 如果是 NetpollBreak 中断的，那么执行 continue 跳过  if *(**uintptr)(unsafe.Pointer(\u0026ev.data)) == \u0026netpollBreakRd { if ev.events != _EPOLLIN { println(\"runtime: netpoll: break fd ready for\", ev.events) throw(\"runtime: netpoll: break fd ready for something unexpected\") } if delay != 0 { var tmp [16]byte read(int32(netpollBreakRd), noescape(unsafe.Pointer(\u0026tmp[0])), int32(len(tmp))) atomic.Store(\u0026netpollWakeSig, 0) } continue } ... } return toRun }   在调用runtime.findrunnable执行抢占时，最后会传入一个时间，超时阻塞调用 netpoll，如果没有事件中断，那么循环调度会一直等待直到 netpoll 超时后才往下进行：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21  func findrunnable() (gp *g, inheritTime bool) { ... delta := int64(-1) if pollUntil != 0 { // checkTimers ensures that polluntil  now.  delta = pollUntil - now } ... // poll network  // 休眠前再次检查 poll 网络  if netpollinited() \u0026\u0026 (atomic.Load(\u0026netpollWaiters)  0 || pollUntil != 0) \u0026\u0026 atomic.Xchg64(\u0026sched.lastpoll, 0) != 0 { ... // 阻塞调用  list := netpoll(delta) } ... // 休眠当前 M  stopm() goto top }   所以在调用 runtime.addtimer 添加 timer 的时候进行 netpoll 的中断操作可以更加灵敏的响应 timer 这类时间敏感的任务。\ndeltimer runtime.deltimer 函数会标记需要删除的计时器，它会根据以下的规则处理计时器：\n timerWaiting - timerModifying - timerDeleted timerModifiedEarlier - timerModifying - timerDeleted timerModifiedLater - timerModifying - timerDeleted 其他状态 - 等待状态改变或者直接返回  对于timer 的删除不能直接从堆中删除，因为它可能不在当前的P，而是在在其它的P堆上，所以只能将其标记为删除状态，并由持有计时器的处理器完成清除工作。\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65  // deltimer deletes the timer t. It may be on some other P, so we can't // actually remove it from the timers heap. We can only mark it as deleted. // It will be removed in due course by the P whose heap it is on. // Reports whether the timer was removed before it was run. func deltimer(t *timer) bool { for { switch s := atomic.Load(\u0026t.status); s { case timerWaiting, timerModifiedLater: // Prevent preemption while the timer is in timerModifying. \t// This could lead to a self-deadlock. See #38070. \tmp := acquirem() if atomic.Cas(\u0026t.status, s, timerModifying) { // Must fetch t.pp before changing status, \t// as cleantimers in another goroutine \t// can clear t.pp of a timerDeleted timer. \ttpp := t.pp.ptr() if !atomic.Cas(\u0026t.status, timerModifying, timerDeleted) { badTimer() } releasem(mp) atomic.Xadd(\u0026tpp.deletedTimers, 1) // Timer was not yet run. \treturn true } else { releasem(mp) } case timerModifiedEarlier: // Prevent preemption while the timer is in timerModifying. \t// This could lead to a self-deadlock. See #38070. \tmp := acquirem() if atomic.Cas(\u0026t.status, s, timerModifying) { // Must fetch t.pp before setting status \t// to timerDeleted. \ttpp := t.pp.ptr() atomic.Xadd(\u0026tpp.adjustTimers, -1) if !atomic.Cas(\u0026t.status, timerModifying, timerDeleted) { badTimer() } releasem(mp) atomic.Xadd(\u0026tpp.deletedTimers, 1) // Timer was not yet run. \treturn true } else { releasem(mp) } case timerDeleted, timerRemoving, timerRemoved: // Timer was already run. \treturn false case timerRunning, timerMoving: // The timer is being run or moved, by a different P. \t// Wait for it to complete. \tosyield() case timerNoStatus: // Removing timer that was never added or \t// has already been run. Also see issue 21874. \treturn false case timerModifying: // Simultaneous calls to deltimer and modtimer. \t// Wait for the other call to complete. \tosyield() default: badTimer() } } }   modtimer runtime.modtimer 会修改已经存在的计时器，它会根据以下的规则处理计时器：\n timerWaiting - timerModifying - timerModifiedXX timerModifiedXX - timerModifying - timerModifiedYY timerNoStatus - timerModifying - timerWaiting timerRemoved - timerModifying - timerWaiting timerDeleted - timerModifying - timerWaiting 其他状态 - 等待状态改变  modtimer 进入到 for 循环后会根据不同的状态做状态设置以及必要字段的处理；如果是 timer 已被删除，那么需要重新添加到 timer 列表中；如果 timer 修改后的时间小于修改前的时间，将状态设置为 timerModifiedEarlier，修改时间提前，还需要触发 netpoll 中断。\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 100 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119 120 121 122 123 124 125 126  // modtimer modifies an existing timer. // This is called by the netpoll code or time.Ticker.Reset or time.Timer.Reset. // Reports whether the timer was modified before it was run. func modtimer(t *timer, when, period int64, f func(interface{}, uintptr), arg interface{}, seq uintptr) bool { if when  0 { throw(\"timer when must be positive\") } if period  0 { throw(\"timer period must be non-negative\") } status := uint32(timerNoStatus) wasRemoved := false var pending bool var mp *m loop: for { // 修改 timer 状态 \tswitch status = atomic.Load(\u0026t.status); status { case timerWaiting, timerModifiedEarlier, timerModifiedLater: // Prevent preemption while the timer is in timerModifying. \t// This could lead to a self-deadlock. See #38070. \tmp = acquirem() if atomic.Cas(\u0026t.status, status, timerModifying) { pending = true // timer not yet run \tbreak loop } releasem(mp) case timerNoStatus, timerRemoved: // Prevent preemption while the timer is in timerModifying. \t// This could lead to a self-deadlock. See #38070. \tmp = acquirem() // Timer was already run and t is no longer in a heap. \t// Act like addtimer. \tif atomic.Cas(\u0026t.status, status, timerModifying) { wasRemoved = true pending = false // timer already run or stopped \tbreak loop } releasem(mp) case timerDeleted: // Prevent preemption while the timer is in timerModifying. \t// This could lead to a self-deadlock. See #38070. \tmp = acquirem() if atomic.Cas(\u0026t.status, status, timerModifying) { atomic.Xadd(\u0026t.pp.ptr().deletedTimers, -1) pending = false // timer already stopped \tbreak loop } releasem(mp) case timerRunning, timerRemoving, timerMoving: // The timer is being run or moved, by a different P. \t// Wait for it to complete. \tosyield() case timerModifying: // Multiple simultaneous calls to modtimer. \t// Wait for the other call to complete. \tosyield() default: badTimer() } } t.period = period t.f = f t.arg = arg t.seq = seq // 如果 timer 已被删除，那么需要重新添加到 timer 列表中 \tif wasRemoved { t.when = when pp := getg().m.p.ptr() lock(\u0026pp.timersLock) doaddtimer(pp, t) unlock(\u0026pp.timersLock) if !atomic.Cas(\u0026t.status, timerModifying, timerWaiting) { badTimer() } releasem(mp) wakeNetPoller(when) } else { // The timer is in some other P's heap, so we can't change \t// the when field. If we did, the other P's heap would \t// be out of order. So we put the new when value in the \t// nextwhen field, and let the other P set the when field \t// when it is prepared to resort the heap. \tt.nextwhen = when newStatus := uint32(timerModifiedLater) // 如果修改后的时间小于修改前的时间，将状态设置为 timerModifiedEarlier \tif when  t.when { newStatus = timerModifiedEarlier } tpp := t.pp.ptr() // Update the adjustTimers field. Subtract one if we \t// are removing a timerModifiedEarlier, add one if we \t// are adding a timerModifiedEarlier. \tadjust := int32(0) if status == timerModifiedEarlier { adjust-- } if newStatus == timerModifiedEarlier { adjust++ updateTimerModifiedEarliest(tpp, when) } if adjust != 0 { atomic.Xadd(\u0026tpp.adjustTimers, adjust) } // Set the new status of the timer. \tif !atomic.Cas(\u0026t.status, timerModifying, newStatus) { badTimer() } releasem(mp) // If the new status is earlier, wake up the poller.  // 如果修改时间提前，那么触发 netpoll 中断 \tif newStatus == timerModifiedEarlier { wakeNetPoller(when) } } return pending }   如果待修改的计时器已经被删除，那么该函数会调用 runtime.doaddtimer 创建新的计时器。在正常情况下会根据修改后的时间进行不同的处理：\n 如果修改后的时间大于或者等于修改前时间，设置计时器的状态为 timerModifiedLater； 如果修改后的时间小于修改前时间，设置计时器的状态为 timerModifiedEarlier 并调用 runtime.netpollBreak 触发调度器的重新调度；  因为修改后的时间会影响计时器的处理，所以用于修改计时器的 runtime.modtimer 也是状态机中最复杂的函数了。\ncleantimers runtime.cleantimers 函数会根据状态清理处理器队列头中的计时器，该函数会遵循以下的规则修改计时器的触发时间：\n timerDeleted - timerRemoving - timerRemoved timerModifiedXX - timerMoving - timerWaiting  cleantimers 函数中使用了一个无限循环来获取头节点。如果头节点的状态是 timerDeleted ，那么需要从 timer 列表中删除；如果头节点的状态是 timerModifiedEarlier 或 timerModifiedLater ，表示头节点的触发的时间被修改到了更早或更晚的时间，那么就先从timer队列中删除再重新添加。\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64  // cleantimers cleans up the head of the timer queue. This speeds up // programs that create and delete timers; leaving them in the heap // slows down addtimer. Reports whether no timer problems were found. // The caller must have locked the timers for pp. func cleantimers(pp *p) { gp := getg() for { // 调度器列表为空，直接返回 \tif len(pp.timers) == 0 { return } // This loop can theoretically run for a while, and because \t// it is holding timersLock it cannot be preempted. \t// If someone is trying to preempt us, just return. \t// We can clean the timers later.  // 如果当前 G 被抢占了，直接返回 \tif gp.preemptStop { return } // 获取第一个 timer \tt := pp.timers[0] if t.pp.ptr() != pp { throw(\"cleantimers: bad p\") } switch s := atomic.Load(\u0026t.status); s { case timerDeleted: // 设置 timer 的状态 \tif !atomic.Cas(\u0026t.status, s, timerRemoving) { continue } // 删除第一个 timer \tdodeltimer0(pp) // 删除完毕后重置状态为 timerRemoved \tif !atomic.Cas(\u0026t.status, timerRemoving, timerRemoved) { badTimer() } atomic.Xadd(\u0026pp.deletedTimers, -1) // timer 被修改到了更早或更晚的时间 \tcase timerModifiedEarlier, timerModifiedLater: // 将 timer 状态设置为 timerMoving \tif !atomic.Cas(\u0026t.status, s, timerMoving) { continue } // Now we can change the when field.  // 重新设置 when 字段 \tt.when = t.nextwhen // Move t to the right position.  // 在列表中删除后重新加入 \tdodeltimer0(pp) doaddtimer(pp, t) if s == timerModifiedEarlier { atomic.Xadd(\u0026pp.adjustTimers, -1) } // 设置状态为 timerWaiting \tif !atomic.Cas(\u0026t.status, timerMoving, timerWaiting) { badTimer() } default: // Head of timers does not need adjustment. \treturn } } }   runtime.cleantimers 函数只会处理计时器状态为 timerDeleted、timerModifiedEarlier 和 timerModifiedLater 的情况：\n 如果计时器的状态为 timerDeleted；  将计时器的状态修改成 timerRemoving； 调用 runtime.dodeltimer0 删除四叉堆顶上的计时器； 将计时器的状态修改成 timerRemoved；   如果计时器的状态为 timerModifiedEarlier 或者 timerModifiedLater；  将计时器的状态修改成 timerMoving； 使用计时器下次触发的时间 nextWhen 覆盖 when； 调用 runtime.dodeltimer0 删除四叉堆顶上的计时器； 调用 runtime.doaddtimer 将计时器加入四叉堆中； 将计时器的状态修改成 timerWaiting；    runtime.cleantimers 会删除已经标记的计时器，修改状态为 timerModifiedXX 的计时器。\nadjusttimers runtime.adjusttimers 与 runtime.cleantimers 的作用相似，它们都会删除堆中的计时器并修改状态为 timerModifiedEarlier 和 timerModifiedLater 的计时器的时间，它们也会遵循相同的规则处理计时器状态：\n timerDeleted - timerRemoving - timerRemoved timerModifiedXX - timerMoving - timerWaiting  1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92  // adjusttimers looks through the timers in the current P's heap for // any timers that have been modified to run earlier, and puts them in // the correct place in the heap. While looking for those timers, // it also moves timers that have been modified to run later, // and removes deleted timers. The caller must have locked the timers for pp. func adjusttimers(pp *p, now int64) { if atomic.Load(\u0026pp.adjustTimers) == 0 { if verifyTimers { verifyTimerHeap(pp) } // There are no timers to adjust, so it is safe to clear \t// timerModifiedEarliest. Do so in case it is stale. \t// Everything will work if we don't do this, \t// but clearing here may save future calls to adjusttimers. \tatomic.Store64(\u0026pp.timerModifiedEarliest, 0) return } // If we haven't yet reached the time of the first timerModifiedEarlier \t// timer, don't do anything. This speeds up programs that adjust \t// a lot of timers back and forth if the timers rarely expire. \t// We'll postpone looking through all the adjusted timers until \t// one would actually expire. \tif first := atomic.Load64(\u0026pp.timerModifiedEarliest); first != 0 { if int64(first)  now { if verifyTimers { verifyTimerHeap(pp) } return } // We are going to clear all timerModifiedEarlier timers. \tatomic.Store64(\u0026pp.timerModifiedEarliest, 0) } var moved []*timer loop: for i := 0; i  len(pp.timers); i++ { t := pp.timers[i] if t.pp.ptr() != pp { throw(\"adjusttimers: bad p\") } switch s := atomic.Load(\u0026t.status); s { case timerDeleted: if atomic.Cas(\u0026t.status, s, timerRemoving) { dodeltimer(pp, i) if !atomic.Cas(\u0026t.status, timerRemoving, timerRemoved) { badTimer() } atomic.Xadd(\u0026pp.deletedTimers, -1) // Look at this heap position again. \ti-- } case timerModifiedEarlier, timerModifiedLater: if atomic.Cas(\u0026t.status, s, timerMoving) { // Now we can change the when field. \tt.when = t.nextwhen // Take t off the heap, and hold onto it. \t// We don't add it back yet because the \t// heap manipulation could cause our \t// loop to skip some other timer. \tdodeltimer(pp, i) moved = append(moved, t) if s == timerModifiedEarlier { if n := atomic.Xadd(\u0026pp.adjustTimers, -1); int32(n)  0 { break loop } } // Look at this heap position again. \ti-- } case timerNoStatus, timerRunning, timerRemoving, timerRemoved, timerMoving: badTimer() case timerWaiting: // OK, nothing to do. \tcase timerModifying: // Check again after modification is complete. \tosyield() i-- default: badTimer() } } if len(moved)  0 { addAdjustedTimers(pp, moved) } if verifyTimers { verifyTimerHeap(pp) } }   与 runtime.cleantimers 不同的是，上述函数可能会遍历处理器堆中的全部计时器（包含退出条件），而不是只修改四叉堆顶部。\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34  // dodeltimer removes timer i from the current P's heap. // We are locked on the P when this is called. // It reports whether it saw no problems due to races. // The caller must have locked the timers for pp. func dodeltimer(pp *p, i int) { if t := pp.timers[i]; t.pp.ptr() != pp { throw(\"dodeltimer: wrong P\") } else { t.pp = 0 } last := len(pp.timers) - 1 // 把 timer[i] 替换为 timer[last] \tif i != last { pp.timers[i] = pp.timers[last] } // 删除 timer[last]，并缩小 slice \tpp.timers[last] = nil pp.timers = pp.timers[:last] // 判断是不是删的最后一个  // 如果不是的话，需要重新调整堆 \tif i != last { // Moving to i may have moved the last timer to a new parent, \t// so sift up to preserve the heap guarantee.  // 最后一个节点当前来的分叉可能并不是它那个分叉  // 所以向上走或者向下走都是有可能的  // 即使是二叉堆，也是有这种可能的 \tsiftupTimer(pp.timers, i) siftdownTimer(pp.timers, i) } if i == 0 { updateTimer0When(pp) } atomic.Xadd(\u0026pp.numTimers, -1) }   runtimer runtime.runtimer 函数会检查处理器四叉堆上最顶上的计时器，该函数也会处理计时器的删除以及计时器时间的更新，它会遵循以下的规则处理计时器：\n timerNoStatus - 崩溃：未初始化的计时器 timerWaiting  - timerWaiting - timerRunning - timerNoStatus - timerRunning - timerWaiting   timerModifying - 等待状态改变 timerModifiedXX - timerMoving - timerWaiting timerDeleted - timerRemoving - timerRemoved timerRunning - 崩溃：并发调用该函数 timerRemoved、timerRemoving、timerMoving - 崩溃：计时器堆不一致  timer 的运行是交给 runtime.runtimer函数执行的，这个函数会检查 P 上最小堆的最顶上的 timer 的状态，根据状态做不同的处理。\nruntimer 里面会启动一个 for 循环，不停的检查 P 的 timer 列表的第一个元素的状态。\n 如果该 timer 处于 timerWaiting，那么判断当前的时间大于 timer 执行的时间，则调用 runOneTimer 执行； 如果该 timer 处于 timerDeleted，表示该 timer 是需要被删除的，那么调用 dodeltimer0 删除最小堆的第一个 timer ，并修改其状态； 如果该 timer 状态是 timerModifiedEarlier 、timerModifiedLater，那么表示该 timer 的执行时间被修改过，需要重新调整它在最小堆中的位置，所以先调用 dodeltimer0 删除该 timer，再调用 doaddtimer 将该 timer 重新添加到最小堆。  1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78  // runtimer examines the first timer in timers. If it is ready based on now, // it runs the timer and removes or updates it. // Returns 0 if it ran a timer, -1 if there are no more timers, or the time // when the first timer should run. // The caller must have locked the timers for pp. // If a timer is run, this will temporarily unlock the timers. //go:systemstack func runtimer(pp *p, now int64) int64 { for { // 获取最小堆的第一个元素 \tt := pp.timers[0] if t.pp.ptr() != pp { throw(\"runtimer: bad p\") } // 获取 timer 状态 \tswitch s := atomic.Load(\u0026t.status); s { case timerWaiting: // 还没到时间，返回下次执行时间 \tif t.when  now { // Not ready to run. \treturn t.when } // 修改状态为 timerRunning \tif !atomic.Cas(\u0026t.status, s, timerRunning) { continue } // Note that runOneTimer may temporarily unlock \t// pp.timersLock.  // 运行该 timer \trunOneTimer(pp, t, now) return 0 case timerDeleted: if !atomic.Cas(\u0026t.status, s, timerRemoving) { continue } // 删除最小堆的第一个 timer \tdodeltimer0(pp) if !atomic.Cas(\u0026t.status, timerRemoving, timerRemoved) { badTimer() } atomic.Xadd(\u0026pp.deletedTimers, -1) if len(pp.timers) == 0 { return -1 } // 需要重新移动位置的 timer \tcase timerModifiedEarlier, timerModifiedLater: if !atomic.Cas(\u0026t.status, s, timerMoving) { continue } t.when = t.nextwhen // 删除最小堆的第一个 timer \tdodeltimer0(pp) // 将该 timer 重新添加到最小堆 \tdoaddtimer(pp, t) if s == timerModifiedEarlier { atomic.Xadd(\u0026pp.adjustTimers, -1) } if !atomic.Cas(\u0026t.status, timerMoving, timerWaiting) { badTimer() } case timerModifying: // Wait for modification to complete. \tosyield() case timerNoStatus, timerRemoved: // Should not see a new or inactive timer on the heap. \tbadTimer() case timerRunning, timerRemoving, timerMoving: // These should only be set when timers are locked, \t// and we didn't do it. \tbadTimer() default: badTimer() } } }   runOneTimer runOneTimer 会根据 period 是否大于0判断该 timer 是否需要反复执行，如果是的话需要重新调整 when 下次执行时间后重新调整该 timer 在堆中的位置。一次性 timer 的话会执行 dodeltimer0 删除该 timer ，最后运行 timer 中的函数；\n如果处理器四叉堆顶部的计时器没有到触发时间会直接返回，否则调用 runtime.runOneTimer 运行堆顶的计时器：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59  // runOneTimer runs a single timer. // The caller must have locked the timers for pp. // This will temporarily unlock the timers while running the timer function. //go:systemstack func runOneTimer(pp *p, t *timer, now int64) { if raceenabled { ppcur := getg().m.p.ptr() if ppcur.timerRaceCtx == 0 { ppcur.timerRaceCtx = racegostart(funcPC(runtimer) + sys.PCQuantum) } raceacquirectx(ppcur.timerRaceCtx, unsafe.Pointer(t)) } // 需要被执行的函数 \tf := t.f // 被执行函数的参数 \targ := t.arg seq := t.seq // 表示该 timer 为 ticker，需要再次触发 \tif t.period  0 { // Leave in heap but adjust next time to fire.  // 放入堆中并调整触发时间 \tdelta := t.when - now t.when += t.period * (1 + -delta/t.period) if t.when  0 { // check for overflow. \tt.when = maxWhen } siftdownTimer(pp.timers, 0) if !atomic.Cas(\u0026t.status, timerRunning, timerWaiting) { badTimer() } updateTimer0When(pp) } else { // Remove from heap. \tdodeltimer0(pp) if !atomic.Cas(\u0026t.status, timerRunning, timerNoStatus) { badTimer() } } if raceenabled { // Temporarily use the current P's racectx for g0. \tgp := getg() if gp.racectx != 0 { throw(\"runOneTimer: unexpected racectx\") } gp.racectx = gp.m.p.ptr().timerRaceCtx } unlock(\u0026pp.timersLock) f(arg, seq) lock(\u0026pp.timersLock) if raceenabled { gp := getg() gp.racectx = 0 } }   根据计时器的 period 字段，上述函数会做出不同的处理：\n 如果 period 字段大于 0；  修改计时器下一次触发的时间并更新其在堆中的位置； 将计时器的状态更新至 timerWaiting； 调用 runtime.updateTimer0When 函数设置处理器的 timer0When 字段；   如果 period 字段小于或者等于 0；  调用 runtime.dodeltimer0 函数删除计时器； 将计时器的状态更新至 timerNoStatus；    更新计时器之后，上述函数会运行计时器中存储的函数并传入触发时间等参数。\n触发时机 我们在上一小节已经分析了计时器状态机中的 10 种状态以及几种操作。这里将分析器的触发过程，Go 语言会在两个模块触发计时器，运行计时器中保存的函数：\n 调度器调度时会检查处理器中的计时器是否准备就绪； 系统监控会检查是否有未执行的到期计时器；  我们将依次分析上述这两个触发过程。\n调度器 runtime.checkTimers 是调度器用来运行处理器中计时器的函数，它会在发生以下情况时被调用：\n 调度器调用 runtime.schedule 执行调度时； 调度器调用 runtime.findrunnable 获取可执行的 Goroutine 时； 调度器调用 runtime.findrunnable 从其他处理器窃取计时器时；  runtime.schedule\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16  func schedule() { _g_ := getg() ... top: pp := _g_.m.p.ptr() ... // 检查是否有可执行 timer 并执行  checkTimers(pp, 0) var gp *g ... if gp == nil { gp, inheritTime = findrunnable() // blocks until work is available  } ... execute(gp, inheritTime) }   runtime.findrunnable\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23  // Finds a runnable goroutine to execute. // Tries to steal from other P's, get g from local or global queue, poll network. func findrunnable() (gp *g, inheritTime bool) { _g_ := getg() // The conditions here and in handoffp must agree: if \t// findrunnable would return a G to run, handoffp must start \t// an M.  top: _p_ := _g_.m.p.ptr() if sched.gcwaiting != 0 { gcstopm() goto top } if _p_.runSafePointFn != 0 { runSafePointFn() } now, pollUntil, _ := checkTimers(_p_, 0) ... }   checkTimers 中主要做了这么几件事：\n 检查是否有timer， 如果没有需要执行的计时器时，直接返回；如果下一个要执行的 timer 没有到期并且需要删除的计时器较少（四分之一）时也会直接返回； 调用 adjusttimers 进行 timer 列表的调整，主要是维护 timer 列表的最小堆的顺序； 调用 runtime.runtimer查找堆中是否存在需要执行的timer， runtime.runtimer上面已经讲过了，这里不再赘述； 如果当前 Goroutine 的 P 和传入的 P 相同，并且需要删除的 timer 超过了 timer 列表数量的四分之一，那么调用 clearDeletedTimers 清理需要删除的 timer；  1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75  // checkTimers runs any timers for the P that are ready. // If now is not 0 it is the current time. // It returns the current time or 0 if it is not known, // and the time when the next timer should run or 0 if there is no next timer, // and reports whether it ran any timers. // If the time when the next timer should run is not 0, // it is always larger than the returned time. // We pass now in and out to avoid extra calls of nanotime. //go:yeswritebarrierrec func checkTimers(pp *p, now int64) (rnow, pollUntil int64, ran bool) { // If it's not yet time for the first timer, or the first adjusted \t// timer, then there is nothing to do.  // 获取 timer0 的执行时间 \tnext := int64(atomic.Load64(\u0026pp.timer0When)) nextAdj := int64(atomic.Load64(\u0026pp.timerModifiedEarliest)) if next == 0 || (nextAdj != 0 \u0026\u0026 nextAdj  next) { next = nextAdj } // 如果没有timer \tif next == 0 { // No timers to run or adjust. \treturn now, 0, false } if now == 0 { now = nanotime() } // 下次执行大于当前时间， \tif now  next { // Next timer is not ready to run, but keep going \t// if we would clear deleted timers. \t// This corresponds to the condition below where \t// we decide whether to call clearDeletedTimers.  // 如果需要删除的 timer 个数小于 timer列表个数的4分之1，直接返回 \tif pp != getg().m.p.ptr() || int(atomic.Load(\u0026pp.deletedTimers))  int(atomic.Load(\u0026pp.numTimers)/4) { return now, next, false } } lock(\u0026pp.timersLock) if len(pp.timers)  0 { // 如果有计时器，则调用函数 adjusttimers() 进行调用（堆维护) \tadjusttimers(pp, now) // 调整了堆中的计时器之后，会通过 runtime.runtimer 依次查找堆中是否存在需要执行的计时器：  // * 如果存在，直接运行计时器；  // * 如果不存在，获取最新计时器的触发时间； \tfor len(pp.timers)  0 { // Note that runtimer may temporarily unlock \t// pp.timersLock.  // 查找堆中是否存在需要执行的 timer \tif tw := runtimer(pp, now); tw != 0 { if tw  0 { pollUntil = tw } break } ran = true } } // If this is the local P, and there are a lot of deleted timers, \t// clear them out. We only do this for the local P to reduce \t// lock contention on timersLock.  // 如果需要删除的 timer 超过了 timer 列表数量的四分之一，那么清理需要删除的 timer  // 在 runtime.checkTimers 的最后，如果当前 Goroutine 的处理器和传入的处理器相同，并且处理器中删除的计时器是堆中计时器的 1/4 以上，就会调用 runtime.clearDeletedTimers 删除处理器全部被标记为 timerDeleted 的计时器，保证堆中靠后的计时器被删除。 \tif pp == getg().m.p.ptr() \u0026\u0026 int(atomic.Load(\u0026pp.deletedTimers))  len(pp.timers)/4 { // runtime.clearDeletedTimers 能够避免堆中出现大量长时间运行的计时器，该函数和 runtime.moveTimers 也是唯二会遍历计时器堆的函数。 \tclearDeletedTimers(pp) } unlock(\u0026pp.timersLock) return now, pollUntil, ran }   系统监控 系统监控其实就是 Go 语言的守护进程，它们能够在后台监控系统的运行状态，在出现意外情况时及时响应。它会每隔一段时间检查 Go 语言运行时状态，确保没有异常发生。我们这里不主要去讲系统监控，只抽离出其中的和 timer 相关的代码进行讲解。\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88  func sysmon() { ... for { ... // sysmon should not enter deep sleep if schedtrace is enabled so that \t// it can print that information at the right time. \t// \t// It should also not enter deep sleep if there are any active P's so \t// that it can retake P's from syscalls, preempt long running G's, and \t// poll the network if all P's are busy for long stretches. \t// \t// It should wakeup from deep sleep if any P's become active either due \t// to exiting a syscall or waking up due to a timer expiring so that it \t// can resume performing those duties. If it wakes from a syscall it \t// resets idle and delay as a bet that since it had retaken a P from a \t// syscall before, it may need to do it again shortly after the \t// application starts work again. It does not reset idle when waking \t// from a timer to avoid adding system load to applications that spend \t// most of their time sleeping. \tnow := nanotime() if debug.schedtrace  0 \u0026\u0026 (sched.gcwaiting != 0 || atomic.Load(\u0026sched.npidle) == uint32(gomaxprocs)) { lock(\u0026sched.lock) if atomic.Load(\u0026sched.gcwaiting) != 0 || atomic.Load(\u0026sched.npidle) == uint32(gomaxprocs) { syscallWake := false // 获取下一次计时器启动的时间和持有该堆的P \tnext, _ := timeSleepUntil() if next  now { atomic.Store(\u0026sched.sysmonwait, 1) unlock(\u0026sched.lock) // Make wake-up period small enough \t// for the sampling to be correct.  // 计算离下次启动计时器的时间 \tsleep := forcegcperiod / 2 if next-now  sleep { sleep = next - now } // 休眠一段时间，唤醒后将直接执行堆中的timers \tshouldRelax := sleep = osRelaxMinNS if shouldRelax { osRelax(true) } syscallWake = notetsleep(\u0026sched.sysmonnote, sleep) mDoFixup() if shouldRelax { osRelax(false) } lock(\u0026sched.lock) atomic.Store(\u0026sched.sysmonwait, 0) noteclear(\u0026sched.sysmonnote) } if syscallWake { idle = 0 delay = 20 } } unlock(\u0026sched.lock) } lock(\u0026sched.sysmonlock) // Update now in case we blocked on sysmonnote or spent a long time \t// blocked on schedlock or sysmonlock above. \tnow = nanotime() // trigger libc interceptors if needed \tif *cgo_yield != nil { asmcgocall(*cgo_yield, nil) } // 如果超过 10ms 没有 poll，则 poll 一下网络  lastpoll := int64(atomic.Load64(\u0026sched.lastpoll)) if netpollinited() \u0026\u0026 lastpoll != 0 \u0026\u0026 lastpoll+10*1000*1000  now { atomic.Cas64(\u0026sched.lastpoll, uint64(lastpoll), uint64(now)) list := netpoll(0) // 非阻塞，返回 G 列表  // G 列表不为空  if !list.empty() { incidlelocked(-1) // 将获取到的 G 列表插入到空闲的 P 中或全局列表中  injectglist(\u0026list) incidlelocked(1) } } // 如果有 timer 到期  if next  now { // 启动新的 M 处理 timer  startm(nil, false) } ... } }    sysmon 会调用 timeSleepUntil() 函数，遍历所有的P，找出下次最先执行(时间值最小)的时间和其所在的P. 调用 notesleep() 函数休眠一段时间。待唤醒后将自动执行堆上的timers。另外还有一个 notesleepg() 函数，区域是 notesleep() 调用者是否为g0 如果超过 10ms 没有 poll，则 poll 一下网络； 如果有 timer 到期，这个时候直接启动新的 M 处理 timer；  在上述过程中 runtime.timeSleepUntil 会遍历运行时的全部处理器并查找下一个需要执行的计时器。\n说明一下，在sysmon 监控线程里没有找到过期 timer 情况下的处理逻辑，只有未过期的处理逻辑。\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32  // timeSleepUntil returns the time when the next timer should fire, // and the P that holds the timer heap that that timer is on. // This is only called by sysmon and checkdead. func timeSleepUntil() (int64, *p) { next := int64(maxWhen) var pret *p // Prevent allp slice changes. This is like retake. \tlock(\u0026allpLock) for _, pp := range allp { if pp == nil { // This can happen if procresize has grown \t// allp but not yet created new Ps. \tcontinue } w := int64(atomic.Load64(\u0026pp.timer0When)) if w != 0 \u0026\u0026 w  next { next = w pret = pp } w = int64(atomic.Load64(\u0026pp.timerModifiedEarliest)) if w != 0 \u0026\u0026 w  next { next = w pret = pp } } unlock(\u0026allpLock) return next, pret }   核心API NewTimer 我们先看看NewTimer方法是如何创建一个Timer的：\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30  // NewTimer creates a new Timer that will send // the current time on its channel after at least duration d. func NewTimer(d Duration) *Timer { c := make(chan Time, 1) // 创建一个带有一个Time结构缓冲的通道 \tt := \u0026Timer{ C: c, r: runtimeTimer{// 运行时定时器 \twhen: when(d),// 定时多久 \tf: sendTime,// Golang写入时间的回调接口 \targ: c,// 往哪个通道写入时间 \t}, } startTimer(\u0026t.r)// 启动提交定时器 \treturn t } // when is a helper function for setting the 'when' field of a runtimeTimer. // It returns what the time will be, in nanoseconds, Duration d in the future. // If d is negative, it is ignored. If the returned value would be less than // zero because of an overflow, MaxInt64 is returned. func when(d Duration) int64 { if d  0 { return runtimeNano() } t := runtimeNano() + int64(d) if t  0 { t = 163 - 1 // math.MaxInt64 \t} return t }    when 表示时间到时，会往 Timer.C 中发送当前时间。when 表示的时间是纳秒时间，正常通过 runtimeNano() + int64(d) 赋值。 f 参数的值是 sendTime，定时器时间到时，会调用 f，并将 arg 和 seq 传给 f。 因为 Timer 是一次性的，所以 period 保留默认值 0。 runtimeTimer 结构中的 i 字段，表示在堆中的索引.  在time包中，函数f有三种类型：\n sendTime：发送当前时间到channel或者在发送被阻塞的情况下丢弃。被time.Timer和time.Ticker使用。 goFunc：在goroutine中执行一些函数。被time.AfterFunc使用。 goroutineReady：唤醒特定的goroutine。被runtime.timeSleep使用。  NewTimer方法主要是初始化一个Timer，然后调用startTimer方法，并返回Timer。startTimer方法的真正逻辑并不在time包里面，我们可以使用dlv调试汇编代码：\n1  sleep.go:94 0xd8ea09 e872c7faff call $time.startTimer   得知startTimer实际上调用的是runtime.time.startTimer方法。也就是说time.Timer只是对runtime包中timer的一层wrap。这层自身实现的最核心功能是将底层的超时回调转换为发送channel消息。\nstartTimer方法会将传入的runtimeTimer转为timer，然后调用addtimer方法。\n1 2 3 4 5 6 7 8  // startTimer adds t to the timer heap. //go:linkname startTimer time.startTimer func startTimer(t *timer) { if raceenabled { racerelease(unsafe.Pointer(t)) } addtimer(t) }   Timer在超时(timer expire)后，执行一个标准库中内置的函数：sendTime。sendTime将当前当前事件send到timer的时间Channel中.\n我们看到NewTimer中创建了一个buffered channel，size = 1。正常情况下，当timer expire，t.C无论是否有goroutine在read，sendTime都可以non-block的将当前时间发送到C中；同时，我们看到sendTime还加了双保险：通过一个select判断c buffer是否已满，一旦满了，直接退出，依然不会block，这种情况在reuse active timer时可能会遇到。\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15  // 时间到后，Golang自动调用sendTime接口，尝试往c通道写入时间 func sendTime(c interface{}, seq uintptr) { // Non-blocking send of time on c. \t// Used in NewTimer, it cannot block anyway (buffer). \t// Used in NewTicker, dropping sends on the floor is \t// the desired behavior when the reader gets behind,  // because the sends are periodic.  // 给c通道以非阻塞方式发送时间  // 如果被用于NewTimer, 无论如何不能阻塞.  // 如果被用于NewTicker，接收方未及时接受时间，则会丢弃掉，因为发送时间是周期性的。 \tselect { case c.(chan Time)  Now(): default: } }   timer.After 1 2 3 4 5 6 7 8 9  // After waits for the duration to elapse and then sends the current time // on the returned channel. // It is equivalent to NewTimer(d).C. // The underlying Timer is not recovered by the garbage collector // until the timer fires. If efficiency is a concern, use NewTimer // instead and call Timer.Stop if the timer is no longer needed. func After(d Duration) chan Time { return NewTimer(d).C }   Timer.AfterFunc 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18  // AfterFunc waits for the duration to elapse and then calls f // in its own goroutine. It returns a Timer that can // be used to cancel the call using its Stop method. func AfterFunc(d Duration, f func()) *Timer { t := \u0026Timer{ r: runtimeTimer{ when: when(d), f: goFunc, arg: f, }, } startTimer(\u0026t.r) return t } func goFunc(arg interface{}, seq uintptr) { go arg.(func())() }   注意：从AfterFunc源码可以看到，外面传入的f参数并非直接赋值给了内部的f，而是作为wrapper function：goFunc的arg传入的。而goFunc则是启动了一个新的goroutine来执行那个外部传入的f。这是因为timer expire对应的事件处理函数的执行是在go runtime内唯一的timer events maintenance goroutine: timerproc中。为了不block timerproc的执行，必须启动一个新的goroutine。\ntimer.Tick 1 2 3 4 5 6  func Tick(d Duration) chan Time { if d  0 { return nil } return NewTicker(d).C }   1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31  // NewTicker 会返回一个 Ticker 对象，其 channel 每隔 period 时间 // 会收到一个时间值 // 如果 receiver 接收慢了，Ticker 会把不需要的 tick drop 掉 // d 必须比 0 大，否则 panic // Stop ticker 才能释放相关的资源 // NewTicker returns a new Ticker containing a channel that will send // the time on the channel after each tick. The period of the ticks is // specified by the duration argument. The ticker will adjust the time // interval or drop ticks to make up for slow receivers. // The duration d must be greater than zero; if not, NewTicker will // panic. Stop the ticker to release associated resources. func NewTicker(d Duration) *Ticker { if d  0 { panic(errors.New(\"non-positive interval for NewTicker\")) } // Give the channel a 1-element time buffer. \t// If the client falls behind while reading, we drop ticks \t// on the floor until the client catches up. \tc := make(chan Time, 1) t := \u0026Ticker{ C: c, r: runtimeTimer{ when: when(d), period: int64(d), f: sendTime, arg: c, }, } startTimer(\u0026t.r) return t }   可以看到， Ticker 和 Timer 的 r 成员就只差在 period 这一个字段上，每隔一个 period 就往 channel 里发数据的就是 Ticker，而 fire and disappear 的就是 Timer。\nTimer.Reset 对于 timer.Reset() 函数，对应的是resetTimer\n这与修改操作对应的是同一个 modtimer() 函数。\n对于这个函数的一般会被网络轮询、timer.Ticker.Reset 或 timer.Timer.Reset 函数调用。\n1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41  // Reset changes the timer to expire after duration d. // It returns true if the timer had been active, false if the timer had // expired or been stopped. // // For a Timer created with NewTimer, Reset should be invoked only on // stopped or expired timers with drained channels. // // If a program has already received a value from t.C, the timer is known // to have expired and the channel drained, so t.Reset can be used directly. // If a program has not yet received a value from t.C, however, // the timer must be stopped and—if Stop reports that the timer expired // before being stopped—the channel explicitly drained: // // if !t.Stop() { // // } // t.Reset(d) // // This should not be done concurrent to other receives from the Timer's // channel. // // Note that it is not possible to use Reset's return value correctly, as there // is a race condition between draining the channel and the new timer expiring. // Reset should always be invoked on stopped or expired channels, as described above. // The return value exists to preserve compatibility with existing programs. // // For a Timer created with AfterFunc(d, f), Reset either reschedules // when f will run, in which case Reset returns true, or schedules f // to run again, in which case it returns false. // When Reset returns false, Reset neither waits for the prior f to // complete before returning nor does it guarantee that the subsequent // goroutine running f does not run concurrently with the prior // one. If the caller needs to know whether the prior execution of // f is completed, it must coordinate with f explicitly. func (t *Timer) Reset(d Duration) bool { if t.r.f == nil { panic(\"time: Reset called on uninitialized Timer\") } w := when(d) return resetTimer(\u0026t.r, w) }   1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17  // resetTimer resets an inactive timer, adding it to the heap. //go:linkname resetTimer time.resetTimer // Reports whether the timer was modified before it was run. func resetTimer(t *timer, when int64) bool { if raceenabled { racerelease(unsafe.Pointer(t)) } return resettimer(t, when) } // resettimer resets the time when a timer should fire. // If used for an inactive timer, the timer will become active. // This should be called instead of addtimer if the timer value has been, // or may have been, used previously. // Reports whether the timer was modified before it was run. func resettimer(t *timer, when int64) bool { return modtimer(t, when, t.period, t.f, t.arg, t.seq) }   1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 100 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119 120 121 122 123 124 125  // modtimer modifies an existing timer. // This is called by the netpoll code or time.Ticker.Reset or time.Timer.Reset. // Reports whether the timer was modified before it was run. func modtimer(t *timer, when, period int64, f func(interface{}, uintptr), arg interface{}, seq uintptr) bool { if when  0 { throw(\"timer when must be positive\") } if period  0 { throw(\"timer period must be non-negative\") } status := uint32(timerNoStatus) wasRemoved := false var pending bool var mp *m loop: for { // 先是用一个for自旋修改定时器状态 \tswitch status = atomic.Load(\u0026t.status); status { case timerWaiting, timerModifiedEarlier, timerModifiedLater: // Prevent preemption while the timer is in timerModifying. \t// This could lead to a self-deadlock. See #38070. \tmp = acquirem() if atomic.Cas(\u0026t.status, status, timerModifying) { pending = true // timer not yet run \tbreak loop } releasem(mp) case timerNoStatus, timerRemoved: // Prevent preemption while the timer is in timerModifying. \t// This could lead to a self-deadlock. See #38070. \tmp = acquirem() // Timer was already run and t is no longer in a heap. \t// Act like addtimer. \tif atomic.Cas(\u0026t.status, status, timerModifying) { wasRemoved = true pending = false // timer already run or stopped \tbreak loop } releasem(mp) case timerDeleted: // Prevent preemption while the timer is in timerModifying. \t// This could lead to a self-deadlock. See #38070. \tmp = acquirem() if atomic.Cas(\u0026t.status, status, timerModifying) { atomic.Xadd(\u0026t.pp.ptr().deletedTimers, -1) pending = false // timer already stopped \tbreak loop } releasem(mp) case timerRunning, timerRemoving, timerMoving: // The timer is being run or moved, by a different P. \t// Wait for it to complete. \tosyield() case timerModifying: // Multiple simultaneous calls to modtimer. \t// Wait for the other call to complete. \tosyield() default: badTimer() } } t.period = period t.f = f t.arg = arg t.seq = seq // 如果已从P中移除，重新加入到P中 timerModifiying = timerWaiting \tif wasRemoved { t.when = when pp := getg().m.p.ptr() lock(\u0026pp.timersLock) doaddtimer(pp, t) unlock(\u0026pp.timersLock) if !atomic.Cas(\u0026t.status, timerModifying, timerWaiting) { badTimer() } releasem(mp) wakeNetPoller(when) } else { // The timer is in some other P's heap, so we can't change \t// the when field. If we did, the other P's heap would \t// be out of order. So we put the new when value in the \t// nextwhen field, and let the other P set the when field \t// when it is prepared to resort the heap. \tt.nextwhen = when // 如果修改后的时间\tnewStatus := uint32(timerModifiedLater) if when  t.when { newStatus = timerModifiedEarlier } tpp := t.pp.ptr() // Update the adjustTimers field. Subtract one if we \t// are removing a timerModifiedEarlier, add one if we \t// are adding a timerModifiedEarlier. \tadjust := int32(0) if status == timerModifiedEarlier { adjust-- } if newStatus == timerModifiedEarlier { adjust++ updateTimerModifiedEarliest(tpp, when) } if adjust != 0 { atomic.Xadd(\u0026tpp.adjustTimers, adjust) } // Set the new status of the timer. \tif !atomic.Cas(\u0026t.status, timerModifying, newStatus) { badTimer() } releasem(mp) // If the new status is earlier, wake up the poller.  // 如果新状态提前 timerModifiedEarlier，则调用 wakeNetPooler 唤醒网络轮询器中休眠的线程,检查计时器被唤醒的时间（when）是否在当前轮询预期运行的时间（pollerPollUntil）内，若是则唤醒。 \tif newStatus == timerModifiedEarlier { wakeNetPoller(when) } } return pending }   如果当前定时器已从P堆中删除，则重新加入P堆中；\n如果修改后的时间提前了，则修改状态为 timerModifiedEarlier，同时唤醒netpool中休眠的线程。\nTimer.Stop \u0026 Ticker.Stop 1 2 3 4 5 6  // Stop turns off a ticker. After Stop, no more ticks will be sent. // Stop does not close the channel, to prevent a concurrent goroutine // reading from the channel from seeing an erroneous \"tick\". func (t *Ticker) Stop() { stopTimer(\u0026t.r) }   1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28  // Stop prevents the Timer from firing. // It returns true if the call stops the timer, false if the timer has already // expired or been stopped. // Stop does not close the channel, to prevent a read from the channel succeeding // incorrectly. // // To ensure the channel is empty after a call to Stop, check the // return value and drain the channel. // For example, assuming the program has not received from t.C already: // // if !t.Stop() { // // } // // This cannot be done concurrent to other receives from the Timer's // channel or other calls to the Timer's Stop method. // // For a timer created with AfterFunc(d, f), if t.Stop returns false, then the timer // has already expired and the function f has been started in its own goroutine; // Stop does not wait for f to complete before returning. // If the caller needs to know whether f is completed, it must coordinate // with f explicitly. func (t *Timer) Stop() bool { if t.r.f == nil { panic(\"time: Stop called on uninitialized Timer\") } return stopTimer(\u0026t.r) }   Timer 和 Ticker 都是调用的 stopTimer。\n1 2 3 4 5 6  // stopTimer stops a timer. // It reports whether t was stopped before being run. //go:linkname stopTimer time.stopTimer func stopTimer(t *timer) bool { return deltimer(t) }   deltimer 在上面也看到过了。\n小结 Go 语言的计时器在并发编程起到了非常重要的作用，它能够为我们提供比较准确的相对时间，基于它的功能，标准库中还提供了定时器、休眠等接口能够我们在 Go 语言程序中更好地处理过期和超时等问题。\n标准库中的计时器在大多数情况下是能够正常工作并且高效完成任务的，但是在遇到极端情况或者性能敏感场景时，它可能没有办法胜任，而在 10ms 的这个粒度中，作者在社区中也没有找到能够使用的计时器实现，一些使用时间轮算法的开源库也不能很好地完成这个任务。\n参考 Go中定时器实现原理及源码解析\n6.3 计时器\nRuntime: Golang 定时器实现原理及源码解析\n",
-  "wordCount" : "16548",
-  "inLanguage": "zh-cn",
-  "datePublished": "2019-10-21T15:23:59Z",
-  "dateModified": "2019-10-21T15:23:59Z",
-  "mainEntityOfPage": {
-    "@type": "WebPage",
-    "@id": "/post/go%E7%9A%84timer%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/"
-  },
-  "publisher": {
-    "@type": "Organization",
-    "name": "Forz Blog",
-    "logo": {
-      "@type": "ImageObject",
-      "url": "/favicon.ico"
-    }
-  }
-}
-</script>
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
 </head>
-
-<body class="" id="top">
-<script>
-    if (localStorage.getItem("pref-theme") === "dark") {
-        document.body.classList.add('dark');
-    } else if (localStorage.getItem("pref-theme") === "light") {
-        document.body.classList.remove('dark')
-    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        document.body.classList.add('dark');
-    }
-
-</script>
-<noscript>
-    <style type="text/css">
-        #theme-toggle,
-        .top-link {
-            display: none;
-        }
-
-    </style>
-    <style>
-        @media (prefers-color-scheme: dark) {
-            :root {
-                --theme: #1d1e20;
-                --entry: #2e2e33;
-                --primary: rgba(255, 255, 255, 0.84);
-                --secondary: rgba(255, 255, 255, 0.56);
-                --tertiary: rgba(255, 255, 255, 0.16);
-                --content: rgba(255, 255, 255, 0.74);
-                --hljs-bg: #2e2e33;
-                --code-bg: #37383e;
-                --border: #333;
-            }
-
-            .list {
-                background: var(--theme);
-            }
-
-            .list:not(.dark)::-webkit-scrollbar-track {
-                background: 0 0;
-            }
-
-            .list:not(.dark)::-webkit-scrollbar-thumb {
-                border-color: var(--theme);
-            }
-        }
-
-    </style>
-</noscript>
-
-<header class="header">
-    <nav class="nav">
-        <div class="logo">
-            <a href="/" accesskey="h" title="Forz Blog (Alt + H)">Forz Blog</a>
-            <span class="logo-switches">
-                <button id="theme-toggle" accesskey="t" title="(Alt + T)">
-                    <svg id="moon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
-                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round">
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-                    </svg>
-                    <svg id="sun" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
-                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="5"></circle>
-                        <line x1="12" y1="1" x2="12" y2="3"></line>
-                        <line x1="12" y1="21" x2="12" y2="23"></line>
-                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                        <line x1="1" y1="12" x2="3" y2="12"></line>
-                        <line x1="21" y1="12" x2="23" y2="12"></line>
-                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                    </svg>
-                </button>
-            </span>
-        </div>
-        <ul id="menu">
-            <li>
-                <a href="/" title="Home">
-                    <span>Home</span>
-                </a>
-            </li>
-            <li>
-                <a href="/post/" title="Archives">
-                    <span>Archives</span>
-                </a>
-            </li>
-            <li>
-                <a href="/tags/" title="Tags">
-                    <span>Tags</span>
-                </a>
-            </li>
-            <li>
-                <a href="/categories/" title="Categories">
-                    <span>Categories</span>
-                </a>
-            </li>
-        </ul>
-    </nav>
-</header>
-<main class="main">
-
-<article class="post-single">
-  <header class="post-header">
-    
-    <h1 class="post-title">
-      Go的timer源码剖析
-    </h1>
-    <div class="post-meta">October 21, 2019
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
 </div>
-  </header> 
-  <div class="post-content"><h2 id="前言">前言<a hidden class="anchor" aria-hidden="true" href="#前言">#</a></h2>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+</nav>
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="clearfix">
+  <div class="logo-wrapper">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+
+  <nav class="site-navbar">
+    <ul id="menu" class="menu">
+      <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+
+<div class="search-container">
+  <div class="aa-input-container" id="aa-input-container">
+    <input type="search" id="aa-search-input" class="aa-input-search" placeholder="Search for titles or URIs..."
+        name="search" autocomplete="off" />
+    <svg class="aa-input-icon" viewBox="654 -372 1664 1664">
+        <path
+            d="M1806,332c0-123.3-43.8-228.8-131.5-316.5C1586.8-72.2,1481.3-116,1358-116s-228.8,43.8-316.5,131.5  C953.8,103.2,910,208.7,910,332s43.8,228.8,131.5,316.5C1129.2,736.2,1234.7,780,1358,780s228.8-43.8,316.5-131.5  C1762.2,560.8,1806,455.3,1806,332z M2318,1164c0,34.7-12.7,64.7-38,90s-55.3,38-90,38c-36,0-66-12.7-90-38l-343-342  c-119.3,82.7-252.3,124-399,124c-95.3,0-186.5-18.5-273.5-55.5s-162-87-225-150s-113-138-150-225S654,427.3,654,332  s18.5-186.5,55.5-273.5s87-162,150-225s138-113,225-150S1262.7-372,1358-372s186.5,18.5,273.5,55.5s162,87,225,150s113,138,150,225  S2062,236.7,2062,332c0,146.7-41.3,279.7-124,399l343,343C2305.7,1098.7,2318,1128.7,2318,1164z" />
+    </svg>
+</div>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/algoliasearch.min.js"></script>
+<script
+    src="https://res.cloudinary.com/jimmysong/raw/upload/rootsongjc-hugo/autocomplete.min.js"></script>
+<script>
+    var client = algoliasearch("IAR2EF5L65", "b4b9da2eba53aa6dabe4b8ac9e8676e1");
+    var index = client.initIndex('forz.forzvina.com');
+    autocomplete('#aa-search-input',
+        { hint: false }, {
+        source: autocomplete.sources.hits(index, { hitsPerPage: 8 }),
+        displayKey: 'name',
+        templates: {
+            suggestion: function (suggestion) {
+                var reg = /([A-Z]+)/ig
+                var title = suggestion.uri.replace(reg, function (m) {
+                    return m.toLowerCase()
+                })
+                return '<span class="search-item">' + '<a href="\/' + title + '">' +
+                    suggestion._highlightResult.title.value + '</a></span>';
+            }
+        }
+    });
+</script>
+</div>
+
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Go的timer源码剖析</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2019-10-21 </span>
+        <div class="post-category">
+            <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
+            </div>
+          <span class="more-meta"> 约 16548 字 </span>
+          <span class="more-meta"> 预计阅读 34 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#前言">前言</a></li>
+    <li><a href="#设计原理">设计原理</a>
+      <ul>
+        <li><a href="#全局四叉堆">全局四叉堆</a></li>
+        <li><a href="#分片四叉堆">分片四叉堆</a></li>
+        <li><a href="#timer-114">timer 1.14</a></li>
+      </ul>
+    </li>
+    <li><a href="#数据结构">数据结构</a>
+      <ul>
+        <li><a href="#timer">timer</a></li>
+        <li><a href="#timer-1">Timer</a></li>
+        <li><a href="#四叉小顶堆">四叉小顶堆</a></li>
+      </ul>
+    </li>
+    <li><a href="#状态机">状态机</a>
+      <ul>
+        <li><a href="#addtimer">addtimer</a></li>
+        <li><a href="#deltimer">deltimer</a></li>
+        <li><a href="#modtimer">modtimer</a></li>
+        <li><a href="#cleantimers">cleantimers</a></li>
+        <li><a href="#adjusttimers">adjusttimers</a></li>
+        <li><a href="#runtimer">runtimer</a></li>
+      </ul>
+    </li>
+    <li><a href="#触发时机">触发时机</a>
+      <ul>
+        <li><a href="#调度器">调度器</a></li>
+        <li><a href="#系统监控">系统监控</a></li>
+      </ul>
+    </li>
+    <li><a href="#核心api">核心API</a>
+      <ul>
+        <li><a href="#newtimer">NewTimer</a></li>
+        <li><a href="#timerafter">timer.After</a></li>
+        <li><a href="#timerafterfunc">Timer.AfterFunc</a></li>
+        <li><a href="#timertick">timer.Tick</a></li>
+        <li><a href="#timerreset">Timer.Reset</a></li>
+        <li><a href="#timerstop--tickerstop">Timer.Stop &amp; Ticker.Stop</a></li>
+      </ul>
+    </li>
+    <li><a href="#小结">小结</a></li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="前言">前言</h2>
 <p>准确的时间对于任何一个正在运行的应用非常重要，但是在分布式系统中我们很难保证各个节点的绝对时间一致，哪怕通过 NTP 这种标准的对时协议也只能把各个节点上时间的误差控制在毫秒级，所以准确的相对时间在分布式系统中显得更为重要，本节会分析用于获取相对时间的计时器的设计与实现原理。</p>
-<h2 id="设计原理">设计原理<a hidden class="anchor" aria-hidden="true" href="#设计原理">#</a></h2>
+<h2 id="设计原理">设计原理</h2>
 <p>Go 语言从实现计时器到现在经历过很多个版本的迭代，到最新的版本为止，计时器的实现分别经历了以下几个过程：</p>
 <ol>
 <li>Go 1.9 版本之前，所有的计时器由全局唯一的四叉堆维护；</li>
@@ -205,7 +233,7 @@
 <li>Go 1.14 版本之后，每个处理器单独管理计时器并通过网络轮询器触发；</li>
 </ol>
 <p>我们在这一节会分别介绍计时器在不同版本的不同设计，梳理计时器实现的演进过程。</p>
-<h3 id="全局四叉堆">全局四叉堆<a hidden class="anchor" aria-hidden="true" href="#全局四叉堆">#</a></h3>
+<h3 id="全局四叉堆">全局四叉堆</h3>
 <p>Go 1.10 之前的计时器都使用最小四叉堆实现，所有的计时器都会存储在如下所示的结构体 runtime.timers:093adee 中：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -238,10 +266,9 @@
 <li>四叉堆中的计时器到期；</li>
 <li>四叉堆中加入了触发时间更早的新计时器；</li>
 </ul>
-<p><img loading="lazy" src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210706235449.png" alt=""  />
-</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210706235449.png" alt=""></p>
 <p>然而全局四叉堆共用的互斥锁对计时器的影响非常大，计时器的各种操作都需要获取全局唯一的互斥锁，这会严重影响计时器的性能.</p>
-<h3 id="分片四叉堆">分片四叉堆<a hidden class="anchor" aria-hidden="true" href="#分片四叉堆">#</a></h3>
+<h3 id="分片四叉堆">分片四叉堆</h3>
 <p>Go 1.10 将全局的四叉堆分割成了 64 个更小的四叉堆。在理想情况下，四叉堆的数量应该等于处理器的数量，但是这需要实现动态的分配过程，所以经过权衡最终选择初始化 64 个四叉堆，以牺牲内存占用的代价换取性能的提升。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -282,10 +309,9 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>如果当前机器上的处理器 P 的个数超过了 64，多个处理器上的计时器就可能存储在同一个桶中。每一个计时器桶都由一个运行 <code>runtime.timerproc:76f4fd8</code> 函数的 Goroutine 处理。</p>
-<p><img loading="lazy" src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210707001631.png" alt=""  />
-</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210707001631.png" alt=""></p>
 <p>将全局计时器分片的方式，虽然能够降低锁的粒度，提高计时器的性能，但是 <code>runtime.timerproc:76f4fd8</code> 造成的处理器和线程之间频繁的上下文切换却成为了影响计时器性能的首要因素</p>
-<h3 id="timer-114">timer 1.14<a hidden class="anchor" aria-hidden="true" href="#timer-114">#</a></h3>
+<h3 id="timer-114">timer 1.14</h3>
 <ul>
 <li>调整:
 <ul>
@@ -311,8 +337,7 @@
 </li>
 </ul>
 <p>在最新版本的实现中，计时器桶已经被移除，所有的计时器都以最小四叉堆的形式存储在处理器 runtime.p 中。</p>
-<p><img loading="lazy" src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210707144554.png" alt=""  />
-</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210707144554.png" alt=""></p>
 <p>处理器 runtime.p 中与计时器相关的有以下字段：</p>
 <ul>
 <li>timersLock — 用于保护计时器的互斥锁；</li>
@@ -356,11 +381,10 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>原本用于管理计时器的 <code>runtime.timerproc:76f4fd8</code> 也已经被移除，目前计时器都交由处理器的网络轮询器和调度器触发，这种方式能够充分利用本地性、减少上下文的切换开销，也是目前性能最好的实现方式。</p>
-<h2 id="数据结构">数据结构<a hidden class="anchor" aria-hidden="true" href="#数据结构">#</a></h2>
-<h3 id="timer">timer<a hidden class="anchor" aria-hidden="true" href="#timer">#</a></h3>
+<h2 id="数据结构">数据结构</h2>
+<h3 id="timer">timer</h3>
 <p>runtime.timer 是 Go 语言计时器的内部表示，每一个计时器都存储在对应处理器的最小四叉堆中，下面是运行时计时器对应的结构体：</p>
-<p><img loading="lazy" src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810212645.png" alt=""  />
-</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810212645.png" alt=""></p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -398,7 +422,7 @@
 <li>status — 计时器的状态；</li>
 <li>pp - 当前对应的处理器P的指针</li>
 </ul>
-<h3 id="timer-1">Timer<a hidden class="anchor" aria-hidden="true" href="#timer-1">#</a></h3>
+<h3 id="timer-1">Timer</h3>
 <p>Timer 类型代表单次时间事件。当 Timer 到期时，当时的时间会被发送给 C (channel)，除非 Timer 是被 AfterFunc 函数创建的。</p>
 <p>注意：Timer 的实例必须通过 NewTimer 或 AfterFunc 获得。</p>
 <p>然而这里的 <code>runtime.timer</code> 只是计时器运行时的私有结构体，对外暴露的计时器使用 <code>time.Timer</code> 结构体：</p>
@@ -458,12 +482,11 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="四叉小顶堆">四叉小顶堆<a hidden class="anchor" aria-hidden="true" href="#四叉小顶堆">#</a></h3>
+</div><h3 id="四叉小顶堆">四叉小顶堆</h3>
 <p>四叉堆高度上比二叉堆要矮一些。一个节点的所有(最多有4个)孩子节点都比这个节点要大。一个节点的(只有一个)父节点一定比当前节点小。下面是填好值之后的一个典型的四叉堆:</p>
-<p><img loading="lazy" src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210707193528.png" alt=""  />
-</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210707193528.png" alt=""></p>
 <p>和二叉堆一样，对于一个节点的要求只有和其父节点以及子节点之间的大小关系。相邻节点之间没有任何关系。</p>
-<h4 id="向上调整">向上调整<a hidden class="anchor" aria-hidden="true" href="#向上调整">#</a></h4>
+<h4 id="向上调整">向上调整</h4>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -540,7 +563,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="向下调整">向下调整<a hidden class="anchor" aria-hidden="true" href="#向下调整">#</a></h4>
+</div><h4 id="向下调整">向下调整</h4>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -633,7 +656,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h2 id="状态机">状态机<a hidden class="anchor" aria-hidden="true" href="#状态机">#</a></h2>
+</div><h2 id="状态机">状态机</h2>
 <p>运行时使用状态机的方式处理全部的计时器，其中包括 10 种状态和几种操作。由于 Go 语言的计时器需要同时支持增加、删除、修改和重置等操作，所以它的状态非常复杂，目前会包含以下 10 种可能：</p>
 <table>
 <thead>
@@ -702,7 +725,7 @@
 <li>runtime.runtimer — 检查队列头中的计时器，在其准备就绪时运行该计时器；</li>
 </ul>
 <p>我们在这里会依次分析计时器的上述 7 个不同操作。</p>
-<h3 id="addtimer">addtimer<a hidden class="anchor" aria-hidden="true" href="#addtimer">#</a></h3>
+<h3 id="addtimer">addtimer</h3>
 <p>当我们调用 time.NewTimer 增加新的计时器时，会执行程序中的 runtime.addtimer 函数根据以下的规则处理计时器：</p>
 <ul>
 <li>timerNoStatus -&gt; timerWaiting</li>
@@ -808,7 +831,7 @@
 <li>调用 wakeNetPoller 函数，唤醒网络轮询器中休眠的线程,检查计时器被唤醒的时间（when）是否在当前轮询预期运行的时间（pollerPollUntil）内，若是则唤醒。</li>
 </ol>
 <p>每次增加新的计时器都会中断正在阻塞的轮询，触发调度器检查是否有计时器到期，我们会在后面详细介绍计时器的触发过程。</p>
-<h4 id="doaddtimer">doaddtimer<a hidden class="anchor" aria-hidden="true" href="#doaddtimer">#</a></h4>
+<h4 id="doaddtimer">doaddtimer</h4>
 <p>doaddtimer 函数实际上很简单，主要是将 timer 与 P 设置关联关系，并将 timer 加入到 P 的 timer 列表中，并维护 timer 列表最小堆的顺序。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -870,7 +893,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="wakenetpoller">wakeNetPoller<a hidden class="anchor" aria-hidden="true" href="#wakenetpoller">#</a></h4>
+</div><h4 id="wakenetpoller">wakeNetPoller</h4>
 <p>wakeNetPoller 主要是将 timer 下次调度的时间和 netpoller 的下一次轮询时间相比，如果小于的话，调用 netpollBreak 向 netpollBreakWr 里面写入数据，立即中断netpoll.</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1191,7 +1214,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>所以在调用 runtime.addtimer 添加 timer 的时候进行 netpoll 的中断操作可以更加灵敏的响应 timer 这类时间敏感的任务。</p>
-<h3 id="deltimer">deltimer<a hidden class="anchor" aria-hidden="true" href="#deltimer">#</a></h3>
+<h3 id="deltimer">deltimer</h3>
 <p><code>runtime.deltimer</code> 函数会标记需要删除的计时器，它会根据以下的规则处理计时器：</p>
 <ul>
 <li>timerWaiting -&gt; timerModifying -&gt; timerDeleted</li>
@@ -1336,7 +1359,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="modtimer">modtimer<a hidden class="anchor" aria-hidden="true" href="#modtimer">#</a></h3>
+</div><h3 id="modtimer">modtimer</h3>
 <p>runtime.modtimer 会修改已经存在的计时器，它会根据以下的规则处理计时器：</p>
 <ul>
 <li>timerWaiting -&gt; timerModifying -&gt; timerModifiedXX</li>
@@ -1611,7 +1634,7 @@
 <li>如果修改后的时间小于修改前时间，设置计时器的状态为 timerModifiedEarlier 并调用 runtime.netpollBreak 触发调度器的重新调度；</li>
 </ul>
 <p>因为修改后的时间会影响计时器的处理，所以用于修改计时器的 runtime.modtimer 也是状态机中最复杂的函数了。</p>
-<h3 id="cleantimers">cleantimers<a hidden class="anchor" aria-hidden="true" href="#cleantimers">#</a></h3>
+<h3 id="cleantimers">cleantimers</h3>
 <p>runtime.cleantimers 函数会根据状态清理处理器队列头中的计时器，该函数会遵循以下的规则修改计时器的触发时间：</p>
 <ul>
 <li>timerDeleted -&gt; timerRemoving -&gt; timerRemoved</li>
@@ -1772,7 +1795,7 @@
 </li>
 </ul>
 <p>runtime.cleantimers 会删除已经标记的计时器，修改状态为 timerModifiedXX 的计时器。</p>
-<h3 id="adjusttimers">adjusttimers<a hidden class="anchor" aria-hidden="true" href="#adjusttimers">#</a></h3>
+<h3 id="adjusttimers">adjusttimers</h3>
 <p><code>runtime.adjusttimers</code> 与 <code>runtime.cleantimers</code> 的作用相似，它们都会删除堆中的计时器并修改状态为 <code>timerModifiedEarlier</code> 和 <code>timerModifiedLater</code> 的计时器的时间，它们也会遵循相同的规则处理计时器状态：</p>
 <ul>
 <li>timerDeleted -&gt; timerRemoving -&gt; timerRemoved</li>
@@ -2043,7 +2066,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="runtimer">runtimer<a hidden class="anchor" aria-hidden="true" href="#runtimer">#</a></h3>
+</div><h3 id="runtimer">runtimer</h3>
 <p>runtime.runtimer 函数会检查处理器四叉堆上最顶上的计时器，该函数也会处理计时器的删除以及计时器时间的更新，它会遵循以下的规则处理计时器：</p>
 <ul>
 <li>timerNoStatus -&gt; 崩溃：未初始化的计时器</li>
@@ -2229,7 +2252,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="runonetimer">runOneTimer<a hidden class="anchor" aria-hidden="true" href="#runonetimer">#</a></h4>
+</div><h4 id="runonetimer">runOneTimer</h4>
 <p>runOneTimer 会根据 period 是否大于0判断该 timer 是否需要反复执行，如果是的话需要重新调整 when 下次执行时间后重新调整该 timer 在堆中的位置。一次性 timer 的话会执行 dodeltimer0 删除该 timer ，最后运行 timer 中的函数；</p>
 <p>如果处理器四叉堆顶部的计时器没有到触发时间会直接返回，否则调用 runtime.runOneTimer 运行堆顶的计时器：</p>
 <div class="highlight"><div class="chroma">
@@ -2373,22 +2396,21 @@
 </li>
 </ul>
 <p>更新计时器之后，上述函数会运行计时器中存储的函数并传入触发时间等参数。</p>
-<h2 id="触发时机">触发时机<a hidden class="anchor" aria-hidden="true" href="#触发时机">#</a></h2>
+<h2 id="触发时机">触发时机</h2>
 <p>我们在上一小节已经分析了计时器状态机中的 10 种状态以及几种操作。这里将分析器的触发过程，Go 语言会在两个模块触发计时器，运行计时器中保存的函数：</p>
 <ul>
 <li>调度器调度时会检查处理器中的计时器是否准备就绪；</li>
 <li>系统监控会检查是否有未执行的到期计时器；</li>
 </ul>
 <p>我们将依次分析上述这两个触发过程。</p>
-<h3 id="调度器">调度器<a hidden class="anchor" aria-hidden="true" href="#调度器">#</a></h3>
+<h3 id="调度器">调度器</h3>
 <p>runtime.checkTimers 是调度器用来运行处理器中计时器的函数，它会在发生以下情况时被调用：</p>
 <ul>
 <li>调度器调用 runtime.schedule 执行调度时；</li>
 <li>调度器调用 runtime.findrunnable 获取可执行的 Goroutine 时；</li>
 <li>调度器调用 runtime.findrunnable 从其他处理器窃取计时器时；</li>
 </ul>
-<p><img loading="lazy" src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810212721.png" alt=""  />
-</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210810212721.png" alt=""></p>
 <p>runtime.schedule</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2644,7 +2666,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="系统监控">系统监控<a hidden class="anchor" aria-hidden="true" href="#系统监控">#</a></h3>
+</div><h3 id="系统监控">系统监控</h3>
 <p>系统监控其实就是 Go 语言的守护进程，它们能够在后台监控系统的运行状态，在出现意外情况时及时响应。它会每隔一段时间检查 Go 语言运行时状态，确保没有异常发生。我们这里不主要去讲系统监控，只抽离出其中的和 timer 相关的代码进行讲解。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2906,8 +2928,8 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h2 id="核心api">核心API<a hidden class="anchor" aria-hidden="true" href="#核心api">#</a></h2>
-<h3 id="newtimer">NewTimer<a hidden class="anchor" aria-hidden="true" href="#newtimer">#</a></h3>
+</div><h2 id="核心api">核心API</h2>
+<h3 id="newtimer">NewTimer</h3>
 <p>我们先看看NewTimer方法是如何创建一个Timer的：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -3058,7 +3080,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="timerafter">timer.After<a hidden class="anchor" aria-hidden="true" href="#timerafter">#</a></h3>
+</div><h3 id="timerafter">timer.After</h3>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt">1
@@ -3083,7 +3105,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="timerafterfunc">Timer.AfterFunc<a hidden class="anchor" aria-hidden="true" href="#timerafterfunc">#</a></h3>
+</div><h3 id="timerafterfunc">Timer.AfterFunc</h3>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -3127,7 +3149,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>注意：从AfterFunc源码可以看到，外面传入的f参数并非直接赋值给了内部的f，而是作为wrapper function：goFunc的arg传入的。而goFunc则是启动了一个新的goroutine来执行那个外部传入的f。这是因为timer expire对应的事件处理函数的执行是在go runtime内唯一的timer events maintenance goroutine: timerproc中。为了不block timerproc的执行，必须启动一个新的goroutine。</p>
-<h3 id="timertick">timer.Tick<a hidden class="anchor" aria-hidden="true" href="#timertick">#</a></h3>
+<h3 id="timertick">timer.Tick</h3>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt">1
@@ -3215,7 +3237,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>可以看到， Ticker 和 Timer 的 r 成员就只差在 period 这一个字段上，每隔一个 period 就往 channel 里发数据的就是 Ticker，而 fire and disappear 的就是 Timer。</p>
-<h3 id="timerreset">Timer.Reset<a hidden class="anchor" aria-hidden="true" href="#timerreset">#</a></h3>
+<h3 id="timerreset">Timer.Reset</h3>
 <p>对于 timer.Reset() 函数，对应的是resetTimer</p>
 <p>这与修改操作对应的是同一个 modtimer() 函数。</p>
 <p>对于这个函数的一般会被网络轮询、timer.Ticker.Reset 或 timer.Timer.Reset 函数调用。</p>
@@ -3605,7 +3627,7 @@
 </div>
 </div><p>如果当前定时器已从P堆中删除，则重新加入P堆中；</p>
 <p>如果修改后的时间提前了，则修改状态为 timerModifiedEarlier，同时唤醒netpool中休眠的线程。</p>
-<h3 id="timerstop--tickerstop">Timer.Stop &amp; Ticker.Stop<a hidden class="anchor" aria-hidden="true" href="#timerstop--tickerstop">#</a></h3>
+<h3 id="timerstop--tickerstop">Timer.Stop &amp; Ticker.Stop</h3>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt">1
@@ -3706,94 +3728,121 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>deltimer 在上面也看到过了。</p>
-<h2 id="小结">小结<a hidden class="anchor" aria-hidden="true" href="#小结">#</a></h2>
+<h2 id="小结">小结</h2>
 <p>Go 语言的计时器在并发编程起到了非常重要的作用，它能够为我们提供比较准确的相对时间，基于它的功能，标准库中还提供了定时器、休眠等接口能够我们在 Go 语言程序中更好地处理过期和超时等问题。</p>
 <p>标准库中的计时器在大多数情况下是能够正常工作并且高效完成任务的，但是在遇到极端情况或者性能敏感场景时，它可能没有办法胜任，而在 10ms 的这个粒度中，作者在社区中也没有找到能够使用的计时器实现，一些使用时间轮算法的开源库也不能很好地完成这个任务。</p>
-<h2 id="参考">参考<a hidden class="anchor" aria-hidden="true" href="#参考">#</a></h2>
+<h2 id="参考">参考</h2>
 <p><a href="https://www.luozhiyun.com/archives/458">Go中定时器实现原理及源码解析</a></p>
 <p><a href="https://draveness.me/golang/docs/part3-runtime/ch06-concurrency/golang-timer/#63-%e8%ae%a1%e6%97%b6%e5%99%a8">6.3 计时器</a></p>
 <p><a href="https://blog.haohtml.com/archives/25962">Runtime: Golang 定时器实现原理及源码解析</a></p>
 
+    </div>
 
-  </div>
-
-  <footer class="post-footer">
-    <ul class="post-tags">
-      <li><a href="/tags/go/">Go</a></li>
-      <li><a href="/tags/%E8%AE%A1%E6%97%B6%E5%99%A8/">计时器</a></li>
-    </ul>
-  </footer>
-</article>
-    </main>
-    
-<footer class="footer">
-    <span>&copy; 2021 <a href="/">Forz Blog</a></span>
-    <span>
-        Powered by
-        <a href="https://gohugo.io/" rel="noopener noreferrer" target="_blank">Hugo</a> &
-        <a href="https://git.io/hugopapermod" rel="noopener" target="_blank">PaperMod</a>
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2019-10-21
+        
     </span>
-</footer>
-<a href="#top" aria-label="go to top" title="Go to Top (Alt + G)">
-    <button class="top-link" id="top-link" type="button" accesskey="g">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 6" fill="currentColor">
-            <path d="M12 6H0l6-6z" />
-        </svg>
-    </button>
-</a>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go/">Go</a>
+          <a href="/tags/%E8%AE%A1%E6%97%B6%E5%99%A8/">计时器</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/go%E7%9A%84timer%E5%92%8Cticker%E7%94%A8%E6%B3%95/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Go的timer和ticker用法</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/linux%E5%86%85%E6%A0%B8%E6%97%B6%E9%92%9F%E7%B3%BB%E7%BB%9F%E5%92%8C%E5%AE%9A%E6%97%B6%E5%99%A8%E5%AE%9E%E7%8E%B0/">
+            <span class="next-text nav-default">Linux内核时钟系统和定时器实现</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
 
-<script>
-    let menu = document.getElementById('menu')
-    menu.scrollLeft = localStorage.getItem("menu-scroll-position");
-    menu.onscroll = function () {
-        localStorage.setItem("menu-scroll-position", menu.scrollLeft);
-    }
+  
 
-    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-        anchor.addEventListener("click", function (e) {
-            e.preventDefault();
-            var id = this.getAttribute("href").substr(1);
-            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView({
-                    behavior: "smooth"
-                });
-            } else {
-                document.querySelector(`[id='${decodeURIComponent(id)}']`).scrollIntoView();
-            }
-            if (id === "top") {
-                history.replaceState(null, null, " ");
-            } else {
-                history.pushState(null, null, `#${id}`);
-            }
-        });
-    });
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
 
-</script>
-<script>
-    var mybutton = document.getElementById("top-link");
-    window.onscroll = function () {
-        if (document.body.scrollTop > 800 || document.documentElement.scrollTop > 800) {
-            mybutton.style.visibility = "visible";
-            mybutton.style.opacity = "1";
-        } else {
-            mybutton.style.visibility = "hidden";
-            mybutton.style.opacity = "0";
-        }
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021
+    <span class="heart">
+      <i class="iconfont icon-heart"></i>
+    </span>
+    <span class="author">Forz</span>
+  </span>
+</div>
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+<script type="text/javascript" src="/dist/even.26188efa.min.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]},
+      showProcessingMessages: false,
+      messageStyle: 'none'
     };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@2.7.5/MathJax.js?config=TeX-MML-AM_CHTML"  integrity="sha256-nvJJv9wWKEm88qvoQl9ekL2J+k/RWIsaSScxxlsrv8k=" crossorigin="anonymous"></script>
 
-</script>
-<script>
-    document.getElementById("theme-toggle").addEventListener("click", () => {
-        if (document.body.className.includes("dark")) {
-            document.body.classList.remove('dark');
-            localStorage.setItem("pref-theme", 'light');
-        } else {
-            document.body.classList.add('dark');
-            localStorage.setItem("pref-theme", 'dark');
-        }
-    })
 
-</script>
+
+
+
+
+
+
 </body>
-
 </html>
