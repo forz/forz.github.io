@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Go语言观察GC的几种方式 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="前言 我们以下面的程序为例，先使用四种不同的方式来介绍如何观察 GC，并在后面的问题中通过几个详细的例子再来讨论如何优化 GC。 1 2 3 4 5 6 7 8 9" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.88.1 with theme even" />
+
+
+<link rel="canonical" href="/post/go%E8%AF%AD%E8%A8%80%E8%A7%82%E5%AF%9Fgc%E7%9A%84%E5%87%A0%E7%A7%8D%E6%96%B9%E5%BC%8F/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.98f8e47918247c097fa26317cbb567fe9f05503485bf08d8547f5579543303b1.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Go语言观察GC的几种方式" />
+<meta property="og:description" content="前言 我们以下面的程序为例，先使用四种不同的方式来介绍如何观察 GC，并在后面的问题中通过几个详细的例子再来讨论如何优化 GC。 1 2 3 4 5 6 7 8 9" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/go%E8%AF%AD%E8%A8%80%E8%A7%82%E5%AF%9Fgc%E7%9A%84%E5%87%A0%E7%A7%8D%E6%96%B9%E5%BC%8F/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-09-08T16:23:07+00:00" />
+<meta property="article:modified_time" content="2021-09-08T16:23:07+00:00" />
+
+<meta itemprop="name" content="Go语言观察GC的几种方式">
+<meta itemprop="description" content="前言 我们以下面的程序为例，先使用四种不同的方式来介绍如何观察 GC，并在后面的问题中通过几个详细的例子再来讨论如何优化 GC。 1 2 3 4 5 6 7 8 9"><meta itemprop="datePublished" content="2021-09-08T16:23:07+00:00" />
+<meta itemprop="dateModified" content="2021-09-08T16:23:07+00:00" />
+<meta itemprop="wordCount" content="2654">
+<meta itemprop="keywords" content="Go," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Go语言观察GC的几种方式"/>
+<meta name="twitter:description" content="前言 我们以下面的程序为例，先使用四种不同的方式来介绍如何观察 GC，并在后面的问题中通过几个详细的例子再来讨论如何优化 GC。 1 2 3 4 5 6 7 8 9"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">Forz Blog</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+      <a class="menu-item-link" href="/">Home</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/post/">Archives</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/tags/">Tags</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/categories/">Categories</a>
+    </li>
+  </ul>
+</nav><div class="docsearch-input__container">
+  <input type="search" class="docsearch-input" placeholder="Search" />
+</div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Go语言观察GC的几种方式</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-09-08 </span>
+        <div class="post-category">
+            <a href="/categories/go/"> Go </a>
+            </div>
+          <span class="more-meta"> 约 2654 字 </span>
+          <span class="more-meta"> 预计阅读 6 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#前言">前言</a></li>
+    <li><a href="#go-tool-prof">go tool prof</a></li>
+    <li><a href="#go-tool-trace">go tool trace</a></li>
+    <li><a href="#godebuggctrace1">GODEBUG=gctrace=1</a></li>
+    <li><a href="#runtimereadmemstats">runtime.ReadMemStats</a></li>
+    <li><a href="#debugreadgcstats">debug.ReadGCStats</a></li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="前言">前言</h2>
+<p>我们以下面的程序为例，先使用四种不同的方式来介绍如何观察 GC，并在后面的问题中通过几个详细的例子再来讨论如何优化 GC。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kd">func</span> <span class="nf">allocate</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">_</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">20</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">for</span> <span class="nx">n</span> <span class="o">:=</span> <span class="mi">1</span><span class="p">;</span> <span class="nx">n</span> <span class="p">&lt;</span> <span class="mi">100000</span><span class="p">;</span> <span class="nx">n</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nf">allocate</span><span class="p">()</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="go-tool-prof">go tool prof</h2>
+<p>Go 基础性能分析工具，pprof的用法和启动方式参考go pprof性能分析，其中的heap即为内存分配分析，go tool默认是查看正在使用的内存(inuse_heap)，如果要看其它数据，使用go tool pprof &ndash;alloc_space|inuse_objects|alloc_objects。</p>
+<p>需要注意的是，go pprof本质是数据采样分析，其中的值并不是精确值，适用于性能热点优化，而非真实数据统计。</p>
+<h2 id="go-tool-trace">go tool trace</h2>
+<p>go tool trace 的主要功能是将统计而来的信息以一种可视化的方式展示给用户。要使用此工具，可以通过调用 trace API：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">f</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Create</span><span class="p">(</span><span class="s">&#34;trace.out&#34;</span><span class="p">)</span>
+    <span class="k">defer</span> <span class="nx">f</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+    <span class="nx">trace</span><span class="p">.</span><span class="nf">Start</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span>
+    <span class="k">defer</span> <span class="nx">trace</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+    <span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>并通过执行以下命令，来启动可视化界面：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="o">$</span> <span class="n">go</span> <span class="n">tool</span> <span class="n">trace</span> <span class="n">trace.out</span>
+<span class="m">2020</span><span class="o">/</span><span class="m">12</span><span class="o">/</span><span class="m">09</span> <span class="m">12</span><span class="o">:</span><span class="m">50</span><span class="o">:</span><span class="m">33</span> <span class="n">Parsing</span> <span class="n">trace...</span>
+<span class="m">2020</span><span class="o">/</span><span class="m">12</span><span class="o">/</span><span class="m">09</span> <span class="m">12</span><span class="o">:</span><span class="m">50</span><span class="o">:</span><span class="m">38</span> <span class="n">Splitting</span> <span class="n">trace...</span>
+<span class="m">2020</span><span class="o">/</span><span class="m">12</span><span class="o">/</span><span class="m">09</span> <span class="m">12</span><span class="o">:</span><span class="m">50</span><span class="o">:</span><span class="m">45</span> <span class="n">Opening</span> <span class="n">browser.</span> <span class="n">Trace</span> <span class="n">viewer</span> <span class="n">is</span> <span class="n">listening</span> <span class="n">on</span> <span class="o">&lt;</span><span class="n">http</span><span class="o">://</span><span class="m">127.0.0.1</span><span class="o">:</span><span class="m">51839</span><span class="o">&gt;</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210908163457.png" alt=""></p>
+<p>选择第一个链接可以获得如下图示：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210908163514.png" alt=""></p>
+<p>右上角的问号可以打开帮助菜单，包含的信息量比较广，横轴为时间线，各行为各种维度的度量，通过A/D左右移动，W/S放大放小。以下是各行的意义:</p>
+<ul>
+<li>Goroutines: 包含GCWaiting，Runnable，Running三种状态的Goroutine数量统计</li>
+<li>Heap: 包含当前堆使用量(Allocated)和下次GC阈值(NextGC)统计</li>
+<li>Threads: 包含正在运行和正在执行系统调用的Threads数量</li>
+<li>GC: 哪个时间段在执行GC</li>
+<li>ProcN: 各个P上面的goroutine调度情况</li>
+</ul>
+<p>除了View trace之外，trace目录的第二个Goroutine analysis也比较有用，它能够直观统计Goroutine的数量和执行状态:</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210908163808.png" alt="">
+<img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210908163819.png" alt=""></p>
+<p>通过它可以对各个goroutine进行健康诊断，各种network,syscall的采样数据下载下来之后可以直接通过go tool pprof分析，因此，实际上pprof和trace两套工具是相辅相成的。</p>
+<h2 id="godebuggctrace1">GODEBUG=gctrace=1</h2>
+<p>GC Trace是Golang提供的非侵入式查看GC信息的方案，用法很简单，设置GCDEBUG=gctrace=1环境变量即可.</p>
+<p>我们首先可以通过命令：<code>GODEBUG=gctrace=1 ./main</code> 来查看，如下所示：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="o">$</span> <span class="n">go</span> <span class="n">build</span> <span class="o">-</span><span class="n">o</span> <span class="n">main</span>
+<span class="o">$</span> <span class="n">GODEBUG</span><span class="o">=</span><span class="n">gctrace</span><span class="o">=</span><span class="m">1</span> <span class="n">./main</span>
+<span class="n">gc</span> <span class="m">1</span> <span class="o">@</span><span class="m">0.000</span><span class="n">s</span> <span class="m">2</span><span class="o">%: 0.009+0.23+0.004 ms clock, 0.11+0.083/0.019/0.14+0.049 ms cpu, 4-&gt;6-&gt;2 MB, 5 MB goal, 12 P
+</span><span class="o">scvg: 8 KB released
+</span><span class="o">scvg: inuse: 3, idle: 60, sys: 63, released: 57, consumed: 6 (MB)
+</span><span class="o">gc 2 @0.001s 2%:</span> <span class="m">0.018+1.1+0.029</span> <span class="n">ms</span> <span class="n">clock</span><span class="p">,</span> <span class="m">0.22+0.047</span><span class="o">/</span><span class="m">0.074</span><span class="o">/</span><span class="m">0.048+0.34</span> <span class="n">ms</span> <span class="n">cpu</span><span class="p">,</span> <span class="m">4</span><span class="o">-&gt;</span><span class="m">7</span><span class="o">-&gt;</span><span class="m">3</span> <span class="n">MB</span><span class="p">,</span> <span class="m">5</span> <span class="n">MB</span> <span class="n">goal</span><span class="p">,</span> <span class="m">12</span> <span class="n">P</span>
+<span class="n">scvg</span><span class="o">:</span> <span class="n">inuse</span><span class="o">:</span> <span class="m">3</span><span class="p">,</span> <span class="n">idle</span><span class="o">:</span> <span class="m">60</span><span class="p">,</span> <span class="n">sys</span><span class="o">:</span> <span class="m">63</span><span class="p">,</span> <span class="n">released</span><span class="o">:</span> <span class="m">56</span><span class="p">,</span> <span class="n">consumed</span><span class="o">:</span> <span class="m">7</span> <span class="p">(</span><span class="n">MB</span><span class="p">)</span>
+<span class="n">gc</span> <span class="m">3</span> <span class="o">@</span><span class="m">0.003</span><span class="n">s</span> <span class="m">2</span><span class="o">%: 0.018+0.59+0.011 ms clock, 0.22+0.073/0.008/0.042+0.13 ms cpu, 5-&gt;6-&gt;1 MB, 6 MB goal, 12 P
+</span><span class="o">scvg: 8 KB released
+</span><span class="o">scvg: inuse: 2, idle: 61, sys: 63, released: 56, consumed: 7 (MB)
+</span><span class="o">gc 4 @0.003s 4%:</span> <span class="m">0.019+0.70+0.054</span> <span class="n">ms</span> <span class="n">clock</span><span class="p">,</span> <span class="m">0.23+0.051</span><span class="o">/</span><span class="m">0.047</span><span class="o">/</span><span class="m">0.085+0.65</span> <span class="n">ms</span> <span class="n">cpu</span><span class="p">,</span> <span class="m">4</span><span class="o">-&gt;</span><span class="m">6</span><span class="o">-&gt;</span><span class="m">2</span> <span class="n">MB</span><span class="p">,</span> <span class="m">5</span> <span class="n">MB</span> <span class="n">goal</span><span class="p">,</span> <span class="m">12</span> <span class="n">P</span>
+<span class="n">scvg</span><span class="o">:</span> <span class="m">8</span> <span class="n">KB</span> <span class="n">released</span>
+<span class="n">scvg</span><span class="o">:</span> <span class="n">inuse</span><span class="o">:</span> <span class="m">3</span><span class="p">,</span> <span class="n">idle</span><span class="o">:</span> <span class="m">60</span><span class="p">,</span> <span class="n">sys</span><span class="o">:</span> <span class="m">63</span><span class="p">,</span> <span class="n">released</span><span class="o">:</span> <span class="m">56</span><span class="p">,</span> <span class="n">consumed</span><span class="o">:</span> <span class="m">7</span> <span class="p">(</span><span class="n">MB</span><span class="p">)</span>
+<span class="n">scvg</span><span class="o">:</span> <span class="m">8</span> <span class="n">KB</span> <span class="n">released</span>
+<span class="n">scvg</span><span class="o">:</span> <span class="n">inuse</span><span class="o">:</span> <span class="m">4</span><span class="p">,</span> <span class="n">idle</span><span class="o">:</span> <span class="m">59</span><span class="p">,</span> <span class="n">sys</span><span class="o">:</span> <span class="m">63</span><span class="p">,</span> <span class="n">released</span><span class="o">:</span> <span class="m">56</span><span class="p">,</span> <span class="n">consumed</span><span class="o">:</span> <span class="m">7</span> <span class="p">(</span><span class="n">MB</span><span class="p">)</span>
+<span class="n">gc</span> <span class="m">5</span> <span class="o">@</span><span class="m">0.004</span><span class="n">s</span> <span class="m">12</span><span class="o">%: 0.021+0.26+0.49 ms clock, 0.26+0.046/0.037/0.11+5.8 ms cpu, 4-&gt;7-&gt;3 MB, 5 MB goal, 12 P
+</span><span class="o">scvg: inuse: 5, idle: 58, sys: 63, released: 56, consumed: 7 (MB)
+</span><span class="o">gc 6 @0.005s 12%:</span> <span class="m">0.020+0.17+0.004</span> <span class="n">ms</span> <span class="n">clock</span><span class="p">,</span> <span class="m">0.25+0.080</span><span class="o">/</span><span class="m">0.070</span><span class="o">/</span><span class="m">0.053+0.051</span> <span class="n">ms</span> <span class="n">cpu</span><span class="p">,</span> <span class="m">5</span><span class="o">-&gt;</span><span class="m">6</span><span class="o">-&gt;</span><span class="m">1</span> <span class="n">MB</span><span class="p">,</span> <span class="m">6</span> <span class="n">MB</span> <span class="n">goal</span><span class="p">,</span> <span class="m">12</span> <span class="n">P</span>
+<span class="n">scvg</span><span class="o">:</span> <span class="m">8</span> <span class="n">KB</span> <span class="n">released</span>
+<span class="n">scvg</span><span class="o">:</span> <span class="n">inuse</span><span class="o">:</span> <span class="m">1</span><span class="p">,</span> <span class="n">idle</span><span class="o">:</span> <span class="m">62</span><span class="p">,</span> <span class="n">sys</span><span class="o">:</span> <span class="m">63</span><span class="p">,</span> <span class="n">released</span><span class="o">:</span> <span class="m">56</span><span class="p">,</span> <span class="n">consumed</span><span class="o">:</span> <span class="m">7</span> <span class="p">(</span><span class="n">MB</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在这个日志中可以观察到两类不同的信息：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">gc</span> <span class="m">1</span> <span class="o">@</span><span class="m">0.000</span><span class="n">s</span> <span class="m">2</span><span class="o">%: 0.009+0.23+0.004 ms clock, 0.11+0.083/0.019/0.14+0.049 ms cpu, 4-&gt;6-&gt;2 MB, 5 MB goal, 12 P
+</span><span class="o">gc 2 @0.001s 2%:</span> <span class="m">0.018+1.1+0.029</span> <span class="n">ms</span> <span class="n">clock</span><span class="p">,</span> <span class="m">0.22+0.047</span><span class="o">/</span><span class="m">0.074</span><span class="o">/</span><span class="m">0.048+0.34</span> <span class="n">ms</span> <span class="n">cpu</span><span class="p">,</span> <span class="m">4</span><span class="o">-&gt;</span><span class="m">7</span><span class="o">-&gt;</span><span class="m">3</span> <span class="n">MB</span><span class="p">,</span> <span class="m">5</span> <span class="n">MB</span> <span class="n">goal</span><span class="p">,</span> <span class="m">12</span> <span class="n">P</span>
+<span class="kc">...</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>另外还有：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">scvg</span><span class="o">:</span> <span class="m">8</span> <span class="n">KB</span> <span class="n">released</span>
+<span class="n">scvg</span><span class="o">:</span> <span class="n">inuse</span><span class="o">:</span> <span class="m">3</span><span class="p">,</span> <span class="n">idle</span><span class="o">:</span> <span class="m">60</span><span class="p">,</span> <span class="n">sys</span><span class="o">:</span> <span class="m">63</span><span class="p">,</span> <span class="n">released</span><span class="o">:</span> <span class="m">57</span><span class="p">,</span> <span class="n">consumed</span><span class="o">:</span> <span class="m">6</span> <span class="p">(</span><span class="n">MB</span><span class="p">)</span>
+<span class="n">scvg</span><span class="o">:</span> <span class="n">inuse</span><span class="o">:</span> <span class="m">3</span><span class="p">,</span> <span class="n">idle</span><span class="o">:</span> <span class="m">60</span><span class="p">,</span> <span class="n">sys</span><span class="o">:</span> <span class="m">63</span><span class="p">,</span> <span class="n">released</span><span class="o">:</span> <span class="m">56</span><span class="p">,</span> <span class="n">consumed</span><span class="o">:</span> <span class="m">7</span> <span class="p">(</span><span class="n">MB</span><span class="p">)</span>
+<span class="kc">...</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>对于用户代码向运行时申请内存产生的垃圾回收：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">gc</span> <span class="m">2</span> <span class="o">@</span><span class="m">0.001</span><span class="n">s</span> <span class="m">2</span>%<span class="o">:</span> <span class="m">0.018+1.1+0.029</span> <span class="n">ms</span> <span class="n">clock</span><span class="p">,</span> <span class="m">0.22+0.047</span><span class="o">/</span><span class="m">0.074</span><span class="o">/</span><span class="m">0.048+0.34</span> <span class="n">ms</span> <span class="n">cpu</span><span class="p">,</span> <span class="m">4</span><span class="o">-&gt;</span><span class="m">7</span><span class="o">-&gt;</span><span class="m">3</span> <span class="n">MB</span><span class="p">,</span> <span class="m">5</span> <span class="n">MB</span> <span class="n">goal</span><span class="p">,</span> <span class="m">12</span> <span class="n">P</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>含义由下表所示：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210908163144.png" alt=""></p>
+<p>wall clock 是指开始执行到完成所经历的实际时间，包括其他程序和本程序所消耗的时间；cpu time 是指特定程序使用 CPU 的时间；他们存在以下关系：</p>
+<ul>
+<li>wall clock &lt; cpu time: 充分利用多核</li>
+<li>wall clock ≈ cpu time: 未并行执行</li>
+<li>wall clock &gt; cpu time: 多核优势不明显</li>
+</ul>
+<p>对于运行时向操作系统申请内存产生的垃圾回收（向操作系统归还多余的内存）：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">scvg</span><span class="o">:</span> <span class="m">8</span> <span class="n">KB</span> <span class="n">released</span>
+<span class="n">scvg</span><span class="o">:</span> <span class="n">inuse</span><span class="o">:</span> <span class="m">3</span><span class="p">,</span> <span class="n">idle</span><span class="o">:</span> <span class="m">60</span><span class="p">,</span> <span class="n">sys</span><span class="o">:</span> <span class="m">63</span><span class="p">,</span> <span class="n">released</span><span class="o">:</span> <span class="m">57</span><span class="p">,</span> <span class="n">consumed</span><span class="o">:</span> <span class="m">6</span> <span class="p">(</span><span class="n">MB</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>含义由下表所示：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210908163342.png" alt=""></p>
+<h2 id="runtimereadmemstats">runtime.ReadMemStats</h2>
+<p>runtime.MemStats记录了内存分配的一些统计信息，通过runtime.ReadMemStats(&amp;ms)获取，它是runtime.mstats的对外版(再次可见Go单一访问控制的弊端)，MemStats字段比较多，其中比较重要的有:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// HeapSys
+</span><span class="c1"></span>
+<span class="c1">// 以下内存大小字段如无特殊说明单位均为bytes
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">MemStats</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="c1">// 从开始运行到现在累计分配的堆内存数
+</span><span class="c1"></span>    <span class="nx">TotalAlloc</span> <span class="kt">uint64</span>
+
+    <span class="c1">// 从OS申请的总内存数(包含堆、栈、内部数据结构等)
+</span><span class="c1"></span>    <span class="nx">Sys</span> <span class="kt">uint64</span>
+
+    <span class="c1">// 累计分配的堆对象数量 (当前存活的堆对象数量=Mallocs-Frees)
+</span><span class="c1"></span>    <span class="nx">Mallocs</span> <span class="kt">uint64</span>
+
+    <span class="c1">// 累计释放的堆对象数量
+</span><span class="c1"></span>    <span class="nx">Frees</span>   <span class="kt">uint64</span>
+
+    <span class="c1">// 正在使用的堆内存数，包含可访问对象和暂未被GC回收的不可访问对象
+</span><span class="c1"></span>    <span class="nx">HeapAlloc</span> <span class="kt">uint64</span>
+
+    <span class="c1">// 虚拟内存空间为堆保留的大小，包含还没被使用的(还没有映射物理内存，但这部分通常很小)
+</span><span class="c1"></span>    <span class="c1">// 以及已经将物理内存归还给OS的部分(即HeapReleased)
+</span><span class="c1"></span>    <span class="c1">// HeapSys = HeapInuse + HeapIdle
+</span><span class="c1"></span>    <span class="nx">HeapSys</span> <span class="kt">uint64</span>
+
+    <span class="c1">// 至少包含一个对象的span字节数
+</span><span class="c1"></span>    <span class="c1">// Go GC是不会整理内存的
+</span><span class="c1"></span>    <span class="c1">// HeapInuse - HeapAlloc 是为特殊大小保留的内存，但是它们还没有被使用
+</span><span class="c1"></span>    <span class="nx">HeapInuse</span> <span class="kt">uint64</span>
+
+    <span class="c1">// 未被使用的span中的字节数
+</span><span class="c1"></span>    <span class="c1">// 未被使用的span指没有包含任何对象的span，它们可以归还OS，也可以被重用，或者被用于栈内存
+</span><span class="c1"></span>    <span class="c1">// HeapIdle - HeadReleased 即为可以归还OS但还被保留的内存，这主要用于避免频繁向OS申请内存
+</span><span class="c1"></span>    <span class="nx">HeapIdle</span> <span class="kt">uint64</span>
+
+    <span class="c1">// HeapIdle中已经归还给OS的内存量
+</span><span class="c1"></span>    <span class="nx">HeapReleased</span> <span class="kt">uint64</span>
+
+    <span class="c1">// ....
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>程序可以通过定期调用runtime.ReadMemStatsAPI来获取内存分配信息发往时序数据库进行监控。另外，该API是会STW的，但是很短，Google内部也在用，用他们的话说:”STW不可怕，长时间STW才可怕”，该API通常一分钟调用一次即可。</p>
+<p>除了使用 debug 包提供的方法外，还可以直接通过运行时的内存相关的 API 进行监控：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">printMemStats</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">t</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTicker</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+    <span class="nx">s</span> <span class="o">:=</span> <span class="nx">runtime</span><span class="p">.</span><span class="nx">MemStats</span><span class="p">{}</span>
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="k">select</span> <span class="p">{</span>
+        <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">t</span><span class="p">.</span><span class="nx">C</span><span class="p">:</span>
+            <span class="nx">runtime</span><span class="p">.</span><span class="nf">ReadMemStats</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">s</span><span class="p">)</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;gc %d last@%v, next_heap_size@%vMB\n&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">NumGC</span><span class="p">,</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Unix</span><span class="p">(</span><span class="nb">int64</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">LastGC</span><span class="p">).</span><span class="nf">Seconds</span><span class="p">()),</span> <span class="mi">0</span><span class="p">),</span> <span class="nx">s</span><span class="p">.</span><span class="nx">NextGC</span><span class="o">/</span><span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">20</span><span class="p">))</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">go</span> <span class="nf">printMemStats</span><span class="p">()</span>
+    <span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="o">$</span> <span class="n">go</span> <span class="n">run</span> <span class="n">main.go</span>
+<span class="n">gc</span> <span class="m">4887</span> <span class="n">last</span><span class="o">@</span><span class="m">2020-12-09</span> <span class="m">13</span><span class="o">:</span><span class="m">44</span><span class="o">:</span><span class="m">56</span> <span class="m">+0100</span> <span class="n">CET</span><span class="p">,</span> <span class="n">next_heap_size</span><span class="o">@</span><span class="m">4</span><span class="n">MB</span>
+<span class="n">gc</span> <span class="m">10049</span> <span class="n">last</span><span class="o">@</span><span class="m">2020-12-09</span> <span class="m">13</span><span class="o">:</span><span class="m">44</span><span class="o">:</span><span class="m">57</span> <span class="m">+0100</span> <span class="n">CET</span><span class="p">,</span> <span class="n">next_heap_size</span><span class="o">@</span><span class="m">4</span><span class="n">MB</span>
+<span class="n">gc</span> <span class="m">15231</span> <span class="n">last</span><span class="o">@</span><span class="m">2020-12-09</span> <span class="m">13</span><span class="o">:</span><span class="m">44</span><span class="o">:</span><span class="m">58</span> <span class="m">+0100</span> <span class="n">CET</span><span class="p">,</span> <span class="n">next_heap_size</span><span class="o">@</span><span class="m">4</span><span class="n">MB</span>
+<span class="n">gc</span> <span class="m">20378</span> <span class="n">last</span><span class="o">@</span><span class="m">2020-12-09</span> <span class="m">13</span><span class="o">:</span><span class="m">44</span><span class="o">:</span><span class="m">59</span> <span class="m">+0100</span> <span class="n">CET</span><span class="p">,</span> <span class="n">next_heap_size</span><span class="o">@</span><span class="m">6</span><span class="n">MB</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>当然，后两种方式能够监控的指标很多，大家可以自行查看 debug.GCStats 和 runtime.MemStats 的字段，这里不再赘述了。</p>
+<h2 id="debugreadgcstats">debug.ReadGCStats</h2>
+<p>debug.ReadGCStats用于获取最近的GC统计信息，主要是GC造成的延迟信息:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// GCStats collect information about recent garbage collections.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">GCStats</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">LastGC</span>         <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span>       <span class="c1">// 最近一次GC耗费时间
+</span><span class="c1"></span>	<span class="nx">NumGC</span>          <span class="kt">int64</span>           <span class="c1">// 执行GC的次数
+</span><span class="c1"></span>	<span class="nx">PauseTotal</span>     <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span>   <span class="c1">// 所有GC暂停时间总和
+</span><span class="c1"></span>	<span class="nx">Pause</span>          <span class="p">[]</span><span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span> <span class="c1">// 每次GC的暂停时间，最近的排在前面
+</span><span class="c1"></span>	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>此方式可以通过代码的方式来直接实现对感兴趣指标的监控，例如我们希望每隔一秒钟监控一次 GC 的状态：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">printGCStats</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">t</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTicker</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+    <span class="nx">s</span> <span class="o">:=</span> <span class="nx">debug</span><span class="p">.</span><span class="nx">GCStats</span><span class="p">{}</span>
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="k">select</span> <span class="p">{</span>
+        <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">t</span><span class="p">.</span><span class="nx">C</span><span class="p">:</span>
+            <span class="nx">debug</span><span class="p">.</span><span class="nf">ReadGCStats</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">s</span><span class="p">)</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;gc %d last@%v, PauseTotal %v\n&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">NumGC</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">LastGC</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">PauseTotal</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">go</span> <span class="nf">printGCStats</span><span class="p">()</span>
+    <span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们能够看到如下输出：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="o">$</span> <span class="n">go</span> <span class="n">run</span> <span class="n">main.go</span>
+<span class="n">gc</span> <span class="m">4954</span> <span class="n">last</span><span class="o">@</span><span class="m">2020-12-09</span> <span class="m">13</span><span class="o">:</span><span class="m">19</span><span class="o">:</span><span class="m">37.505575</span> <span class="m">+0100</span> <span class="n">CET</span><span class="p">,</span> <span class="n">PauseTotal</span> <span class="m">29.901171</span><span class="n">ms</span>
+<span class="n">gc</span> <span class="m">9195</span> <span class="n">last</span><span class="o">@</span><span class="m">2020-12-09</span> <span class="m">13</span><span class="o">:</span><span class="m">19</span><span class="o">:</span><span class="m">38.50565</span> <span class="m">+0100</span> <span class="n">CET</span><span class="p">,</span> <span class="n">PauseTotal</span> <span class="m">77.579622</span><span class="n">ms</span>
+<span class="n">gc</span> <span class="m">13502</span> <span class="n">last</span><span class="o">@</span><span class="m">2020-12-09</span> <span class="m">13</span><span class="o">:</span><span class="m">19</span><span class="o">:</span><span class="m">39.505714</span> <span class="m">+0100</span> <span class="n">CET</span><span class="p">,</span> <span class="n">PauseTotal</span> <span class="m">128.022307</span><span class="n">ms</span>
+<span class="n">gc</span> <span class="m">17555</span> <span class="n">last</span><span class="o">@</span><span class="m">2020-12-09</span> <span class="m">13</span><span class="o">:</span><span class="m">19</span><span class="o">:</span><span class="m">40.505579</span> <span class="m">+0100</span> <span class="n">CET</span><span class="p">,</span> <span class="n">PauseTotal</span> <span class="m">182.816528</span><span class="n">ms</span>
+<span class="n">gc</span> <span class="m">21838</span> <span class="n">last</span><span class="o">@</span><span class="m">2020-12-09</span> <span class="m">13</span><span class="o">:</span><span class="m">19</span><span class="o">:</span><span class="m">41.505595</span> <span class="m">+0100</span> <span class="n">CET</span><span class="p">,</span> <span class="n">PauseTotal</span> <span class="m">246.618502</span><span class="n">ms</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="参考">参考</h2>
+<p><a href="https://juejin.cn/post/6904280087668097038">Go语言中观察GC的几种方式</a></p>
+<p><a href="https://wudaijun.com/2020/01/go-gc-keypoint-and-monitor/">Golang GC核心要点和度量方法</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-09-08
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go/">Go</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/%E6%8E%A2%E7%B4%A2prometheus%E7%9A%84go%E5%AE%A2%E6%88%B7%E7%AB%AF%E6%8C%87%E6%A0%87/">
+            <span class="next-text nav-default">探索Prometheus的Go客户端指标</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021<span class="heart"><i class="iconfont icon-heart"></i></span><span>Forz</span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.js"></script>
+<script>
+docsearch({
+    apiKey: "b4b9da2eba53aa6dabe4b8ac9e8676e1",
+    indexName: "forz.forzvina.com",
+    appId: "IAR2EF5L65",
+    inputSelector: '.docsearch-input',
+    debug: false,
+});
+</script>
+</body>
+</html>
