@@ -16,7 +16,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
 
 
-<meta name="author" content="Forz" /><meta name="description" content="Dgraph实验室自2015年成立以来一直是Go语言的用户。五年过去了，200K行的Go代码，我们很高兴地告诉大家，我们仍然相信Go是并且仍" /><meta name="keywords" content="Hugo, theme, even" />
+<meta name="author" content="Forz" /><meta name="description" content="前言 Dgraph实验室自2015年成立以来一直是Go语言的用户。五年过去了，200K行的Go代码，我们很高兴地告诉大家，我们仍然相信Go是并" /><meta name="keywords" content="Hugo, theme, even" />
 
 
 
@@ -40,19 +40,19 @@
 
 
 <meta property="og:title" content="使用jemalloc在Go中手动管理内存" />
-<meta property="og:description" content="Dgraph实验室自2015年成立以来一直是Go语言的用户。五年过去了，200K行的Go代码，我们很高兴地告诉大家，我们仍然相信Go是并且仍" />
+<meta property="og:description" content="前言 Dgraph实验室自2015年成立以来一直是Go语言的用户。五年过去了，200K行的Go代码，我们很高兴地告诉大家，我们仍然相信Go是并" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/%E4%BD%BF%E7%94%A8jemalloc%E5%9C%A8go%E4%B8%AD%E6%89%8B%E5%8A%A8%E7%AE%A1%E7%90%86%E5%86%85%E5%AD%98/" /><meta property="article:section" content="post" />
 <meta property="article:published_time" content="2021-09-11T15:22:25+00:00" />
 <meta property="article:modified_time" content="2021-09-11T15:22:25+00:00" />
 
 <meta itemprop="name" content="使用jemalloc在Go中手动管理内存">
-<meta itemprop="description" content="Dgraph实验室自2015年成立以来一直是Go语言的用户。五年过去了，200K行的Go代码，我们很高兴地告诉大家，我们仍然相信Go是并且仍"><meta itemprop="datePublished" content="2021-09-11T15:22:25+00:00" />
+<meta itemprop="description" content="前言 Dgraph实验室自2015年成立以来一直是Go语言的用户。五年过去了，200K行的Go代码，我们很高兴地告诉大家，我们仍然相信Go是并"><meta itemprop="datePublished" content="2021-09-11T15:22:25+00:00" />
 <meta itemprop="dateModified" content="2021-09-11T15:22:25+00:00" />
-<meta itemprop="wordCount" content="689">
+<meta itemprop="wordCount" content="6274">
 <meta itemprop="keywords" content="Go,CGO," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="使用jemalloc在Go中手动管理内存"/>
-<meta name="twitter:description" content="Dgraph实验室自2015年成立以来一直是Go语言的用户。五年过去了，200K行的Go代码，我们很高兴地告诉大家，我们仍然相信Go是并且仍"/>
+<meta name="twitter:description" content="前言 Dgraph实验室自2015年成立以来一直是Go语言的用户。五年过去了，200K行的Go代码，我们很高兴地告诉大家，我们仍然相信Go是并"/>
 
 <!--[if lte IE 9]>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/go/"> Go </a>
             </div>
-          <span class="more-meta"> 约 689 字 </span>
-          <span class="more-meta"> 预计阅读 2 分钟 </span>
+          <span class="more-meta"> 约 6274 字 </span>
+          <span class="more-meta"> 预计阅读 13 分钟 </span>
         
       </div>
     </header>
@@ -141,17 +141,430 @@
     <div class="post-toc" id="post-toc">
   <h2 class="post-toc-title">文章目录</h2>
   <div class="post-toc-content always-active">
-    <nav id="TableOfContents"></nav>
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#前言">前言</a></li>
+    <li><a href="#通过cgo创建内存">通过Cgo创建内存</a></li>
+    <li><a href="#jemalloc">jemalloc</a></li>
+    <li><a href="#在byte-slices上布置-go-结构">在byte slices上布置 Go 结构</a></li>
+    <li><a href="#用allocator摊派calloc的成本">用Allocator摊派Calloc的成本</a></li>
+    <li><a href="#明智的引用">明智的引用</a></li>
+    <li><a href="#处理gb级分配的问题">处理GB级分配的问题</a></li>
+    <li><a href="#对可变长度的数据进行排序">对可变长度的数据进行排序</a></li>
+    <li><a href="#捕捉内存泄漏">捕捉内存泄漏</a></li>
+    <li><a href="#结论">结论</a></li>
+    <li><a href="#转载">转载</a></li>
+  </ul>
+</nav>
   </div>
 </div>
     <div class="post-content">
-      <p>Dgraph实验室自2015年成立以来一直是Go语言的用户。五年过去了，200K行的Go代码，我们很高兴地告诉大家，我们仍然相信Go是并且仍然是正确的选择。我们对Go的兴奋已经超越了构建系统，甚至导致我们用Go写脚本，而这些脚本通常是用Bash或Python编写的。我们发现，使用Go帮助我们建立了一个干净、可读、可维护的代码库，而且&ndash;最重要的是&ndash;高效和并发的代码库。</p>
+      <h2 id="前言">前言</h2>
+<p>Dgraph实验室自2015年成立以来一直是Go语言的用户。五年过去了，200K行的Go代码，我们很高兴地告诉大家，我们仍然相信Go是并且仍然是正确的选择。我们对Go的兴奋已经超越了构建系统，甚至导致我们用Go写脚本，而这些脚本通常是用Bash或Python编写的。我们发现，使用Go帮助我们建立了一个干净、可读、可维护的代码库，而且&ndash;最重要的是&ndash;高效和并发的代码库。</p>
 <p>然而，有一个领域是我们从早期就关注的：内存管理。我们并不反对Go垃圾收集器，但尽管它为开发者提供了便利，它却有着与其他内存垃圾收集器相同的问题：它根本无法与手动内存管理的效率竞争。</p>
 <p>当你手动管理内存时，内存使用量较低，可预测，并允许突发的内存分配，不会导致内存使用量的疯狂飙升。对于使用Go内存的Dgraph来说，所有这些都是一个问题1。事实上，Dgraph的内存耗尽是我们从用户那里听到的一个非常普遍的抱怨。</p>
 <p>像Rust这样的语言一直在不断壮大，部分原因是它允许安全的手动内存管理。我们完全可以理解这一点。</p>
 <p>根据我们的经验，进行手动内存分配和追寻潜在的内存泄漏比在有垃圾收集的语言中优化内存使用要花更少的精力2。在建立几乎能够无限扩展的数据库系统时，手动内存管理是非常值得的。</p>
 <p>我们对Go的热爱和避免Go GC的需要，使我们找到了在Go中进行手动内存管理的新方法。当然，大多数Go用户永远不需要进行手动内存管理；除非你需要，否则我们建议不要这样做。当你需要的时候，你就会知道。</p>
 <p>在这篇文章中，我将分享我们在Dgraph实验室对手动内存管理的探索中所学到的东西，并解释我们如何在Go中手动管理内存。</p>
+<h2 id="通过cgo创建内存">通过Cgo创建内存</h2>
+<p>灵感来自于Cgo wiki中关于将C数组转化为Go分片的部分。我们可以使用malloc在C语言中分配内存，并使用unsafe将其传递给Go，不受Go GC的干扰。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">import</span> <span class="s">&#34;C&#34;</span>
+<span class="kn">import</span> <span class="s">&#34;unsafe&#34;</span>
+<span class="o">...</span>
+        <span class="kd">var</span> <span class="nx">theCArray</span> <span class="o">*</span><span class="nx">C</span><span class="p">.</span><span class="nx">YourType</span> <span class="p">=</span> <span class="nx">C</span><span class="p">.</span><span class="nf">getTheArray</span><span class="p">()</span>
+        <span class="nx">length</span> <span class="o">:=</span> <span class="nx">C</span><span class="p">.</span><span class="nf">getTheArrayLength</span><span class="p">()</span>
+        <span class="nx">slice</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">28</span><span class="p">]</span><span class="nx">C</span><span class="p">.</span><span class="nx">YourType</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">theCArray</span><span class="p">))[:</span><span class="nx">length</span><span class="p">:</span><span class="nx">length</span><span class="p">]</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>然而，上述做法有一个注意事项，正如golang.org/cmd/cgo中指出的。</p>
+<p>注意：目前的实现有一个错误。虽然Go代码允许向C内存写入nil或C指针（但不是Go指针），但如果C内存的内容看起来是Go指针，当前的实现有时会导致运行时错误。因此，如果Go代码要在其中存储指针值，请避免将未初始化的C内存传递给Go代码。在将C语言的内存传递给Go之前，先将其清零。</p>
+<p>因此，我们不使用malloc，而是使用其稍贵的兄弟姐妹，calloc。calloc的工作方式与malloc相同，只是在将内存返回给调用者之前将其清零。</p>
+<p>我们一开始只是实现了基本的Calloc和Free函数，它们通过Cgo为Go分配和取消分配字节片。为了测试这些函数，我们开发并运行了一个连续的内存使用测试。这个测试无休止地重复着一个分配/取消分配的循环，首先分配各种随机大小的内存块，直到分配了16GB的内存，然后释放这些内存块，直到只剩下1GB的内存分配。</p>
+<p>这个程序的C语言等价物的表现和预期的一样。我们会看到htop中的RSS内存增加到16GB，然后下降到1GB，又增加到16GB，如此循环。然而，使用Calloc和Free的Go程序在每个周期后都会逐渐使用更多的内存（见下图）。</p>
+<p>我们将这一行为归因于默认的C.calloc调用中缺乏线程意识而导致的内存碎片化。经过Go #dark-arts Slack频道的一些帮助（特别感谢Kale Blankenship），我们决定给jemalloc一个尝试。</p>
+<h2 id="jemalloc">jemalloc</h2>
+<p>jemalloc 是一个通用的 malloc(3) 实现，强调避免碎片化和可扩展的并发支持。jemalloc 在 2005 年首次作为 FreeBSD 的 libc 分配器投入使用，从那时起，它已经进入了许多依赖其可预测行为的应用程序。- <a href="http://jemalloc.net">http://jemalloc.net</a></p>
+<p>我们将我们的API转换为使用jemalloc3来调用和释放。它的表现非常好：jemalloc原生支持线程，几乎不存在内存碎片。我们的内存使用监控测试中的分配-分配周期在预期的限制之间循环，忽略了运行测试所需的少量开销。</p>
+<p>为了确保我们使用的是jemalloc并避免名称冲突，我们在安装时添加了一个je_前缀，所以我们的API现在调用的是je_calloc和je_free，而不是calloc和free。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210911155304.png" alt=""></p>
+<p>在上图中，通过C.calloc分配Go内存导致了严重的内存碎片化，导致程序在第11个周期时占用了20GB的内存。使用jemalloc的同等代码没有明显的碎片化，每个周期都会减少接近1GB。</p>
+<p>在程序结束时（最右边的小点），在所有分配的内存被释放后，C.calloc程序仍然占用不到20GB的内存，而jemalloc显示400MB的内存使用率。</p>
+<p>要安装jemalloc，请从这里下载它，然后运行以下命令。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">./configure</span> <span class="o">--</span><span class="n">with</span><span class="o">-</span><span class="n">jemalloc</span><span class="o">-</span><span class="n">prefix</span><span class="o">=</span><span class="s">&#39;je_&#39;</span> <span class="o">--</span><span class="n">with</span><span class="o">-</span><span class="n">malloc</span><span class="o">-</span><span class="n">conf</span><span class="o">=</span><span class="s">&#39;background_thread:true,metadata_thp:auto&#39;</span>
+<span class="n">make</span>
+<span class="n">sudo</span> <span class="n">make</span> <span class="n">install</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>整个Calloc代码看起来是这样的。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">ptr</span> <span class="o">:=</span> <span class="nx">C</span><span class="p">.</span><span class="nf">je_calloc</span><span class="p">(</span><span class="nx">C</span><span class="p">.</span><span class="nf">size_t</span><span class="p">(</span><span class="nx">n</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">ptr</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// NB: throw is like panic, except it guarantees the process will be
+</span><span class="c1"></span>		<span class="c1">// terminated. The call below is exactly what the Go runtime invokes when
+</span><span class="c1"></span>		<span class="c1">// it cannot allocate memory.
+</span><span class="c1"></span>		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;out of memory&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">uptr</span> <span class="o">:=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">ptr</span><span class="p">)</span>
+
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">numBytes</span><span class="p">,</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">n</span><span class="p">))</span>
+	<span class="c1">// Interpret the C pointer as a pointer to a Go array, then slice.
+</span><span class="c1"></span>	<span class="k">return</span> <span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="nx">MaxArrayLen</span><span class="p">]</span><span class="kt">byte</span><span class="p">)(</span><span class="nx">uptr</span><span class="p">)[:</span><span class="nx">n</span><span class="p">:</span><span class="nx">n</span><span class="p">]</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们将这段代码作为Ristretto的z包的一部分，所以Dgraph和Badger都可以使用它。为了让我们的代码切换到使用jemalloc来分配字节片，我们添加了一个构建标签jemalloc。为了进一步简化我们的部署，我们通过设置正确的LDFLAGS，使jemalloc库静态链接到任何生成的Go二进制文件中。</p>
+<h2 id="在byte-slices上布置-go-结构">在byte slices上布置 Go 结构</h2>
+<p>现在我们有了分配和释放字节片的方法，下一步就是用它来布局Go结构。我们可以从一个基本结构开始（完整代码）。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">node</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">val</span>  <span class="kt">int</span>
+    <span class="nx">next</span> <span class="o">*</span><span class="nx">node</span>
+<span class="p">}</span>
+
+<span class="kd">var</span> <span class="nx">nodeSz</span> <span class="p">=</span> <span class="nb">int</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">node</span><span class="p">{}))</span>
+
+<span class="kd">func</span> <span class="nf">newNode</span><span class="p">(</span><span class="nx">val</span> <span class="kt">int</span><span class="p">)</span> <span class="o">*</span><span class="nx">node</span> <span class="p">{</span>
+    <span class="nx">b</span> <span class="o">:=</span> <span class="nx">z</span><span class="p">.</span><span class="nf">Calloc</span><span class="p">(</span><span class="nx">nodeSz</span><span class="p">)</span>
+    <span class="nx">n</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">node</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">b</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+    <span class="nx">n</span><span class="p">.</span><span class="nx">val</span> <span class="p">=</span> <span class="nx">val</span>
+    <span class="k">return</span> <span class="nx">n</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">freeNode</span><span class="p">(</span><span class="nx">n</span> <span class="o">*</span><span class="nx">node</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">buf</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="nx">z</span><span class="p">.</span><span class="nx">MaxArrayLen</span><span class="p">]</span><span class="kt">byte</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">n</span><span class="p">))[:</span><span class="nx">nodeSz</span><span class="p">:</span><span class="nx">nodeSz</span><span class="p">]</span>
+    <span class="nx">z</span><span class="p">.</span><span class="nf">Free</span><span class="p">(</span><span class="nx">buf</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在上面的代码中，我们使用newNode在C分配的内存上布置了一个Go结构。我们创建了一个相应的freeNode函数，一旦我们完成了该结构，它就可以释放内存。Go结构的基本数据类型是int，还有一个指向下一个节点结构的指针，所有这些都是在程序中设置和访问的。我们分配了2M个节点对象，并从这些对象中创建了一个链接列表，以演示jemalloc的正常运作。</p>
+<p>在默认的Go内存中，我们看到为带有2M个对象的链表分配了31MB的堆，但没有通过jemalloc分配任何东西。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="o">$</span> <span class="n">go</span> <span class="n">run</span> <span class="n">.
+</span><span class="n">Allocated</span> <span class="n">memory</span><span class="o">:</span> <span class="m">0</span> <span class="n">Objects</span><span class="o">:</span> <span class="m">2000001</span>
+<span class="n">node</span><span class="o">:</span> <span class="m">0</span>
+<span class="kc">...</span>
+<span class="n">node</span><span class="o">:</span> <span class="m">2000000</span>
+<span class="n">After</span> <span class="n">freeing.</span> <span class="n">Allocated</span> <span class="n">memory</span><span class="o">:</span> <span class="m">0</span>
+<span class="n">HeapAlloc</span><span class="o">:</span> <span class="m">31</span> <span class="n">MiB</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>使用jemalloc构建标签，我们看到通过jemalloc分配了30 MiB的内存，在释放了链表之后，这个数字下降到了0。Go的堆分配只有很小的399 KiB，这可能来自于运行程序的开销。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="o">$</span> <span class="n">go</span> <span class="n">run</span> <span class="o">-</span><span class="n">tags</span><span class="o">=</span><span class="n">jemalloc</span> <span class="n">.
+</span><span class="n">Allocated</span> <span class="n">memory</span><span class="o">:</span> <span class="m">30</span> <span class="n">MiB</span> <span class="n">Objects</span><span class="o">:</span> <span class="m">2000001</span>
+<span class="n">node</span><span class="o">:</span> <span class="m">0</span>
+<span class="kc">...</span>
+<span class="n">node</span><span class="o">:</span> <span class="m">2000000</span>
+<span class="n">After</span> <span class="n">freeing.</span> <span class="n">Allocated</span> <span class="n">memory</span><span class="o">:</span> <span class="m">0</span>
+<span class="n">HeapAlloc</span><span class="o">:</span> <span class="m">399</span> <span class="n">KiB</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="用allocator摊派calloc的成本">用Allocator摊派Calloc的成本</h2>
+<p>上面的代码对于避免通过Go分配内存非常有效。但是，这也是有代价的：降低性能。用时间来运行这两个实例，我们看到在没有jemalloc的情况下，程序运行了1.15秒。而使用jemalloc，则慢了5倍，为5.29秒。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="o">$</span> <span class="n">time</span> <span class="n">go</span> <span class="n">run</span> <span class="n">.
+</span><span class="n">go</span> <span class="n">run</span> <span class="n">. </span> <span class="m">1.15</span><span class="n">s</span> <span class="n">user</span> <span class="m">0.25</span><span class="n">s</span> <span class="n">system</span> <span class="m">162</span><span class="o">% cpu 0.861 total
+</span><span class="o">
+</span><span class="o">$ time go run -tags=jemalloc .
+</span><span class="o">go run -tags=jemalloc .  5.29s user 0.36s system 108%</span> <span class="n">cpu</span> <span class="m">5.200</span> <span class="n">total</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们将较慢的性能归因于每次分配内存时都要进行Cgo调用，而每次Cgo调用都会带来一些开销。为了解决这个问题，我们在ristretto/z包中写了一个Allocator库。这个库在一次调用中分配了较大的内存块，然后可以用来分配许多小对象，避免了昂贵的Cgo调用。</p>
+<p>Allocator从一个缓冲区开始，当用尽时，会创建一个新的两倍大小的缓冲区。它维护一个所有分配的缓冲区的内部列表。最后，当用户用完数据后，他们可以调用Release来一次性释放所有这些缓冲区。注意，Allocator不做任何内存移动。这有助于确保我们拥有的任何结构指针保持有效。</p>
+<p>虽然这可能看起来有点像tcmalloc/jemalloc使用的板块式内存管理，但这要简单得多。一旦分配，你不能只释放一个结构。你只能释放Allocator4使用的所有内存。</p>
+<p>Allocator做得很好，它可以廉价地布局数百万个结构，并在完成后释放它们，而不涉及Go堆。上图所示的同一个程序，在使用新的分配器构建标签运行时，运行速度甚至比Go内存版本更快。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="o">$</span> <span class="n">time</span> <span class="n">go</span> <span class="n">run</span> <span class="o">-</span><span class="n">tags</span><span class="o">=</span><span class="s">&#34;jemalloc,allocator&#34;</span> <span class="n">.
+</span><span class="n">go</span> <span class="n">run</span> <span class="o">-</span><span class="n">tags</span><span class="o">=</span><span class="s">&#34;jemalloc,allocator&#34;</span> <span class="n">. </span> <span class="m">1.09</span><span class="n">s</span> <span class="n">user</span> <span class="m">0.29</span><span class="n">s</span> <span class="n">system</span> <span class="m">143</span>% <span class="n">cpu</span> <span class="m">0.956</span> <span class="n">total</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>从Go 1.14开始，-race标志开启了结构体的内存对齐检查。Allocator有一个AllocateAligned方法，它返回的内存以正确的指针对齐方式开始，以通过这些检查。根据结构体的大小，这可能会导致一些内存浪费，但由于字的边界正确，使得CPU指令更加高效。</p>
+<p>我们面临着另一个内存管理问题：有时内存分配发生在一个与取消分配非常不同的地方。这两个地方之间的唯一交流可能是分配的结构，而没有办法向下传递实际的分配器对象。为了处理这个问题，我们给每个Allocator对象分配一个唯一的ID，这些对象存储在一个uint64引用中。每个新的Allocator对象都被存储在一个全局map上，与它的引用相对应。然后，Allocator对象可以使用这个引用被调用，并在不再需要数据的时候被释放。</p>
+<h2 id="明智的引用">明智的引用</h2>
+<p>不要从手动分配的内存中引用Go分配的内存。</p>
+<p>如上图所示，手动分配结构时，必须确保结构中没有对Go分配的内存的引用。请考虑对上面的结构稍作修改。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">node</span> <span class="kd">struct</span> <span class="p">{</span>
+  <span class="nx">val</span> <span class="kt">int</span>
+  <span class="nx">next</span> <span class="o">*</span><span class="nx">node</span>
+  <span class="nx">buf</span> <span class="p">[]</span><span class="kt">byte</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>让我们使用上面定义的<code>root := newNode(val) func</code>来手动分配一个节点。然而，如果我们再设置<code>root.next = &amp;node{val: val}</code>，通过Go内存分配链接列表中的所有其他节点，我们必然会出现以下分段故障。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="o">$</span> <span class="n">go</span> <span class="n">run</span> <span class="o">-</span><span class="n">race</span> <span class="o">-</span><span class="n">tags</span><span class="o">=</span><span class="s">&#34;jemalloc&#34;</span> <span class="n">.
+</span><span class="n">Allocated</span> <span class="n">memory</span><span class="o">:</span> <span class="m">16</span> <span class="n">B</span> <span class="n">Objects</span><span class="o">:</span> <span class="m">2000001</span>
+<span class="n">unexpected</span> <span class="n">fault</span> <span class="n">address</span> <span class="mh">0x1cccb0</span>
+<span class="n">fatal</span> <span class="n">error</span><span class="o">:</span> <span class="n">fault</span>
+<span class="n">[signal</span> <span class="n">SIGSEGV</span><span class="o">:</span> <span class="n">segmentation</span> <span class="n">violation</span> <span class="n">code</span><span class="o">=</span><span class="mh">0x1</span> <span class="n">addr</span><span class="o">=</span><span class="mh">0x1cccb0</span> <span class="n">pc</span><span class="o">=</span><span class="mh">0x55a48b</span><span class="n">]</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Go分配的内存被垃圾回收，因为没有有效的Go结构指向它。只有C分配的内存在引用它，而Go堆中没有任何对它的引用，导致了上述故障。因此，如果您创建了一个结构并手动分配了内存，那么必须确保所有可递归访问的字段也是手动分配的。</p>
+<p>例如，如果上述结构使用的是字节片，我们也要使用Allocator分配该字节片，以避免Go内存与C内存混合。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">b</span> <span class="o">:=</span> <span class="nx">allocator</span><span class="p">.</span><span class="nf">AllocateAligned</span><span class="p">(</span><span class="nx">nodeSz</span><span class="p">)</span>
+<span class="nx">n</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">node</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">b</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+<span class="nx">n</span><span class="p">.</span><span class="nx">val</span> <span class="p">=</span> <span class="o">-</span><span class="mi">1</span>
+<span class="nx">n</span><span class="p">.</span><span class="nx">buf</span> <span class="p">=</span> <span class="nx">allocator</span><span class="p">.</span><span class="nf">Allocate</span><span class="p">(</span><span class="mi">16</span><span class="p">)</span> <span class="c1">// Allocate 16 bytes
+</span><span class="c1"></span><span class="nx">rand</span><span class="p">.</span><span class="nf">Read</span><span class="p">(</span><span class="nx">n</span><span class="p">.</span><span class="nx">buf</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="处理gb级分配的问题">处理GB级分配的问题</h2>
+<p>Allocator对于手动分配数以百万计的结构是非常好的。然而，我们有一些用例需要创建数十亿的小对象并对它们进行排序。在Go中，即使使用Allocator，也会有这样的方式。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">nodes</span> <span class="p">[]</span><span class="o">*</span><span class="nx">node</span>
+<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mf">1e9</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+  <span class="nx">b</span> <span class="o">:=</span> <span class="nx">allocator</span><span class="p">.</span><span class="nf">AllocateAligned</span><span class="p">(</span><span class="nx">nodeSz</span><span class="p">)</span>
+  <span class="nx">n</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">node</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">b</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+  <span class="nx">n</span><span class="p">.</span><span class="nx">val</span> <span class="p">=</span> <span class="nx">rand</span><span class="p">.</span><span class="nf">Int63</span><span class="p">()</span>
+  <span class="nx">nodes</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">nodes</span><span class="p">,</span> <span class="nx">n</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="nx">sort</span><span class="p">.</span><span class="nf">Slice</span><span class="p">(</span><span class="nx">nodes</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">j</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="nx">nodes</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">val</span> <span class="p">&lt;</span> <span class="nx">nodes</span><span class="p">[</span><span class="nx">j</span><span class="p">].</span><span class="nx">val</span>
+<span class="p">})</span>
+<span class="c1">// nodes are now sorted in increasing order of val.
+</span></code></pre></td></tr></table>
+</div>
+</div><p>所有这些1B节点都是在分配器上手动分配的，这就变得很昂贵。我们还需要支付Go中分片的费用，8GB的内存（每个节点指针8字节，1B条目）本身就很昂贵。</p>
+<p>为了处理这类用例，我们建立了z.Buffer，它可以在文件上进行内存映射，允许Linux按照系统的要求对内存进行分页。它实现了io.Writer，取代了我们对byte.Buffer的依赖。</p>
+<p>更重要的是，<code>z.Buffer</code>提供了一种新的方式来分配较小的数据片。通过调用<code>SliceAllocate(n)</code>，<code>z.Buffer</code>会写出被分配的片断的长度（n），然后再分配片断。这使得z.Buffer能够理解片断的边界，并通过SliceIterate正确地迭代它们。</p>
+<h2 id="对可变长度的数据进行排序">对可变长度的数据进行排序</h2>
+<p>对于排序，我们最初试图从z.Buffer中获得片断，访问片断进行比较，但只对片断进行排序。给定一个偏移量，z.Buffer可以读取偏移量，找到切片的长度并返回该切片。因此，这个系统允许我们按照排序的顺序访问切片，而不产生任何内存移动。虽然很新颖，但这种机制给内存带来了很大的压力，因为我们仍然要为将这些偏移量带入Go内存而支付8GB的内存罚款。</p>
+<p>我们有一个关键的限制，那就是片断的大小不一样。此外，我们只能按顺序访问这些片断，而不能按反向或随机顺序访问，而不能事先计算和存储偏移量。大多数就地排序算法都假定值的大小是相同的5，可以随机访问，并且可以随时调换。Go的sort.Slice也是这样工作的，因此并不适合z.Buffer。</p>
+<p>在这些限制下，我们发现合并排序算法是最适合这项工作的。通过合并排序，我们可以按顺序对缓冲区进行操作，只需要在缓冲区的大小上多占用一半的内存。事实证明，这不仅比将偏移量带入内存更便宜，而且在内存使用开销方面也更可预测（大约是缓冲区大小的一半）。更妙的是，运行合并排序所需的开销本身就是内存映射的。</p>
+<p>合并排序也有一个非常积极的影响。在基于偏移量的排序中，我们必须将偏移量保留在内存中，同时对缓冲区进行迭代和处理，这对内存造成了更大压力。有了合并排序，所需的额外内存在迭代开始时就被释放，这意味着有更多的内存可用于缓冲区处理。</p>
+<p>z.Buffer还支持通过Calloc分配内存，一旦超过了用户指定的某个限制，就自动进行内存映射。这使得它在所有大小的数据中都能很好地工作。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">buffer</span> <span class="o">:=</span> <span class="nx">z</span><span class="p">.</span><span class="nf">NewBuffer</span><span class="p">(</span><span class="mi">256</span><span class="o">&lt;&lt;</span><span class="mi">20</span><span class="p">)</span> <span class="c1">// Start with 256MB via Calloc.
+</span><span class="c1"></span><span class="nx">buffer</span><span class="p">.</span><span class="nf">AutoMmapAfter</span><span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">30</span><span class="p">)</span>    <span class="c1">// Automatically mmap it after it becomes 1GB.
+</span><span class="c1"></span>
+<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mf">1e9</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+  <span class="nx">b</span> <span class="o">:=</span> <span class="nx">buffer</span><span class="p">.</span><span class="nf">SliceAllocate</span><span class="p">(</span><span class="nx">nodeSz</span><span class="p">)</span>
+  <span class="nx">n</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">node</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">b</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+  <span class="nx">n</span><span class="p">.</span><span class="nx">val</span> <span class="p">=</span> <span class="nx">rand</span><span class="p">.</span><span class="nf">Int63</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="nx">buffer</span><span class="p">.</span><span class="nf">SortSlice</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">left</span><span class="p">,</span> <span class="nx">right</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+  <span class="nx">nl</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">node</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">left</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+  <span class="nx">nr</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">node</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">right</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+  <span class="k">return</span> <span class="nx">nl</span><span class="p">.</span><span class="nx">val</span> <span class="p">&lt;</span> <span class="nx">nr</span><span class="p">.</span><span class="nx">val</span>
+<span class="p">})</span>
+
+<span class="c1">// Iterate over nodes in increasing order of val.
+</span><span class="c1"></span><span class="nx">buffer</span><span class="p">.</span><span class="nf">SliceIterate</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">b</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+  <span class="nx">n</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">node</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">b</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+  <span class="nx">_</span> <span class="p">=</span> <span class="nx">n</span><span class="p">.</span><span class="nx">val</span>
+  <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">})</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="捕捉内存泄漏">捕捉内存泄漏</h2>
+<p>如果不触及内存泄漏，所有这些讨论都是不完整的。现在我们正在使用手动内存分配，必然会有内存泄漏，因为我们忘记了去分配内存。我们怎样才能抓住这些问题呢？</p>
+<p>我们早期做的一件简单的事情是让一个原子计数器跟踪通过这些调用分配的字节数，所以我们可以通过<code>z.NumAllocBytes()</code>快速知道我们在程序中手动分配了多少内存。如果在我们的内存测试结束时，我们仍有剩余的内存，这表明有泄漏。</p>
+<p>当我们确实发现泄漏时，我们最初试图使用jemalloc内存分析器。但是，我们很快意识到，这并没有什么帮助。由于Cgo边界的存在，它不能看到整个调用堆栈。剖析器所看到的是来自相同的z.Calloc和z.Free调用的分配和取消分配。</p>
+<p>感谢Go运行时，我们能够快速建立一个简单的系统来捕获进入z.Calloc的调用者，并将其与z.Free调用相匹配。这个系统需要mutex锁，所以我们选择不默认启用它。相反，我们使用一个泄漏构建标志，为我们的开发构建打开泄漏调试信息。这将自动检测泄漏，并打印出任何泄漏发生的地方。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// If leak detection is enabled.
+</span><span class="c1"></span><span class="nx">pc</span><span class="p">,</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">l</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">Caller</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<span class="k">if</span> <span class="nx">ok</span> <span class="p">{</span>
+  <span class="nx">dallocsMu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+  <span class="nx">dallocs</span><span class="p">[</span><span class="nx">uptr</span><span class="p">]</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">dalloc</span><span class="p">{</span>
+    <span class="nx">pc</span><span class="p">:</span> <span class="nx">pc</span><span class="p">,</span>
+    <span class="nx">no</span><span class="p">:</span> <span class="nx">l</span><span class="p">,</span>
+    <span class="nx">sz</span><span class="p">:</span> <span class="nx">n</span><span class="p">,</span>
+  <span class="p">}</span>
+  <span class="nx">dallocsMu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="o">//</span> <span class="n">Induced</span> <span class="n">leak</span> <span class="n">to</span> <span class="n">demonstrate</span> <span class="n">leak</span> <span class="n">capture.</span> <span class="n">The</span> <span class="n">first</span> <span class="n">number</span> <span class="n">shows</span>
+<span class="o">//</span> <span class="n">the</span> <span class="n">size</span> <span class="n">of</span> <span class="n">allocation</span><span class="p">,</span> <span class="n">followed</span> <span class="n">by</span> <span class="n">the</span> <span class="n">function</span> <span class="n">and</span> <span class="n">the</span> <span class="n">line</span>
+<span class="o">//</span> <span class="n">number</span> <span class="n">where</span> <span class="n">the</span> <span class="n">allocation</span> <span class="n">was</span> <span class="n">made.</span>
+<span class="o">$</span> <span class="n">go</span> <span class="n">test</span> <span class="o">-</span><span class="n">v</span> <span class="o">-</span><span class="n">tags</span><span class="o">=</span><span class="s">&#34;jemalloc leak&#34;</span> <span class="o">-</span><span class="n">run</span><span class="o">=</span><span class="n">TestCalloc</span>
+<span class="kc">...</span>
+<span class="n">LEAK</span><span class="o">:</span> <span class="m">128</span> <span class="n">at</span> <span class="n">func</span><span class="o">:</span> <span class="n">github.com</span><span class="o">/</span><span class="n">dgraph</span><span class="o">-</span><span class="n">io</span><span class="o">/</span><span class="n">ristretto</span><span class="o">/</span><span class="n">z.TestCalloc</span> <span class="m">91</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="结论">结论</h2>
+<p>通过这些技术，我们得到了两全其美的结果：我们可以在关键的、受内存约束的代码路径中进行手动内存分配。同时，我们可以在非关键的代码路径中获得自动垃圾收集的好处。即使你不习惯使用Cgo或jemalloc，你也可以在更大块的Go内存上应用这些技术，产生类似的影响。</p>
+<p>上面提到的所有库都可以在Apache 2.0许可下在Ristretto/z包中获得。memtest和演示代码位于contrib文件夹中。</p>
+<p>Badger和Dgraph（尤其是Badger）都已经从使用这些库中获得了巨大的收益。我们现在可以用有限的内存使用量来处理数千兆字节的数据&ndash;与你对C++程序的期望一致。我们正在进一步识别对Go内存造成压力的地方，并在有意义的地方通过切换到手动内存管理来缓解压力。</p>
+<p>Dgraph v20.11（T&rsquo;Challa）版本将是第一个包含所有这些内存管理功能的版本。我们的目标是确保Dgraph在运行任何种类的工作负载时都不需要超过32GB的物理内存。而使用z.Calloc、z.Free、z.Allocator和z.Buffer有助于我们用Go实现这一目标。</p>
+<h2 id="转载">转载</h2>
+<p><a href="https://dgraph.io/blog/post/manual-memory-management-golang-jemalloc/">使用 jemalloc 在 Go 中手动管理内存</a></p>
 
     </div>
 
