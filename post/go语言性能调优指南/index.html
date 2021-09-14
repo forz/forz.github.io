@@ -16,7 +16,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
 
 
-<meta name="author" content="Forz" /><meta name="description" content="优化的范围 Latency numbers every programmer should know 我们的性能优化主要聚焦在应用、Go 标准库、Go runtime。 大多数优化集中在应用代码 极少部分在标准库和 runtime. Benchmark 逃逸分析 用" /><meta name="keywords" content="Hugo, theme, even" />
+<meta name="author" content="Forz" /><meta name="description" content="优化的范围 Latency numbers every programmer should know 我们的性能优化主要聚焦在应用、Go 标准库、Go runtime。 大多数优化集中在应用代码 极少部分在标准库和 runtime. Benchmark 逃逸分析 Go" /><meta name="keywords" content="Hugo, theme, even" />
 
 
 
@@ -40,19 +40,19 @@
 
 
 <meta property="og:title" content="Go语言性能调优指南" />
-<meta property="og:description" content="优化的范围 Latency numbers every programmer should know 我们的性能优化主要聚焦在应用、Go 标准库、Go runtime。 大多数优化集中在应用代码 极少部分在标准库和 runtime. Benchmark 逃逸分析 用" />
+<meta property="og:description" content="优化的范围 Latency numbers every programmer should know 我们的性能优化主要聚焦在应用、Go 标准库、Go runtime。 大多数优化集中在应用代码 极少部分在标准库和 runtime. Benchmark 逃逸分析 Go" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/go%E8%AF%AD%E8%A8%80%E6%80%A7%E8%83%BD%E8%B0%83%E4%BC%98%E6%8C%87%E5%8D%97/" /><meta property="article:section" content="post" />
 <meta property="article:published_time" content="2021-09-07T13:42:48+00:00" />
 <meta property="article:modified_time" content="2021-09-07T13:42:48+00:00" />
 
 <meta itemprop="name" content="Go语言性能调优指南">
-<meta itemprop="description" content="优化的范围 Latency numbers every programmer should know 我们的性能优化主要聚焦在应用、Go 标准库、Go runtime。 大多数优化集中在应用代码 极少部分在标准库和 runtime. Benchmark 逃逸分析 用"><meta itemprop="datePublished" content="2021-09-07T13:42:48+00:00" />
+<meta itemprop="description" content="优化的范围 Latency numbers every programmer should know 我们的性能优化主要聚焦在应用、Go 标准库、Go runtime。 大多数优化集中在应用代码 极少部分在标准库和 runtime. Benchmark 逃逸分析 Go"><meta itemprop="datePublished" content="2021-09-07T13:42:48+00:00" />
 <meta itemprop="dateModified" content="2021-09-07T13:42:48+00:00" />
-<meta itemprop="wordCount" content="1714">
-<meta itemprop="keywords" content="调优," /><meta name="twitter:card" content="summary"/>
+<meta itemprop="wordCount" content="7120">
+<meta itemprop="keywords" content="Go调优," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go语言性能调优指南"/>
-<meta name="twitter:description" content="优化的范围 Latency numbers every programmer should know 我们的性能优化主要聚焦在应用、Go 标准库、Go runtime。 大多数优化集中在应用代码 极少部分在标准库和 runtime. Benchmark 逃逸分析 用"/>
+<meta name="twitter:description" content="优化的范围 Latency numbers every programmer should know 我们的性能优化主要聚焦在应用、Go 标准库、Go runtime。 大多数优化集中在应用代码 极少部分在标准库和 runtime. Benchmark 逃逸分析 Go"/>
 
 <!--[if lte IE 9]>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
@@ -130,10 +130,10 @@
       <div class="post-meta">
         <span class="post-time"> 2021-09-07 </span>
         <div class="post-category">
-            <a href="/categories/%E8%B0%83%E4%BC%98/"> 调优 </a>
+            <a href="/categories/go%E8%B0%83%E4%BC%98/"> Go调优 </a>
             </div>
-          <span class="more-meta"> 约 1714 字 </span>
-          <span class="more-meta"> 预计阅读 4 分钟 </span>
+          <span class="more-meta"> 约 7120 字 </span>
+          <span class="more-meta"> 预计阅读 15 分钟 </span>
         
       </div>
     </header>
@@ -147,6 +147,7 @@
     <li><a href="#benchmark">Benchmark</a>
       <ul>
         <li><a href="#逃逸分析">逃逸分析</a></li>
+        <li><a href="#指针">指针</a></li>
         <li><a href="#字符串拼接">字符串拼接</a></li>
         <li><a href="#zero-garbageallocation">Zero Garbage/Allocation</a></li>
         <li><a href="#false-sharing">False Sharing</a></li>
@@ -164,6 +165,7 @@
       </ul>
     </li>
     <li><a href="#总结">总结</a></li>
+    <li><a href="#参考">参考</a></li>
   </ul>
 </nav>
   </div>
@@ -177,19 +179,682 @@
 <p>大多数优化集中在应用代码 极少部分在标准库和 runtime.</p>
 <h2 id="benchmark">Benchmark</h2>
 <h3 id="逃逸分析">逃逸分析</h3>
+<p>Go 可以自动的管理内存，这帮我们避免了大量潜在 bug，但它并没有将程序员彻底的从内存分配的事情上解脱出来。因为 Go 没有提供直接操作内存的方式，所以开发者必须要搞懂其内部机制，这样才能将收益最大化。</p>
+<p>如果读了这篇文章后，你只能记住一点，那请记住这个：栈分配廉价，堆分配昂贵。现在让我们深入讲述下这是什么意思。</p>
+<ul>
+<li>Go 有两个地方可以分配内存：一个全局堆空间用来动态分配内存，另一个是每个 goroutine 都有的自身栈空间。</li>
+<li>Go 更倾向于在栈空间上分配内存 —— 一个 Go 程序大部分的内存分配都是在栈空间上的。它的代价很低，因为只需要两个 CPU 指令：一个是把数据 push 到栈空间上以完成分配，另一个是从栈空间上释放。</li>
+</ul>
+<p>不幸的是, 不是所有的内存都可以在栈空间上分配的。栈空间分配要求一个变量的生命周期和内存足迹能在编译时确定。
+否则就需要在运行时在堆空间上进行动态分配。</p>
+<p>malloc 必须找到一块足够大的内存来存放新的变量数据。后续释放时，垃圾回收器扫描堆空间寻找不再被使用的对象。</p>
+<p>不用多说，这明显要比只需两个指令的栈分配更加昂贵。</p>
+<p>译者注: 内存足迹, 代表和一个变量相关的所有内存块。比如一个 struct 中含有成员 <code>*int</code>, 那么这个<code>*int</code> 所指向的内存块属于该 struct 的足迹。</p>
+<p>编译器使用逃逸分析的技术来在这两者间做选择。基本的思路就是在编译时做垃圾回收的工作。</p>
+<p>编译器会追踪变量在代码块上的作用域。变量会携带有一组校验数据，用来证明它的整个生命周期是否在运行时完全可知。如果变量通过了这些校验，它就可以在栈上分配。否则就说它 逃逸 了，必须在堆上分配。</p>
+<p>逃逸分析的机制，并没有在 Go 语言官方说明上阐述。对 Go 程序员来说，学习这些规则最有效的方式就是凭经验。编译命令 <code>go build -gcflags '-m'</code> 会让编译器在编译时输出逃逸分析的结果。</p>
+<p>让我们来看一个例子：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="s">&#34;fmt&#34;</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nx">x</span> <span class="o">:=</span> <span class="mi">42</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">x</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="o">$</span> <span class="n">go</span> <span class="n">build</span> <span class="o">-</span><span class="n">gcflags</span> <span class="s">&#39;-m&#39;</span> <span class="n">./main.go</span>
+
+<span class="c1"># command-line-arguments</span>
+
+<span class="n">./main.go</span><span class="o">:</span><span class="m">7</span><span class="o">:</span> <span class="n">x</span> <span class="n">escapes</span> <span class="n">to</span> <span class="n">heap</span>
+<span class="n">./main.go</span><span class="o">:</span><span class="m">7</span><span class="o">:</span> <span class="n">main</span> <span class="kc">...</span> <span class="n">argument</span> <span class="n">does</span> <span class="n">not</span> <span class="n">escape</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们看到 x escapes to heap, 表示它会在运行时在堆空间上动态分配。
+这个例子让人有些费解，直觉上，很明显变量 x 并没有逃出 main() 函数之外。
+编译器没有说明它为什么认为这个变量逃逸了。为得到更详细的内容，多传几个 -m 参数给编译器，会打印出更详细的内容。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="o">$</span> <span class="n">go</span> <span class="n">build</span> <span class="o">-</span><span class="n">gcflags</span> <span class="s">&#39;-m -m&#39;</span> <span class="n">./main.go</span>
+
+<span class="c1"># command-line-arguments</span>
+
+<span class="n">./main.go</span><span class="o">:</span><span class="m">5</span><span class="o">:</span> <span class="n">cannot</span> <span class="n">inline</span> <span class="n">main</span><span class="o">:</span> <span class="n">non</span><span class="o">-</span><span class="n">leaf</span> <span class="n">function</span>
+<span class="n">./main.go</span><span class="o">:</span><span class="m">7</span><span class="o">:</span> <span class="n">x</span> <span class="n">escapes</span> <span class="n">to</span> <span class="n">heap</span>
+<span class="n">./main.go</span><span class="o">:</span><span class="m">7</span><span class="o">:</span>         <span class="n">from</span> <span class="kc">...</span> <span class="nf">argument </span><span class="p">(</span><span class="n">arg</span> <span class="n">to</span> <span class="kc">...</span><span class="p">)</span> <span class="n">at</span> <span class="n">./main.go</span><span class="o">:</span><span class="m">7</span>
+<span class="n">./main.go</span><span class="o">:</span><span class="m">7</span><span class="o">:</span>         <span class="n">from</span> <span class="o">*</span><span class="p">(</span><span class="kc">...</span> <span class="n">argument</span><span class="p">)</span> <span class="p">(</span><span class="n">indirection</span><span class="p">)</span> <span class="n">at</span> <span class="n">./main.go</span><span class="o">:</span><span class="m">7</span>
+<span class="n">./main.go</span><span class="o">:</span><span class="m">7</span><span class="o">:</span>         <span class="n">from</span> <span class="kc">...</span> <span class="nf">argument </span><span class="p">(</span><span class="n">passed</span> <span class="n">to</span> <span class="n">call[argument</span> <span class="n">content</span> <span class="n">escapes]</span><span class="p">)</span> <span class="n">at</span> <span class="n">./main.go</span><span class="o">:</span><span class="m">7</span>
+<span class="n">./main.go</span><span class="o">:</span><span class="m">7</span><span class="o">:</span> <span class="n">main</span> <span class="kc">...</span> <span class="n">argument</span> <span class="n">does</span> <span class="n">not</span> <span class="n">escape</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>是的，上面显示了，变量 x 之所以逃逸了，是因为它被传入了一个逃逸的函数内。</p>
+<p>这个机制乍看上去有些难以捉摸，但多用几次这个工具后，就能搞明白这其中的规律了。长话短说，下面是一些我们找到的，能引起变量逃逸到堆上的典型情况：</p>
+<ul>
+<li>
+<p>发送指针或带有指针的值到 channel 中。在编译时，是没有办法知道哪个 goroutine 会在 channel 上接收数据。所以编译器没法知道变量什么时候才会被释放。</p>
+</li>
+<li>
+<p>在一个切片上存储指针或带指针的值。一个典型的例子就是 <code>[]*string</code>。这会导致切片的内容逃逸。尽管其后面的数组可能是在栈上分配的，但其引用的值一定是在堆上。</p>
+</li>
+<li>
+<p>slice 的背后数组被重新分配了，因为 append 时可能会超出其容量(cap)。slice 初始化的地方在编译时是可以知道的，它最开始会在栈上分配。如果切片背后的存储要基于运行时的数据进行扩充，就会在堆上分配。</p>
+</li>
+<li>
+<p>在 interface 类型上调用方法。在 interface 类型上调用方法都是动态调度的 —— 方法的真正实现只能在运行时知道。想像一个 io.Reader 类型的变量 r, 调用 r.Read(b) 会使得 r 的值和切片 b 的背后存储都逃逸掉，所以会在堆上分配。</p>
+</li>
+</ul>
 <p>用户声明的对象，被放在栈上还是堆上， 是由编译器的 escape analysis 来决定的</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210908170751.png" alt=""></p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210908170803.png" alt=""></p>
-<h3 id="字符串拼接">字符串拼接</h3>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210908170829.png" alt=""></p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210908170839.png" alt=""></p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210908170848.png" alt=""></p>
+<p>string 类型天然就是带指针的类型，比如一些 cache 服务，有几千万 entry，那么用 string 来做 key 和 value 可能成本就很高。</p>
+<p>减少指针的手段：</p>
+<p>用值类型代替指针类型，比如：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="o">*</span><span class="n">int</span> <span class="o">-&gt;</span> <span class="n">struct</span> <span class="p">{</span><span class="n">value</span> <span class="n">int</span><span class="p">,</span> <span class="n">isNull</span> <span class="n">bool</span><span class="p">}</span>
+<span class="n">string</span> <span class="o">-&gt;</span> <span class="n">struct</span> <span class="p">{</span><span class="n">value</span> <span class="n">[12]byte</span><span class="p">,</span> <span class="n">length</span> <span class="n">int</span><span class="p">)</span>
+数值类型的 <span class="n">string</span> <span class="o">-&gt;</span> <span class="n">int</span>
+<span class="o">*</span><span class="n">Host</span> <span class="o">-&gt;</span> <span class="n">Host</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>减少逃逸的手段</p>
+<ul>
+<li>
+<p>尽量少用 <code>fmt.Print</code>、<code>fmt.Sprint</code> 系列的函数。</p>
+</li>
+<li>
+<p>设计函数签名时，参数尽量少用 interface</p>
+</li>
+<li>
+<p>少用闭包，被闭包引用的局部变量会逃逸到堆上</p>
+</li>
+</ul>
+<p>不过这些也就说说而已，真的每一条都遵循怕是写代码的时候已经疯了。况且 Go 的 defer 只能在函数作用域内运作，为了避免 panic 死锁，很多时候套个闭包的操作还是比较常见的。</p>
+<p>map 结构的 128 阈值</p>
+<ul>
+<li>key &gt; 128 字节时，indirectkey = true</li>
+<li>value &gt; 128 字节时，indirectvalue = true</li>
+</ul>
+<h3 id="指针">指针</h3>
+<p>一个经验是：指针指向的数据都是在堆上分配的。因此，在程序中减少指针的运用可以减少堆分配。这不是绝对的，但是我们发现这是在实际问题中最常见的问题。</p>
+<p>一般情况下我们会这样认为：“值的拷贝是昂贵的，所以用一个指针来代替。”
+但是，在很多情况下，直接的值拷贝要比使用指针廉价的多。你可能要问为什么。</p>
+<ul>
+<li>
+<p>编译器会在解除指针时做检查。目的是在指针是 nil 的情况下直接 panic() 以避免内存泄露。这就必须在运行时执行更多的代码。如果数据是按值传递的，那就不需要做这些了，它不可能是 nil</p>
+</li>
+<li>
+<p>指针通常有糟糕的局部引用。一个函数内部的所有值都会在栈空间上分配。局部引用是编写高效代码的重要环节。它会使得变量数据在 CPU Cache(cpu 的一级二级缓存) 中的热度更高，进而减少指令预取时 Cache 不命中的的几率。</p>
+</li>
+<li>
+<p>在 Cache 层拷贝一堆对象，可粗略地认为和拷贝一个指针效率是一样的。CPU 在各 Cache 层和主内存中以固定大小的 cache 进行内存移动。x86 机器上是 64 字节。而且，Go 使用了Duff’s device 技术来使得常规内存操作变得更高效。</p>
+</li>
+</ul>
+<p>指针应该主要被用来做映射数据的所有权和可变性的。实际项目中，用指针来避免拷贝的方式应该尽量少用。</p>
+<p>不要掉进过早优化的陷阱。养成一个按值传递的习惯，只在需要的时候用指针传递。另一个好处就是可以较少 nil 带来的安全问题。</p>
+<p>减少程序中指针的使用的另一个好处是，如果可以证明它里面没有指针，垃圾回收器会直接越过这块内存。例如，一块作为 <code>[]byte</code> 背后存储的堆上内存，是不需要进行扫描的。对于那些不包含指针的数组和 struct 数据类型也是一样的。</p>
+<p>译者注: 垃圾回收器回收一个变量时，要检查该类型里是否有指针。如果有，要检查指针所指向的内存是否可被回收，进而才能决定这个变量能否被回收。如此递归下去。如果被回收的变量里面没有指针, 就不需要进去递归扫描了，直接回收掉就行。</p>
+<p>减少指针的使用不仅可以降低垃圾回收的工作量，它会产生对 cache 更加友好的代码。读内存是要把数据从主内存读到 CPU 的 cache 中。
+Cache 的空间是有限的，所以其他的数据必须被抹掉，好腾出空间。
+被抹掉的数据很可能程序的另外一部分相关。
+由此产生的 cache 抖动会引起线上服务的一些意外的和突然的抖动。</p>
+<p>减少指针的使用就意味着要深入我们自定义的数据类型。我们的一个服务，用带有一组数据结构的循环 buffer 构建了一个失败操作的队列好做重试；它大致是这个样子：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">retryQueue</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">buckets</span>       <span class="p">[][]</span><span class="nx">retryItem</span> <span class="c1">// each bucket represents a 1 second interval
+</span><span class="c1"></span>    <span class="nx">currentTime</span>   <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span>
+    <span class="nx">currentOffset</span> <span class="kt">int</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">retryItem</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">id</span>   <span class="nx">ksuid</span><span class="p">.</span><span class="nx">KSUID</span> <span class="c1">// ID of the item to retry
+</span><span class="c1"></span>    <span class="nx">time</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span>   <span class="c1">// exact time at which the item has to be retried
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>buckets 中外面的数组大小是固定的, 但是 <code>[]retryItem</code> 中 <code>item</code> 的数量是在运行时变化的。重试次数越多, 切片增长的越大。</p>
+<p>挖掘一下 retryItem 的具体实现，我们发现 KSUID 是 <code>[20]byte</code> 的别名, 里面没有指针，所以可以排除。<code>currentOffset</code> 是一个 int 类型, 也是固定长度的，故也可排除。接下来，看一下 <code>time.Time</code> 的实现:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Time</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">sec</span>  <span class="kt">int64</span>
+    <span class="nx">nsec</span> <span class="kt">int32</span>
+    <span class="nx">loc</span>  <span class="o">*</span><span class="nx">Location</span> <span class="c1">// pointer to the time zone structure
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>time.Time</code> 的结构体中包含了一个指针成员 loc。在 retryItem 中使用它会导致 GC 每次经过堆上的这块区域时。</p>
+<p>都要去追踪到结构体里面的指针。</p>
+<p>我们发现，这个案例很典型。 在正常运行期间失败情况很少。 只有少量内存用于存储重试操作。 当失败突然飙升时，重试队列中的对象数量每秒增长好几千，从而对垃圾回收器增加很多压力。</p>
+<p>在这种情况下，time.Time 中的时区信息不是必要的。这些保存在内存中的时间截从来不会被序列化。所以可以重写这个数据结构来避免这种情况:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">retryItem</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">id</span>   <span class="nx">ksuid</span><span class="p">.</span><span class="nx">KSUID</span>
+    <span class="nx">nsec</span> <span class="kt">uint32</span>
+    <span class="nx">sec</span>  <span class="kt">int64</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">item</span> <span class="o">*</span><span class="nx">retryItem</span><span class="p">)</span> <span class="nf">time</span><span class="p">()</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Unix</span><span class="p">(</span><span class="nx">item</span><span class="p">.</span><span class="nx">sec</span><span class="p">,</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">item</span><span class="p">.</span><span class="nx">nsec</span><span class="p">))</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">makeRetryItem</span><span class="p">(</span><span class="nx">id</span> <span class="nx">ksuid</span><span class="p">.</span><span class="nx">KSUID</span><span class="p">,</span> <span class="nx">time</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">)</span> <span class="nx">retryItem</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nx">retryItem</span><span class="p">{</span>
+        <span class="nx">id</span><span class="p">:</span>   <span class="nx">id</span><span class="p">,</span>
+        <span class="nx">nsec</span><span class="p">:</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Nanosecond</span><span class="p">()),</span>
+        <span class="nx">sec</span><span class="p">:</span>  <span class="nx">time</span><span class="p">.</span><span class="nf">Unix</span><span class="p">(),</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>注意现在的 retryItem 不包含任何指针。这大大降低了 gc 压力，因为 retryItem 的整个足迹都可以在编译时知道。</p>
+<h4 id="数据分配密集型">数据分配密集型</h4>
+<p>让我们举一个简单的例子，说明何时要为使用值而共享结构体：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">S</span> <span class="kd">struct</span> <span class="p">{</span>
+   <span class="nx">a</span><span class="p">,</span> <span class="nx">b</span><span class="p">,</span> <span class="nx">c</span> <span class="kt">int64</span>
+   <span class="nx">d</span><span class="p">,</span> <span class="nx">e</span><span class="p">,</span> <span class="nx">f</span> <span class="kt">string</span>
+   <span class="nx">g</span><span class="p">,</span> <span class="nx">h</span><span class="p">,</span> <span class="nx">i</span> <span class="kt">float64</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这是一个可以由副本或指针共享的基本结构体：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">byCopy</span><span class="p">()</span> <span class="nx">S</span> <span class="p">{</span>
+   <span class="k">return</span> <span class="nx">S</span><span class="p">{</span>
+      <span class="nx">a</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="nx">b</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="nx">c</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+      <span class="nx">e</span><span class="p">:</span> <span class="s">&#34;foo&#34;</span><span class="p">,</span> <span class="nx">f</span><span class="p">:</span> <span class="s">&#34;foo&#34;</span><span class="p">,</span>
+      <span class="nx">g</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span> <span class="nx">h</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span> <span class="nx">i</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>
+   <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">byPointer</span><span class="p">()</span> <span class="o">*</span><span class="nx">S</span> <span class="p">{</span>
+   <span class="k">return</span> <span class="o">&amp;</span><span class="nx">S</span><span class="p">{</span>
+      <span class="nx">a</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="nx">b</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="nx">c</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+      <span class="nx">e</span><span class="p">:</span> <span class="s">&#34;foo&#34;</span><span class="p">,</span> <span class="nx">f</span><span class="p">:</span> <span class="s">&#34;foo&#34;</span><span class="p">,</span>
+      <span class="nx">g</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span> <span class="nx">h</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span> <span class="nx">i</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>
+   <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>基于这两种方法，我们现在可以编写两个基准测试，其中一个是通过副本传递结构体的：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">BenchmarkMemoryStack</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+   <span class="kd">var</span> <span class="nx">s</span> <span class="nx">S</span>
+
+   <span class="nx">f</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Create</span><span class="p">(</span><span class="s">&#34;stack.out&#34;</span><span class="p">)</span>
+   <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+   <span class="p">}</span>
+   <span class="k">defer</span> <span class="nx">f</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+
+   <span class="nx">err</span> <span class="p">=</span> <span class="nx">trace</span><span class="p">.</span><span class="nf">Start</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span>
+   <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+   <span class="p">}</span>
+
+   <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+      <span class="nx">s</span> <span class="p">=</span> <span class="nf">byCopy</span><span class="p">()</span>
+   <span class="p">}</span>
+
+   <span class="nx">trace</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+
+   <span class="nx">b</span><span class="p">.</span><span class="nf">StopTimer</span><span class="p">()</span>
+
+   <span class="nx">_</span> <span class="p">=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%v&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">a</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>另一个非常相似，它通过指针传递：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">BenchmarkMemoryHeap</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+<span class="kd">var</span> <span class="nx">s</span><span class="o">*</span><span class="nx">S</span>
+
+   <span class="nx">f</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Create</span><span class="p">(</span><span class="s">&#34;heap.out&#34;</span><span class="p">)</span>
+   <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+   <span class="p">}</span>
+   <span class="k">defer</span> <span class="nx">f</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+
+   <span class="nx">err</span> <span class="p">=</span> <span class="nx">trace</span><span class="p">.</span><span class="nf">Start</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span>
+   <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+   <span class="p">}</span>
+
+   <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+      <span class="nx">s</span> <span class="p">=</span> <span class="nf">byPointer</span><span class="p">()</span>
+   <span class="p">}</span>
+
+   <span class="nx">trace</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+
+   <span class="nx">b</span><span class="p">.</span><span class="nf">StopTimer</span><span class="p">()</span>
+
+   <span class="nx">_</span> <span class="p">=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%v&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">a</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>让我们运行基准测试：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">go</span> <span class="n">test</span> <span class="n">./...</span> <span class="o">-</span><span class="n">bench</span><span class="o">=</span><span class="n">BenchmarkMemoryHeap</span> <span class="o">-</span><span class="n">benchmem</span> <span class="o">-</span><span class="n">run</span><span class="o">=</span><span class="n">^</span><span class="o">$</span> <span class="o">-</span><span class="n">count</span><span class="o">=</span><span class="m">10</span> <span class="o">&gt;</span> <span class="n">head.txt</span> <span class="o">&amp;&amp;</span> <span class="n">benchstat</span> <span class="n">head.txt</span>
+<span class="n">go</span> <span class="n">test</span> <span class="n">./...</span> <span class="o">-</span><span class="n">bench</span><span class="o">=</span><span class="n">BenchmarkMemoryStack</span> <span class="o">-</span><span class="n">benchmem</span> <span class="o">-</span><span class="n">run</span><span class="o">=</span><span class="n">^</span><span class="o">$</span> <span class="o">-</span><span class="n">count</span><span class="o">=</span><span class="m">10</span> <span class="o">&gt;</span> <span class="n">stack.txt</span> <span class="o">&amp;&amp;</span> <span class="n">benchstat</span> <span class="n">stack.txt</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>以下是统计数据：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">name</span>          <span class="n">time</span><span class="o">/</span><span class="n">op</span>
+<span class="n">MemoryHeap</span><span class="m">-4</span>  <span class="m">75.0</span><span class="n">ns</span> ± <span class="m">5</span><span class="o">%
+</span><span class="o">name          alloc/op
+</span><span class="o">MemoryHeap-4   96.0B ± 0%</span>
+<span class="n">name</span>          <span class="n">allocs</span><span class="o">/</span><span class="n">op</span>
+<span class="n">MemoryHeap</span><span class="m">-4</span>    <span class="m">1.00</span> ± <span class="m">0</span><span class="o">%
+</span><span class="o">------------------
+</span><span class="o">
+</span><span class="o">name           time/op
+</span><span class="o">MemoryStack-4  8.93ns ± 4%</span>
+<span class="n">name</span>           <span class="n">alloc</span><span class="o">/</span><span class="n">op</span>
+<span class="n">MemoryStack</span><span class="m">-4</span>   <span class="m">0.00</span><span class="n">B</span>
+<span class="n">name</span>           <span class="n">allocs</span><span class="o">/</span><span class="n">op</span>
+<span class="n">MemoryStack</span><span class="m">-4</span>    <span class="m">0.00</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在这里，使用结构体副本比指针快 8 倍。</p>
+<p>为了理解原因，让我们看看追踪生成的图表：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210510154158.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210510154210.png" alt=""></p>
+<p>第一张图非常简单。由于没有使用堆，因此没有垃圾收集器，也没有额外的 goroutine。 对于第二张图，使用指针迫使 go 编译器将变量逃逸到堆，由此增大了垃圾回收器的压力。如果我们放大图表，我们可以看到，垃圾回收器占据了进程的重要部分。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210510154223.png" alt=""></p>
+<p>在这张图中，我们可以看到，垃圾回收器每隔 4ms 必须工作一次。 如果我们再次缩放，我们可以详细了解正在发生的事情：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210510154228.png" alt=""></p>
+<p>蓝色，粉色和红色是垃圾收集器的不同阶段，而棕色的是与堆上的分配相关（在图上标有 “runtime.bgsweep”）：</p>
+<p>清扫是指回收与堆内存中未标记为使用中的值相关联的内存。当应用程序 Goroutines 尝试在堆内存中分配新值时，会触发此活动。清扫的延迟被添加到在堆内存中执行分配的成本中，并且与垃圾收集相关的任何延迟没有关系。</p>
+<p>即使这个例子有点极端，我们也可以看到，与栈相比，在堆上为变量分配内存是多么消耗资源。在我们的示例中，与在堆上分配内存并共享指针相比，代码在栈上分配结构体并复制副本要快得多。</p>
+<p>如果你不熟悉堆栈或堆，如果你想更多地了解栈或堆的内部细节，你可以在网上找到很多资源，比如 Paul Gribble 的这篇文章。</p>
+<p>如果我们使用 GOMAXPROCS = 1 将处理器限制为 1，情况会更糟：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">name</span>        <span class="n">time</span><span class="o">/</span><span class="n">op</span>
+<span class="n">MemoryHeap</span>  <span class="m">114</span><span class="n">ns</span> ± <span class="m">4</span><span class="o">%
+</span><span class="o">name        alloc/op
+</span><span class="o">MemoryHeap  96.0B ± 0%</span>
+<span class="n">name</span>        <span class="n">allocs</span><span class="o">/</span><span class="n">op</span>
+<span class="n">MemoryHeap</span>   <span class="m">1.00</span> ± <span class="m">0</span><span class="o">%
+</span><span class="o">------------------
+</span><span class="o">
+</span><span class="o">name         time/op
+</span><span class="o">MemoryStack  8.77ns ± 5%</span>
+<span class="n">name</span>         <span class="n">alloc</span><span class="o">/</span><span class="n">op</span>
+<span class="n">MemoryStack</span>   <span class="m">0.00</span><span class="n">B</span>
+<span class="n">name</span>         <span class="n">allocs</span><span class="o">/</span><span class="n">op</span>
+<span class="n">MemoryStack</span>    <span class="m">0.00</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>如果栈上分配的基准数据不变，则堆上的基准从 75ns/op 降低到 114ns/op。</p>
+<h4 id="方法调用密集型">方法调用密集型</h4>
+<p>对于第二个用例，我们将在结构体中添加两个空方法，稍微调整一下我们的基准测试：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="nx">S</span><span class="p">)</span> <span class="nf">stack</span><span class="p">(</span><span class="nx">s1</span> <span class="nx">S</span><span class="p">)</span> <span class="p">{}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">S</span><span class="p">)</span> <span class="nf">heap</span><span class="p">(</span><span class="nx">s1</span><span class="o">*</span><span class="nx">S</span><span class="p">)</span> <span class="p">{}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在栈上分配的基准测试将创建一个结构体并通过复制副本传递它：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">BenchmarkMemoryStack</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+   <span class="kd">var</span> <span class="nx">s</span> <span class="nx">S</span>
+   <span class="kd">var</span> <span class="nx">s1</span> <span class="nx">S</span>
+
+   <span class="nx">s</span> <span class="p">=</span> <span class="nf">byCopy</span><span class="p">()</span>
+   <span class="nx">s1</span> <span class="p">=</span> <span class="nf">byCopy</span><span class="p">()</span>
+   <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+      <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">1000000</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span>  <span class="p">{</span>
+         <span class="nx">s</span><span class="p">.</span><span class="nf">stack</span><span class="p">(</span><span class="nx">s1</span><span class="p">)</span>
+      <span class="p">}</span>
+   <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>堆的基准测试将通过指针传递结构体：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">BenchmarkMemoryHeap</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+<span class="kd">var</span> <span class="nx">s</span><span class="o">*</span><span class="nx">S</span>
+   <span class="kd">var</span> <span class="nx">s1</span> <span class="o">*</span><span class="nx">S</span>
+
+   <span class="nx">s</span> <span class="p">=</span> <span class="nf">byPointer</span><span class="p">()</span>
+   <span class="nx">s1</span> <span class="p">=</span> <span class="nf">byPointer</span><span class="p">()</span>
+   <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+      <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">1000000</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+         <span class="nx">s</span><span class="p">.</span><span class="nf">heap</span><span class="p">(</span><span class="nx">s1</span><span class="p">)</span>
+      <span class="p">}</span>
+   <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>正如预期的那样，结果现在大不相同：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">name</span>          <span class="n">time</span><span class="o">/</span><span class="n">op</span>
+<span class="n">MemoryHeap</span><span class="m">-4</span>  <span class="m">301</span>µ<span class="n">s</span> ± <span class="m">4</span><span class="o">%
+</span><span class="o">name          alloc/op
+</span><span class="o">MemoryHeap-4  0.00B
+</span><span class="o">name          allocs/op
+</span><span class="o">MemoryHeap-4   0.00
+</span><span class="o">------------------
+</span><span class="o">
+</span><span class="o">name           time/op
+</span><span class="o">MemoryStack-4  595µs ± 2%</span>
+<span class="n">name</span>           <span class="n">alloc</span><span class="o">/</span><span class="n">op</span>
+<span class="n">MemoryStack</span><span class="m">-4</span>  <span class="m">0.00</span><span class="n">B</span>
+<span class="n">name</span>           <span class="n">allocs</span><span class="o">/</span><span class="n">op</span>
+<span class="n">MemoryStack</span><span class="m">-4</span>   <span class="m">0.00</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="字符串拼接">字符串拼接</h3>
+<p>用加号连接，和 Sprintf 差别还是比较大的：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">BenchmarkBytesBufferAppend</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="kd">var</span> <span class="nx">msg</span> <span class="nx">bytes</span><span class="p">.</span><span class="nx">Buffer</span>
+		<span class="nx">msg</span><span class="p">.</span><span class="nf">WriteString</span><span class="p">(</span><span class="s">&#34;userid : &#34;</span> <span class="o">+</span> <span class="s">&#34;1&#34;</span><span class="p">)</span>
+		<span class="nx">msg</span><span class="p">.</span><span class="nf">WriteString</span><span class="p">(</span><span class="s">&#34;location : &#34;</span> <span class="o">+</span> <span class="s">&#34;ab&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">BenchmarkBytesBufferAppendSprintf</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="kd">var</span> <span class="nx">msg</span> <span class="nx">bytes</span><span class="p">.</span><span class="nx">Buffer</span>
+		<span class="nx">msg</span><span class="p">.</span><span class="nf">WriteString</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;userid : %d&#34;</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+		<span class="nx">msg</span><span class="p">.</span><span class="nf">WriteString</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;location : %s&#34;</span><span class="p">,</span> <span class="s">&#34;ab&#34;</span><span class="p">))</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210908170848.png" alt=""></p>
 <p>猜猜哪个是 3?</p>
+<p>fmt.打印系列大部分会造成变量逃逸(interface 参数)。</p>
 <h3 id="zero-garbageallocation">Zero Garbage/Allocation</h3>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210908170915.png" alt=""></p>
 <p>Zero garbage 一般是利用 sync.Pool 来将堆分配完全消灭的手段 在一些 http router 框架中会提这个概念</p>
 <p>Gin 的 benchmark 中的 zero allocation</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210908170933.png" alt=""></p>
+<p>sync.Pool 才能实现 zero garbage。benchmark 中的 0 alloc，其实是因为对象有复用，alloc 平均 &lt; 1。</p>
+<p>struct 可以复用(p = Person{}，用零值覆盖一次就可以)，slice 可以复用(<code>a = a[:0]</code>)，但 map 不太好复用(得把所有 kv 全清空才行，成本可能比新建一个还要高)。比如 fasthttp 里，把本来应该是 map 的 header 结构变成了 slice，牺牲一点查询速度，换来了复用的方便。</p>
+<ul>
+<li>复用本身可能导致 bug，例如：</li>
+<li>拿出时不 Reset，内含脏数据:</li>
+<li>slice 缩容时，被缩掉对象如果不置 nil，是不会释放的</li>
+</ul>
+<p>在 Put 回 Pool 时，不判断大小，导致了进程占内存越来越大(标准库发生过这样的问题，在用户看起来，整个进程占用的内存一直在上涨，像是泄露一样)</p>
+<p>第二点可以看下面这张图理解一下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210913163045.png" alt=""></p>
+<p><code>a = a[:1]</code>，如果后面的元素都是指针，都指向了 500MB 的一个大 buffer，没法释放，GC 认为你还是持有引用的。这种情况需要自己先把后面的元素全置为 nil，再缩容。</p>
 <h3 id="false-sharing">False Sharing</h3>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210908171008.png" alt=""></p>
 <p>从 CPU 到内存需要经过多级 cache</p>
@@ -223,11 +888,106 @@
 </ol>
 <h3 id="高频接口滥用外部命令">高频接口滥用外部命令</h3>
 <p>在线上 exec 命令是非常危险的</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210909154239.png" alt=""></p>
-<h3 id="阻塞导致高延迟">阻塞导致高延迟</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;os/exec&#34;</span>
+	<span class="s">&#34;testing&#34;</span>
+
+	<span class="nx">uuid</span> <span class="s">&#34;github.com/satori/go.uuid&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">var</span> <span class="nx">uu</span> <span class="p">[]</span><span class="kt">byte</span>
+<span class="kd">var</span> <span class="nx">u1</span> <span class="nx">uuid</span><span class="p">.</span><span class="nx">UUID</span>
+
+<span class="kd">func</span> <span class="nf">BenchmarkUUIDExec</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">uu</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="s">&#34;uuidgen&#34;</span><span class="p">).</span><span class="nf">Output</span><span class="p">()</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">BenchmarkUUIDLib</span><span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">B</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">N</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">u1</span> <span class="p">=</span> <span class="nx">uuid</span><span class="p">.</span><span class="nf">NewV4</span><span class="p">()</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="阻塞导致高延迟">阻塞导致高延迟</h3>
 <p>临界区里有慢操作</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210909154459.png" alt=""></p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210909160214.png" alt=""></p>
+<p>性能敏感场合，全局锁，比如 rand 的全局锁。单机 10w+ QPS 即可能触发该瓶颈(和环境以及程序行为有关)</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">lockedSource</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">lk</span>  <span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
+	<span class="nx">src</span> <span class="nx">Source64</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">lockedSource</span><span class="p">)</span> <span class="nf">Int63</span><span class="p">()</span> <span class="p">(</span><span class="nx">n</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">r</span><span class="p">.</span><span class="nx">lk</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="nx">n</span> <span class="p">=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">src</span><span class="p">.</span><span class="nf">Int63</span><span class="p">()</span>
+	<span class="nx">r</span><span class="p">.</span><span class="nx">lk</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="k">return</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">lockedSource</span><span class="p">)</span> <span class="nf">Uint64</span><span class="p">()</span> <span class="p">(</span><span class="nx">n</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">r</span><span class="p">.</span><span class="nx">lk</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="nx">n</span> <span class="p">=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">src</span><span class="p">.</span><span class="nf">Uint64</span><span class="p">()</span>
+	<span class="nx">r</span><span class="p">.</span><span class="nx">lk</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>有些开源库设计是一个 struct 对应一个 sync.Pool，这种时候，如果你不对该 struct 进行复用，就会触发 runtime 中的锁冲突：</p>
 <p>在后端系统开发中，锁瓶颈是较常⻅的问题，比如文件锁</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210909160229.png" alt=""></p>
 <p>还有一些公司的 metrics 系统设计，本机上会有 udp 通信</p>
@@ -245,17 +1005,20 @@
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210909161124.png" alt=""></p>
 <p>如果更新可能并发，那么在更新时需要加锁</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210909162030.png" alt=""></p>
+<p>解决方案</p>
+<ul>
+<li>map → sync.Map(读多写少)</li>
+<li>换用无锁结构，如 lock free queue、stack 等</li>
+<li>分段锁</li>
+<li>copy on write，业务逻辑允许的前提下，在修改时拷贝一份，再修改</li>
+</ul>
 <h3 id="cpu-使用太高了">CPU 使用太高了</h3>
 <p>编解码使用 CPU 过高:</p>
 <p>通过更换 json 库，就可以提高系统的吞吐量 本质上就是请求的 CPU 使用被优化了 我们可以使用固定 QPS 压测来验证该结论</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210909162157.png" alt=""></p>
 <p>GC 使用 CPU 过高:</p>
-<p>可以将变化较少的结构放在堆外</p>
-<ul>
-<li>通过 cgo 来管理内存</li>
-<li>让 GC 发现不了这些对象</li>
-<li>也就不会扫描了</li>
-</ul>
+<p>如果数据不可变，只作查询，也可以考虑 offheap，但局限性较大。</p>
+<p>可以将变化较少的结构放在堆外,通过 cgo 来管理内存,让 GC 发现不了这些对象,也就不会扫描了</p>
 <p>Off heap 也可以减少 Go 进程的内存占用和内存使用波动，但要用到 cgo</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210909162401.png" alt=""></p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210909163948.png" alt=""></p>
@@ -263,6 +1026,8 @@
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210909164021.png" alt=""></p>
 <p>调大 GOGC: 程序启动阶段 make 一个全局的超大 slice(如 1GB)</p>
 <p>这种方式只适合那些内存不紧张，且希望提高整体吞吐量的服务</p>
+<p>最近 dgraph 有一篇<a href="https://dgraph.io/blog/post/manual-memory-management-golang-jemalloc/">分享</a>，用 jemalloc 和封装的 cgo 方法，可以把一些 hotpath 上分配的对象放在堆外，这个库的局限是在堆外分配的对象不能引用任何 Go 内部的对象，否则可能破坏 GC 时的引用关系。</p>
+<p>理论上一些 QPS 较低，但每次请求很大的系统，或许可以参考这个库，把 buffer 放在堆外。</p>
 <h3 id="内存占用过高">内存占用过高</h3>
 <p>堆分配导致内存过高</p>
 <p>实例分析，TLS 的 write buffer 瓶颈优化过程</p>
@@ -382,6 +1147,9 @@
 </ul>
 </li>
 </ul>
+<h2 id="参考">参考</h2>
+<p><a href="https://studygolang.com/articles/21763">Go：我应该用指针替代结构体的副本吗？</a></p>
+<p><a href="https://cch123.github.io/perf_opt/">Go 语言性能优化</a></p>
 
     </div>
 
@@ -402,7 +1170,7 @@
 </div>
 <footer class="post-footer">
       <div class="post-tags">
-          <a href="/tags/%E8%B0%83%E4%BC%98/">调优</a>
+          <a href="/tags/go%E8%B0%83%E4%BC%98/">Go调优</a>
           </div>
       <nav class="post-nav">
         <a class="prev" href="/post/%E6%8E%A2%E7%B4%A2prometheus%E7%9A%84go%E5%AE%A2%E6%88%B7%E7%AB%AF%E6%8C%87%E6%A0%87/">

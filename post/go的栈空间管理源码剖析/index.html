@@ -49,7 +49,7 @@
 <meta itemprop="name" content="Go的栈空间管理源码剖析">
 <meta itemprop="description" content="设计原理 栈区的内存一般由编译器自动进行分配和释放，其中存储着函数的入参以及局部变量，这些参数会随着函数的创建而创建，函数的返回而消亡，一般不"><meta itemprop="datePublished" content="2020-12-18T17:46:19+00:00" />
 <meta itemprop="dateModified" content="2020-12-18T17:46:19+00:00" />
-<meta itemprop="wordCount" content="18742">
+<meta itemprop="wordCount" content="18808">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的栈空间管理源码剖析"/>
 <meta name="twitter:description" content="设计原理 栈区的内存一般由编译器自动进行分配和释放，其中存储着函数的入参以及局部变量，这些参数会随着函数的创建而创建，函数的返回而消亡，一般不"/>
@@ -132,7 +132,7 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 18742 字 </span>
+          <span class="more-meta"> 约 18808 字 </span>
           <span class="more-meta"> 预计阅读 38 分钟 </span>
         
       </div>
@@ -166,7 +166,7 @@
         <li><a href="#全部逃逸情景">全部逃逸情景</a></li>
         <li><a href="#逃逸情景传址">逃逸情景:传址</a></li>
         <li><a href="#逃逸情景切片">逃逸情景:切片</a></li>
-        <li><a href="#结论">结论</a></li>
+        <li><a href="#逃逸情景interface">逃逸情景:Interface</a></li>
       </ul>
     </li>
     <li><a href="#小结">小结</a></li>
@@ -3627,7 +3627,6 @@ escape_analysis/main.go:10: main &amp;x does not escape
 <p>ain()中的对象c，由于作为参数p传入g()后发生了逃逸，因此c也发生了逃逸</p>
 <p>当然，如果定义ret.Data为int(instead of *int)的话，对象p也是不会逃逸的(执行了拷贝)</p>
 <h3 id="逃逸情景切片">逃逸情景:切片</h3>
-<h4 id="example7">Example7</h4>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt">1
@@ -3692,26 +3691,80 @@ escape_analysis/main.go:10: main &amp;x does not escape
 </code></pre></td></tr></table>
 </div>
 </div><p>但是!!! 这段代码a是在栈上分配的。而最上面那段，却是在堆上分配的。</p>
-<h3 id="结论">结论</h3>
-<p>导致内存逃逸的情况比较多，有些可能还是官方未能够实现精确的分析逃逸情况的bug，简单一点来讲就是如果变量的作用域不会扩大并且其行为或者大小能够在编译的时候确定，一般情况下都是分配到栈上，否则就可能发生内存逃逸分配到堆上。</p>
-<p>简单总结一下有以下几类情况：</p>
-<ol>
-<li>
-<p>发送指针的指针或值包含了指针到 channel 中，由于在编译阶段无法确定其作用域与传递的路径，所以一般都会逃逸到堆上分配。</p>
-</li>
-<li>
-<p>slices 中的值是指针的指针或包含指针字段。一个例子是类似 <code>[] *string</code> 的类型。这总是导致 slice 的逃逸。即使切片的底层存储数组仍可能位于堆栈上，数据的引用也会转移到堆中。</p>
-</li>
-<li>
-<p>slice 由于 append 操作超出其容量，因此会导致 slice 重新分配。这种情况下，由于在编译时 slice 的初始大小的已知情况下，将会在栈上分配。如果 slice 的底层存储必须基于仅在运行时数据进行扩展，则它将分配在堆上。</p>
-</li>
-<li>
-<p>调用接口类型的方法(比如<code>fmt.Println</code>)。接口类型的方法调用是动态调度 - 实际使用的具体实现只能在运行时确定。考虑一个接口类型为 <code>io.Reader</code> 的变量 r。对 <code>r.Read(b)</code> 的调用将导致 r 的值和字节片 b 的后续转义并因此分配到堆上。</p>
-</li>
-<li>
-<p>尽管能够符合分配到栈的场景，但是其大小不能够在在编译时候确定的情况，也会分配到堆上</p>
-</li>
-</ol>
+<h3 id="逃逸情景interface">逃逸情景:Interface</h3>
+<p>众所周知的，在 Interface 类型上调用方法要比直接在 Struct 上调用方法效率低。在 interface 类型上调用方法是动态调度的。这就极大的限制了编译器确定运行时代码执行方式的能力。到目前为止我们已经大量的讨论了，调整代码好让编译器能在编译时更好的理解你的代码行为。但 interface 类型会让这一切都白做。</p>
+<p>不幸的是，interface 类型还是一个非常有用的抽象方式 —— 它能让我们写出扩展性更高的代码。interface 的一个普遍应用场景是标准库里的 hash 包中的哈希函数。hash 包定义了通用的接口，然后提供了几个具体的实现。让我们看几个例子：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+        <span class="s">&#34;fmt&#34;</span>
+        <span class="s">&#34;hash/fnv&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">hashIt</span><span class="p">(</span><span class="nx">in</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">uint64</span> <span class="p">{</span>
+        <span class="nx">h</span> <span class="o">:=</span> <span class="nx">fnv</span><span class="p">.</span><span class="nf">New64a</span><span class="p">()</span>
+        <span class="nx">h</span><span class="p">.</span><span class="nf">Write</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">in</span><span class="p">))</span>
+        <span class="nx">out</span> <span class="o">:=</span> <span class="nx">h</span><span class="p">.</span><span class="nf">Sum64</span><span class="p">()</span>
+        <span class="k">return</span> <span class="nx">out</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nx">s</span> <span class="o">:=</span> <span class="s">&#34;hello&#34;</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;The FNV64a hash of &#39;%v&#39; is &#39;%v&#39;\n&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">,</span> <span class="nf">hashIt</span><span class="p">(</span><span class="nx">s</span><span class="p">))</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>编译上段代码，加上逃逸分析参数，会有以下输出：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">./foo1.go</span><span class="o">:</span><span class="m">9</span><span class="o">:</span><span class="m">17</span><span class="o">:</span> <span class="n">inlining</span> <span class="n">call</span> <span class="n">to</span> <span class="n">fnv.New64a</span>
+<span class="n">./foo1.go</span><span class="o">:</span><span class="m">10</span><span class="o">:</span><span class="m">16</span><span class="o">:</span> <span class="p">(</span><span class="n">[]byte</span><span class="p">)(</span><span class="n">in</span><span class="p">)</span> <span class="n">escapes</span> <span class="n">to</span> <span class="n">heap</span>
+<span class="n">./foo1.go</span><span class="o">:</span><span class="m">9</span><span class="o">:</span><span class="m">17</span><span class="o">:</span> <span class="nf">hash.Hash64</span><span class="p">(</span><span class="o">&amp;</span><span class="n">fnv.s</span>·<span class="m">2</span><span class="p">)</span> <span class="n">escapes</span> <span class="n">to</span> <span class="n">heap</span>
+<span class="n">./foo1.go</span><span class="o">:</span><span class="m">9</span><span class="o">:</span><span class="m">17</span><span class="o">:</span> <span class="o">&amp;</span><span class="n">fnv.s</span>·<span class="m">2</span> <span class="n">escapes</span> <span class="n">to</span> <span class="n">heap</span>
+<span class="n">./foo1.go</span><span class="o">:</span><span class="m">9</span><span class="o">:</span><span class="m">17</span><span class="o">:</span> <span class="n">moved</span> <span class="n">to</span> <span class="n">heap</span><span class="o">:</span> <span class="n">fnv.s</span>·<span class="m">2</span>
+<span class="n">./foo1.go</span><span class="o">:</span><span class="m">8</span><span class="o">:</span><span class="m">24</span><span class="o">:</span> <span class="n">hashIt</span> <span class="n">in</span> <span class="n">does</span> <span class="n">not</span> <span class="n">escape</span>
+<span class="n">./foo1.go</span><span class="o">:</span><span class="m">17</span><span class="o">:</span><span class="m">13</span><span class="o">:</span> <span class="n">s</span> <span class="n">escapes</span> <span class="n">to</span> <span class="n">heap</span>
+<span class="n">./foo1.go</span><span class="o">:</span><span class="m">17</span><span class="o">:</span><span class="m">59</span><span class="o">:</span> <span class="nf">hashIt</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="n">escapes</span> <span class="n">to</span> <span class="n">heap</span>
+<span class="n">./foo1.go</span><span class="o">:</span><span class="m">17</span><span class="o">:</span><span class="m">12</span><span class="o">:</span> <span class="n">main</span> <span class="kc">...</span> <span class="n">argument</span> <span class="n">does</span> <span class="n">not</span> <span class="n">escape</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这说明了，hash 对象，输入字符串，和 []byte 都会逃逸到堆上。</p>
+<p>人肉眼看上去很明显这些数据根本没有逃逸，但是 interface 类型限制了编译器的功能。</p>
+<p>没有办法不进入 hash 的 interface 结构而安全的调用其具体实现。
+所以碰到这种情况，除非自己手动实现一个不使用 interface 的库，没什么好办法。</p>
 <h2 id="小结">小结</h2>
 <p>栈内存是应用程序中重要的内存空间，它能够支持本地的局部变量和函数调用，栈空间中的变量会与栈一同创建和销毁，这部分内存空间不需要工程师过多的干预和管理，现代的编程语言通过逃逸分析减少了我们的工作量，理解栈空间的分配对于理解 Go 语言的运行时有很大的帮助。</p>
 <h2 id="参考">参考</h2>
