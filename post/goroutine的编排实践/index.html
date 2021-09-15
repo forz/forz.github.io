@@ -1,0 +1,1529 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Goroutine的编排实践 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="任务编排 这里的编排既指安排 goroutine 按照指定的顺序执行,也指多个 chan 按照指定的方式组合处理的方式。goroutine 的编排类似“击鼓传花”的例子,我们" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.88.1 with theme even" />
+
+
+<link rel="canonical" href="/post/goroutine%E7%9A%84%E7%BC%96%E6%8E%92%E5%AE%9E%E8%B7%B5/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.98f8e47918247c097fa26317cbb567fe9f05503485bf08d8547f5579543303b1.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Goroutine的编排实践" />
+<meta property="og:description" content="任务编排 这里的编排既指安排 goroutine 按照指定的顺序执行,也指多个 chan 按照指定的方式组合处理的方式。goroutine 的编排类似“击鼓传花”的例子,我们" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/goroutine%E7%9A%84%E7%BC%96%E6%8E%92%E5%AE%9E%E8%B7%B5/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-09-15T18:26:15+00:00" />
+<meta property="article:modified_time" content="2021-09-15T18:26:15+00:00" />
+
+<meta itemprop="name" content="Goroutine的编排实践">
+<meta itemprop="description" content="任务编排 这里的编排既指安排 goroutine 按照指定的顺序执行,也指多个 chan 按照指定的方式组合处理的方式。goroutine 的编排类似“击鼓传花”的例子,我们"><meta itemprop="datePublished" content="2021-09-15T18:26:15+00:00" />
+<meta itemprop="dateModified" content="2021-09-15T18:26:15+00:00" />
+<meta itemprop="wordCount" content="4455">
+<meta itemprop="keywords" content="Go," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Goroutine的编排实践"/>
+<meta name="twitter:description" content="任务编排 这里的编排既指安排 goroutine 按照指定的顺序执行,也指多个 chan 按照指定的方式组合处理的方式。goroutine 的编排类似“击鼓传花”的例子,我们"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">Forz Blog</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+      <a class="menu-item-link" href="/">Home</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/post/">Archives</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/tags/">Tags</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/categories/">Categories</a>
+    </li>
+  </ul>
+</nav><div class="docsearch-input__container">
+  <input type="search" class="docsearch-input" placeholder="Search" />
+</div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Goroutine的编排实践</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-09-15 </span>
+        <div class="post-category">
+            <a href="/categories/go/"> Go </a>
+            </div>
+          <span class="more-meta"> 约 4455 字 </span>
+          <span class="more-meta"> 预计阅读 9 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#任务编排">任务编排</a>
+      <ul>
+        <li><a href="#基本编排">基本编排</a></li>
+        <li><a href="#or-done-模式">Or-Done 模式</a></li>
+        <li><a href="#扇入模式">扇入模式</a></li>
+        <li><a href="#扇出模式">扇出模式</a></li>
+        <li><a href="#stream">Stream</a></li>
+        <li><a href="#map-reduce">Map-Reduce</a></li>
+      </ul>
+    </li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="任务编排">任务编排</h2>
+<p>这里的编排既指安排 goroutine 按照指定的顺序执行,也指多个 chan 按照指定的方式组合处理的方式。goroutine 的编排类似“击鼓传花”的例子,我们通过编排数据在 chan 之间的流转,就可以控制 goroutine 的执行。会重点介绍下多个 chan 的编排方式,总共 5 种,分别是 Or-Done 模式、扇入模式、扇出模式、Stream 和 MapReduce。</p>
+<h3 id="基本编排">基本编排</h3>
+<p>基本处理:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">goroutine</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;fmt&#34;</span>
+
+	<span class="s">&#34;github.com/abulo/ratel/logger&#34;</span>
+	<span class="s">&#34;github.com/abulo/ratel/util&#34;</span>
+	<span class="s">&#34;github.com/pkg/errors&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">try</span><span class="p">(</span><span class="nx">fn</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span><span class="p">,</span> <span class="nx">cleaner</span> <span class="kd">func</span><span class="p">())</span> <span class="p">(</span><span class="nx">ret</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">cleaner</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">defer</span> <span class="nf">cleaner</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">logger</span><span class="p">.</span><span class="nx">Logger</span><span class="p">.</span><span class="nf">Error</span><span class="p">(</span><span class="s">&#34;recover&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">err</span><span class="p">.(</span><span class="kt">error</span><span class="p">);</span> <span class="nx">ok</span> <span class="p">{</span>
+				<span class="nx">ret</span> <span class="p">=</span> <span class="nx">err</span><span class="p">.(</span><span class="kt">error</span><span class="p">)</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+				<span class="nx">ret</span> <span class="p">=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;%+v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="nx">ret</span> <span class="p">=</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">Wrap</span><span class="p">(</span><span class="nx">ret</span><span class="p">,</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%s&#34;</span><span class="p">,</span> <span class="nx">util</span><span class="p">.</span><span class="nf">FunctionName</span><span class="p">(</span><span class="nx">fn</span><span class="p">)))</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+	<span class="k">return</span> <span class="nf">fn</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">try2</span><span class="p">(</span><span class="nx">fn</span> <span class="kd">func</span><span class="p">(),</span> <span class="nx">cleaner</span> <span class="kd">func</span><span class="p">())</span> <span class="p">(</span><span class="nx">ret</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">cleaner</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">defer</span> <span class="nf">cleaner</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">logger</span><span class="p">.</span><span class="nx">Logger</span><span class="p">.</span><span class="nf">Error</span><span class="p">(</span><span class="s">&#34;recover&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">err</span><span class="p">.(</span><span class="kt">error</span><span class="p">);</span> <span class="nx">ok</span> <span class="p">{</span>
+				<span class="nx">ret</span> <span class="p">=</span> <span class="nx">err</span><span class="p">.(</span><span class="kt">error</span><span class="p">)</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+				<span class="nx">ret</span> <span class="p">=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;%+v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+	<span class="nf">fn</span><span class="p">()</span>
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><p>安全并发:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">goroutine</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;sync&#34;</span>
+	<span class="s">&#34;time&#34;</span>
+
+	<span class="s">&#34;github.com/abulo/ratel/logger&#34;</span>
+	<span class="s">&#34;github.com/codegangsta/inject&#34;</span>
+<span class="p">)</span>
+
+<span class="c1">// Serial 串行
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">Serial</span><span class="p">(</span><span class="nx">fns</span> <span class="o">...</span><span class="kd">func</span><span class="p">())</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">fns</span> <span class="p">{</span>
+			<span class="nf">fn</span><span class="p">()</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// Parallel 并发执行
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">Parallel</span><span class="p">(</span><span class="nx">fns</span> <span class="o">...</span><span class="kd">func</span><span class="p">())</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+	<span class="k">return</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">fns</span><span class="p">))</span>
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">fns</span> <span class="p">{</span>
+			<span class="k">go</span> <span class="nf">try2</span><span class="p">(</span><span class="nx">fn</span><span class="p">,</span> <span class="nx">wg</span><span class="p">.</span><span class="nx">Done</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// RestrictParallel 并发,最大并发量restrict
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">RestrictParallel</span><span class="p">(</span><span class="nx">restrict</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">fns</span> <span class="o">...</span><span class="kd">func</span><span class="p">())</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">channel</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{},</span> <span class="nx">restrict</span><span class="p">)</span>
+	<span class="k">return</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">fns</span> <span class="p">{</span>
+			<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+			<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">fn</span> <span class="kd">func</span><span class="p">())</span> <span class="p">{</span>
+				<span class="k">defer</span> <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+				<span class="nx">channel</span> <span class="o">&lt;-</span> <span class="kd">struct</span><span class="p">{}{}</span>
+				<span class="nf">try2</span><span class="p">(</span><span class="nx">fn</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+				<span class="o">&lt;-</span><span class="nx">channel</span>
+			<span class="p">}(</span><span class="nx">fn</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+		<span class="nb">close</span><span class="p">(</span><span class="nx">channel</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// GoDirect ...
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">GoDirect</span><span class="p">(</span><span class="nx">fn</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">args</span> <span class="o">...</span><span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">inj</span> <span class="p">=</span> <span class="nx">inject</span><span class="p">.</span><span class="nf">New</span><span class="p">()</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">arg</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">args</span> <span class="p">{</span>
+		<span class="nx">inj</span><span class="p">.</span><span class="nf">Map</span><span class="p">(</span><span class="nx">arg</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nx">logger</span><span class="p">.</span><span class="nx">Logger</span><span class="p">.</span><span class="nf">Error</span><span class="p">(</span><span class="s">&#34;recover&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}()</span>
+		<span class="c1">// 忽略返回值, goroutine执行的返回值通常都会忽略掉
+</span><span class="c1"></span>		<span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">inj</span><span class="p">.</span><span class="nf">Invoke</span><span class="p">(</span><span class="nx">fn</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">logger</span><span class="p">.</span><span class="nx">Logger</span><span class="p">.</span><span class="nf">Error</span><span class="p">(</span><span class="s">&#34;inject&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+<span class="p">}</span>
+
+<span class="c1">// Go goroutine
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">Go</span><span class="p">(</span><span class="nx">fn</span> <span class="kd">func</span><span class="p">())</span> <span class="p">{</span>
+	<span class="k">go</span> <span class="nf">try2</span><span class="p">(</span><span class="nx">fn</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">// DelayGo goroutine
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">DelayGo</span><span class="p">(</span><span class="nx">delay</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">,</span> <span class="nx">fn</span> <span class="kd">func</span><span class="p">())</span> <span class="p">{</span>
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nx">logger</span><span class="p">.</span><span class="nx">Logger</span><span class="p">.</span><span class="nf">Error</span><span class="p">(</span><span class="s">&#34;inject&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}()</span>
+		<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">delay</span><span class="p">)</span>
+		<span class="nf">fn</span><span class="p">()</span>
+	<span class="p">}()</span>
+<span class="p">}</span>
+
+<span class="c1">// SafeGo safe go
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">SafeGo</span><span class="p">(</span><span class="nx">fn</span> <span class="kd">func</span><span class="p">(),</span> <span class="nx">rec</span> <span class="kd">func</span><span class="p">(</span><span class="kt">error</span><span class="p">))</span> <span class="p">{</span>
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">err</span> <span class="o">:=</span> <span class="nf">try2</span><span class="p">(</span><span class="nx">fn</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nf">rec</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><p>顺序编排:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">goroutine</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;go.uber.org/multierr&#34;</span>
+<span class="p">)</span>
+
+<span class="c1">// SerialWithError ...
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">SerialWithError</span><span class="p">(</span><span class="nx">fns</span> <span class="o">...</span><span class="kd">func</span><span class="p">()</span> <span class="kt">error</span><span class="p">)</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+		<span class="kd">var</span> <span class="nx">errs</span> <span class="kt">error</span>
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">fns</span> <span class="p">{</span>
+			<span class="nx">errs</span> <span class="p">=</span> <span class="nx">multierr</span><span class="p">.</span><span class="nf">Append</span><span class="p">(</span><span class="nx">errs</span><span class="p">,</span> <span class="nf">try</span><span class="p">(</span><span class="nx">fn</span><span class="p">,</span> <span class="kc">nil</span><span class="p">))</span>
+		<span class="p">}</span>
+		<span class="k">return</span> <span class="nx">errs</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// 创建一个迭代器
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">SerialUntilError</span><span class="p">(</span><span class="nx">fns</span> <span class="o">...</span><span class="kd">func</span><span class="p">()</span> <span class="kt">error</span><span class="p">)</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">fns</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">try</span><span class="p">(</span><span class="nx">fn</span><span class="p">,</span> <span class="kc">nil</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="k">return</span> <span class="nx">err</span>
+				<span class="c1">// return errors.Wrap(err, xstring.FunctionName(fn))
+</span><span class="c1"></span>			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// 策略注入
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">WhenError</span> <span class="kt">int</span>
+
+<span class="kd">var</span> <span class="p">(</span>
+
+	<span class="c1">// ReturnWhenError ...
+</span><span class="c1"></span>	<span class="nx">ReturnWhenError</span> <span class="nx">WhenError</span> <span class="p">=</span> <span class="mi">1</span>
+
+	<span class="c1">// ContinueWhenError ...
+</span><span class="c1"></span>	<span class="nx">ContinueWhenError</span> <span class="nx">WhenError</span> <span class="p">=</span> <span class="mi">2</span>
+
+	<span class="c1">// PanicWhenError ...
+</span><span class="c1"></span>	<span class="nx">PanicWhenError</span> <span class="nx">WhenError</span> <span class="p">=</span> <span class="mi">3</span>
+
+	<span class="c1">// LastErrorWhenError ...
+</span><span class="c1"></span>	<span class="nx">LastErrorWhenError</span> <span class="nx">WhenError</span> <span class="p">=</span> <span class="mi">4</span>
+<span class="p">)</span>
+
+<span class="c1">// SerialWhenError ...
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">SerialWhenError</span><span class="p">(</span><span class="nx">we</span> <span class="nx">WhenError</span><span class="p">)</span> <span class="kd">func</span><span class="p">(</span><span class="nx">fn</span> <span class="o">...</span><span class="kd">func</span><span class="p">()</span> <span class="kt">error</span><span class="p">)</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="kd">func</span><span class="p">(</span><span class="nx">fns</span> <span class="o">...</span><span class="kd">func</span><span class="p">()</span> <span class="kt">error</span><span class="p">)</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+			<span class="kd">var</span> <span class="nx">errs</span> <span class="kt">error</span>
+			<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">fns</span> <span class="p">{</span>
+				<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">try</span><span class="p">(</span><span class="nx">fn</span><span class="p">,</span> <span class="kc">nil</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+					<span class="k">switch</span> <span class="nx">we</span> <span class="p">{</span>
+					<span class="k">case</span> <span class="nx">ReturnWhenError</span><span class="p">:</span> <span class="c1">// 直接退出
+</span><span class="c1"></span>						<span class="k">return</span> <span class="nx">err</span>
+					<span class="k">case</span> <span class="nx">ContinueWhenError</span><span class="p">:</span> <span class="c1">// 继续执行
+</span><span class="c1"></span>						<span class="nx">errs</span> <span class="p">=</span> <span class="nx">multierr</span><span class="p">.</span><span class="nf">Append</span><span class="p">(</span><span class="nx">errs</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+					<span class="k">case</span> <span class="nx">PanicWhenError</span><span class="p">:</span> <span class="c1">// panic
+</span><span class="c1"></span>						<span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+					<span class="k">case</span> <span class="nx">LastErrorWhenError</span><span class="p">:</span> <span class="c1">// 返回最后一个错误
+</span><span class="c1"></span>						<span class="nx">errs</span> <span class="p">=</span> <span class="nx">err</span>
+					<span class="p">}</span>
+				<span class="p">}</span>
+			<span class="p">}</span>
+			<span class="k">return</span> <span class="nx">errs</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>并发编排:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">goroutine</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;sync&#34;</span>
+
+	<span class="s">&#34;golang.org/x/sync/errgroup&#34;</span>
+<span class="p">)</span>
+
+<span class="c1">// ParallelWithError ...
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">ParallelWithError</span><span class="p">(</span><span class="nx">fns</span> <span class="o">...</span><span class="kd">func</span><span class="p">()</span> <span class="kt">error</span><span class="p">)</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+		<span class="nx">eg</span> <span class="o">:=</span> <span class="nx">errgroup</span><span class="p">.</span><span class="nx">Group</span><span class="p">{}</span>
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">fns</span> <span class="p">{</span>
+			<span class="nx">eg</span><span class="p">.</span><span class="nf">Go</span><span class="p">(</span><span class="nx">fn</span><span class="p">)</span>
+		<span class="p">}</span>
+
+		<span class="k">return</span> <span class="nx">eg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// ParallelWithErrorChan calls the passed functions in a goroutine, returns a chan of errors.
+</span><span class="c1">// fns会并发执行，chan error
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">ParallelWithErrorChan</span><span class="p">(</span><span class="nx">fns</span> <span class="o">...</span><span class="kd">func</span><span class="p">()</span> <span class="kt">error</span><span class="p">)</span> <span class="kd">chan</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">total</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">fns</span><span class="p">)</span>
+	<span class="nx">errs</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">error</span><span class="p">,</span> <span class="nx">total</span><span class="p">)</span>
+
+	<span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+	<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">total</span><span class="p">)</span>
+
+	<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">errs</span> <span class="kd">chan</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+		<span class="nb">close</span><span class="p">(</span><span class="nx">errs</span><span class="p">)</span>
+	<span class="p">}(</span><span class="nx">errs</span><span class="p">)</span>
+
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">fns</span> <span class="p">{</span>
+		<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">fn</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span><span class="p">,</span> <span class="nx">errs</span> <span class="kd">chan</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+			<span class="k">defer</span> <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+			<span class="nx">errs</span> <span class="o">&lt;-</span> <span class="nf">try</span><span class="p">(</span><span class="nx">fn</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+		<span class="p">}(</span><span class="nx">fn</span><span class="p">,</span> <span class="nx">errs</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span> <span class="nx">errs</span>
+<span class="p">}</span>
+
+<span class="c1">// RestrictParallelWithErrorChan calls the passed functions in a goroutine, limiting the number of goroutines running at the same time,
+</span><span class="c1">// returns a chan of errors.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">RestrictParallelWithErrorChan</span><span class="p">(</span><span class="nx">concurrency</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">fns</span> <span class="o">...</span><span class="kd">func</span><span class="p">()</span> <span class="kt">error</span><span class="p">)</span> <span class="kd">chan</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">total</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">fns</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">concurrency</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">concurrency</span> <span class="p">=</span> <span class="mi">1</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">concurrency</span> <span class="p">&gt;</span> <span class="nx">total</span> <span class="p">{</span>
+		<span class="nx">concurrency</span> <span class="p">=</span> <span class="nx">total</span>
+	<span class="p">}</span>
+	<span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+	<span class="nx">errs</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">error</span><span class="p">,</span> <span class="nx">total</span><span class="p">)</span>
+	<span class="nx">jobs</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span><span class="p">,</span> <span class="nx">concurrency</span><span class="p">)</span>
+	<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">concurrency</span><span class="p">)</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">concurrency</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="c1">//consumer
+</span><span class="c1"></span>		<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">jobs</span> <span class="kd">chan</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span><span class="p">,</span> <span class="nx">errs</span> <span class="kd">chan</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+			<span class="k">defer</span> <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+			<span class="k">for</span> <span class="nx">fn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">jobs</span> <span class="p">{</span>
+				<span class="nx">errs</span> <span class="o">&lt;-</span> <span class="nf">try</span><span class="p">(</span><span class="nx">fn</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}(</span><span class="nx">jobs</span><span class="p">,</span> <span class="nx">errs</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">errs</span> <span class="kd">chan</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+		<span class="c1">//producer
+</span><span class="c1"></span>		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">fns</span> <span class="p">{</span>
+			<span class="nx">jobs</span> <span class="o">&lt;-</span> <span class="nx">fn</span>
+		<span class="p">}</span>
+		<span class="nb">close</span><span class="p">(</span><span class="nx">jobs</span><span class="p">)</span>
+		<span class="c1">//wait for block errs
+</span><span class="c1"></span>		<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+		<span class="nb">close</span><span class="p">(</span><span class="nx">errs</span><span class="p">)</span>
+	<span class="p">}(</span><span class="nx">errs</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">errs</span>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="or-done-模式">Or-Done 模式</h3>
+<p>首先来看 Or-Done 模式。Or-Done 模式是信号通知模式中更宽泛的一种模式。这里提到了“信号通知模式”,我先来解释一下。</p>
+<p>我们会使用“信号通知”实现某个任务执行完成后的通知机制,在实现时,我们为这个任务定义一个类型为 <code>chan struct{}</code>类型的 done 变量,等任务结束后,我们就可以 close 这个变量,然后,其它 receiver 就会收到这个通知。</p>
+<p>这是有一个任务的情况,如果有多个任务,只要有任意一个任务执行完,我们就想获得这个信号,这就是 Or-Done 模式。</p>
+<p>比如,你发送同一个请求到多个微服务节点,只要任意一个微服务节点返回结果,就算成功,这个时候,就可以参考下面的实现:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">example</span>
+
+<span class="kd">func</span> <span class="nf">or</span><span class="p">(</span><span class="nx">channels</span> <span class="o">...&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+	<span class="c1">// 特殊情况,只有零个或者1个chan
+</span><span class="c1"></span>	<span class="k">switch</span> <span class="nb">len</span><span class="p">(</span><span class="nx">channels</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="mi">0</span><span class="p">:</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="k">case</span> <span class="mi">1</span><span class="p">:</span>
+		<span class="k">return</span> <span class="nx">channels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+	<span class="p">}</span>
+	<span class="nx">orDone</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span>
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">orDone</span><span class="p">)</span>
+		<span class="k">switch</span> <span class="nb">len</span><span class="p">(</span><span class="nx">channels</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="mi">2</span><span class="p">:</span> <span class="c1">// 2个也是一种特殊情况
+</span><span class="c1"></span>			<span class="k">select</span> <span class="p">{</span>
+			<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">channels</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+			<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">channels</span><span class="p">[</span><span class="mi">1</span><span class="p">]:</span>
+			<span class="p">}</span>
+		<span class="k">default</span><span class="p">:</span> <span class="c1">// 超过两个,二分法递归处理
+</span><span class="c1"></span>			<span class="nx">m</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">channels</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+			<span class="k">select</span> <span class="p">{</span>
+			<span class="k">case</span> <span class="o">&lt;-</span><span class="nf">or</span><span class="p">(</span><span class="nx">channels</span><span class="p">[:</span><span class="nx">m</span><span class="p">]</span><span class="o">...</span><span class="p">):</span>
+			<span class="k">case</span> <span class="o">&lt;-</span><span class="nf">or</span><span class="p">(</span><span class="nx">channels</span><span class="p">[</span><span class="nx">m</span><span class="p">:]</span><span class="o">...</span><span class="p">):</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+	<span class="k">return</span> <span class="nx">orDone</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们可以写一个测试程序测试它:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">sig</span><span class="p">(</span><span class="nx">after</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">)</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+    <span class="nx">c</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span>
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
+        <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">after</span><span class="p">)</span>
+    <span class="p">}()</span>
+    <span class="k">return</span> <span class="nx">c</span>
+<span class="p">}</span>
+
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">start</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">()</span>
+
+    <span class="o">&lt;-</span><span class="nf">or</span><span class="p">(</span>
+        <span class="nf">sig</span><span class="p">(</span><span class="mi">10</span><span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">),</span>
+        <span class="nf">sig</span><span class="p">(</span><span class="mi">20</span><span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">),</span>
+        <span class="nf">sig</span><span class="p">(</span><span class="mi">30</span><span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">),</span>
+        <span class="nf">sig</span><span class="p">(</span><span class="mi">40</span><span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">),</span>
+        <span class="nf">sig</span><span class="p">(</span><span class="mi">50</span><span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">),</span>
+        <span class="nf">sig</span><span class="p">(</span><span class="mo">01</span><span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Minute</span><span class="p">),</span>
+    <span class="p">)</span>
+
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;done after %v&#34;</span><span class="p">,</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Since</span><span class="p">(</span><span class="nx">start</span><span class="p">))</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这里的实现使用了一个巧妙的方式,当 chan 的数量大于 2 时,使用递归的方式等待信号。</p>
+<p>在 chan 数量比较多的情况下,递归并不是一个很好的解决方式,根据这一讲最开始介绍的反射的方法,我们也可以实现 Or-Done 模式:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">
+<span class="kd">func</span> <span class="nf">or</span><span class="p">(</span><span class="nx">channels</span> <span class="o">...&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+    <span class="c1">//特殊情况，只有0个或者1个
+</span><span class="c1"></span>    <span class="k">switch</span> <span class="nb">len</span><span class="p">(</span><span class="nx">channels</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">case</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">nil</span>
+    <span class="k">case</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nx">channels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="p">}</span>
+
+    <span class="nx">orDone</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span>
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">orDone</span><span class="p">)</span>
+        <span class="c1">// 利用反射构建SelectCase
+</span><span class="c1"></span>        <span class="kd">var</span> <span class="nx">cases</span> <span class="p">[]</span><span class="nx">reflect</span><span class="p">.</span><span class="nx">SelectCase</span>
+        <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">c</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">channels</span> <span class="p">{</span>
+            <span class="nx">cases</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">cases</span><span class="p">,</span> <span class="nx">reflect</span><span class="p">.</span><span class="nx">SelectCase</span><span class="p">{</span>
+                <span class="nx">Dir</span><span class="p">:</span>  <span class="nx">reflect</span><span class="p">.</span><span class="nx">SelectRecv</span><span class="p">,</span>
+                <span class="nx">Chan</span><span class="p">:</span> <span class="nx">reflect</span><span class="p">.</span><span class="nf">ValueOf</span><span class="p">(</span><span class="nx">c</span><span class="p">),</span>
+            <span class="p">})</span>
+        <span class="p">}</span>
+
+        <span class="c1">// 随机选择一个可用的case
+</span><span class="c1"></span>        <span class="nx">reflect</span><span class="p">.</span><span class="nf">Select</span><span class="p">(</span><span class="nx">cases</span><span class="p">)</span>
+    <span class="p">}()</span>
+
+
+    <span class="k">return</span> <span class="nx">orDone</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这是递归和反射两种方法实现 Or-Done 模式的代码。反射方式避免了深层递归的情况,可以处理有大量 chan 的情况。其实最笨的一种方法就是为每一个 Channel 启动一个 goroutine,不过这会启动非常多的 goroutine,太多的 goroutine 会影响性能,所以不太常用。你只要知道这种用法就行了,不用重点掌握。</p>
+<h3 id="扇入模式">扇入模式</h3>
+<p>扇入借鉴了数字电路的概念,它定义了单个逻辑门能够接受的数字信号输入最大量的术语。一个逻辑门可以有多个输入,一个输出。</p>
+<p>在软件工程中,模块的扇入是指有多少个上级模块调用它。而对于我们这里的 Channel 扇入模式来说,就是指有多个源 Channel 输入、一个目的 Channel 输出的情况。扇入比就是源 Channel 数量比 1。</p>
+<p>每个源 Channel 的元素都会发送给目标 Channel,相当于目标 Channel 的 receiver 只需要监听目标 Channel,就可以接收所有发送给源 Channel 的数据。</p>
+<p>扇入模式也可以使用反射、递归,或者是用最笨的每个 goroutine 处理一个 Channel 的方式来实现。</p>
+<p>这里我列举下递归和反射的方式,帮你加深一下对这个技巧的理解。</p>
+<p>反射的代码比较简短,易于理解,主要就是构造出 SelectCase slice,然后传递给 reflect.Select 语句。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">fanInReflect</span><span class="p">(</span><span class="nx">chans</span> <span class="o">...&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+    <span class="nx">out</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span>
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">out</span><span class="p">)</span>
+        <span class="c1">// 构造SelectCase slice
+</span><span class="c1"></span>        <span class="kd">var</span> <span class="nx">cases</span> <span class="p">[]</span><span class="nx">reflect</span><span class="p">.</span><span class="nx">SelectCase</span>
+        <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">c</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">chans</span> <span class="p">{</span>
+            <span class="nx">cases</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">cases</span><span class="p">,</span> <span class="nx">reflect</span><span class="p">.</span><span class="nx">SelectCase</span><span class="p">{</span>
+                <span class="nx">Dir</span><span class="p">:</span>  <span class="nx">reflect</span><span class="p">.</span><span class="nx">SelectRecv</span><span class="p">,</span>
+                <span class="nx">Chan</span><span class="p">:</span> <span class="nx">reflect</span><span class="p">.</span><span class="nf">ValueOf</span><span class="p">(</span><span class="nx">c</span><span class="p">),</span>
+            <span class="p">})</span>
+        <span class="p">}</span>
+
+        <span class="c1">// 循环，从cases中选择一个可用的
+</span><span class="c1"></span>        <span class="k">for</span> <span class="nb">len</span><span class="p">(</span><span class="nx">cases</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+            <span class="nx">i</span><span class="p">,</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">reflect</span><span class="p">.</span><span class="nf">Select</span><span class="p">(</span><span class="nx">cases</span><span class="p">)</span>
+            <span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span> <span class="c1">// 此channel已经close
+</span><span class="c1"></span>                <span class="nx">cases</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">cases</span><span class="p">[:</span><span class="nx">i</span><span class="p">],</span> <span class="nx">cases</span><span class="p">[</span><span class="nx">i</span><span class="o">+</span><span class="mi">1</span><span class="p">:]</span><span class="o">...</span><span class="p">)</span>
+                <span class="k">continue</span>
+            <span class="p">}</span>
+            <span class="nx">out</span> <span class="o">&lt;-</span> <span class="nx">v</span><span class="p">.</span><span class="nf">Interface</span><span class="p">()</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+    <span class="k">return</span> <span class="nx">out</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>递归模式也是在 Channel 大于 2 时,采用二分法递归 merge。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">
+<span class="kd">func</span> <span class="nf">fanInRec</span><span class="p">(</span><span class="nx">chans</span> <span class="o">...&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+    <span class="k">switch</span> <span class="nb">len</span><span class="p">(</span><span class="nx">chans</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">case</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="nx">c</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span>
+        <span class="nb">close</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nx">c</span>
+    <span class="k">case</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nx">chans</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">case</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nf">mergeTwo</span><span class="p">(</span><span class="nx">chans</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="nx">chans</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="k">default</span><span class="p">:</span>
+        <span class="nx">m</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">chans</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+        <span class="k">return</span> <span class="nf">mergeTwo</span><span class="p">(</span>
+            <span class="nf">fanInRec</span><span class="p">(</span><span class="nx">chans</span><span class="p">[:</span><span class="nx">m</span><span class="p">]</span><span class="o">...</span><span class="p">),</span>
+            <span class="nf">fanInRec</span><span class="p">(</span><span class="nx">chans</span><span class="p">[</span><span class="nx">m</span><span class="p">:]</span><span class="o">...</span><span class="p">))</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>这里有一个 mergeTwo 的方法,是将两个 Channel 合并成一个 Channel,是扇入形式的一种特例(只处理两个 Channel)。 下面我来借助一段代码帮你理解下这个方法。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mergeTwo</span><span class="p">(</span><span class="nx">a</span><span class="p">,</span> <span class="nx">b</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+    <span class="nx">c</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span>
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
+        <span class="k">for</span> <span class="nx">a</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nx">b</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span> <span class="c1">//只要还有可读的chan
+</span><span class="c1"></span>            <span class="k">select</span> <span class="p">{</span>
+            <span class="k">case</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">a</span><span class="p">:</span>
+                <span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span> <span class="c1">// a 已关闭，设置为nil
+</span><span class="c1"></span>                    <span class="nx">a</span> <span class="p">=</span> <span class="kc">nil</span>
+                    <span class="k">continue</span>
+                <span class="p">}</span>
+                <span class="nx">c</span> <span class="o">&lt;-</span> <span class="nx">v</span>
+            <span class="k">case</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">b</span><span class="p">:</span>
+                <span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span> <span class="c1">// b 已关闭，设置为nil
+</span><span class="c1"></span>                    <span class="nx">b</span> <span class="p">=</span> <span class="kc">nil</span>
+                    <span class="k">continue</span>
+                <span class="p">}</span>
+                <span class="nx">c</span> <span class="o">&lt;-</span> <span class="nx">v</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+    <span class="k">return</span> <span class="nx">c</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="扇出模式">扇出模式</h3>
+<p>有扇入模式，就有扇出模式，扇出模式是和扇入模式相反的。</p>
+<p>扇出模式只有一个输入源 Channel，有多个目标 Channel，扇出比就是 1 比目标 Channel 数的值，经常用在设计模式中的观察者模式中（观察者设计模式定义了对象间的一种一对多的组合关系。这样一来，一个对象的状态发生变化时，所有依赖于它的对象都会得到通知并自动刷新）。在观察者模式中，数据变动后，多个观察者都会收到这个变更信号。</p>
+<p>下面是一个扇出模式的实现。从源 Channel 取出一个数据后，依次发送给目标 Channel：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">fanOut</span><span class="p">(</span><span class="nx">ch</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">out</span> <span class="o">...</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span> <span class="c1">// 退出时关闭所有的输出chan
+</span><span class="c1"></span>			<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">out</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+				<span class="nb">close</span><span class="p">(</span><span class="nx">out</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+			<span class="p">}</span>
+		<span class="p">}()</span>
+		<span class="k">for</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">ch</span> <span class="p">{</span> <span class="c1">// 从输入chan中读取数据
+</span><span class="c1"></span>			<span class="nx">v</span> <span class="o">:=</span> <span class="nx">v</span>
+			<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">out</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+				<span class="nx">i</span> <span class="o">:=</span> <span class="nx">i</span>
+				<span class="nx">out</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="o">&lt;-</span> <span class="nx">v</span> <span class="c1">// 放入到输出chan中，同步方式
+</span><span class="c1"></span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="stream">Stream</h3>
+<p>这里我来介绍一种把 Channel 当作流式管道使用的方式,也就是把 Channel 看作流(Stream),提供跳过几个元素,或者是只取其中的几个元素等方法。</p>
+<p>首先,我们提供创建流的方法。这个方法把一个数据 slice 转换成流:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">asStream</span><span class="p">(</span><span class="nx">done</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{},</span> <span class="nx">values</span> <span class="o">...</span><span class="kd">interface</span><span class="p">{})</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+    <span class="nx">s</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span> <span class="c1">//创建一个unbuffered的channel
+</span><span class="c1"></span>    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span> <span class="c1">// 启动一个goroutine，往s中塞数据
+</span><span class="c1"></span>        <span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span> <span class="c1">// 退出时关闭chan
+</span><span class="c1"></span>        <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">values</span> <span class="p">{</span> <span class="c1">// 遍历数组
+</span><span class="c1"></span>            <span class="k">select</span> <span class="p">{</span>
+            <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">done</span><span class="p">:</span>
+                <span class="k">return</span>
+            <span class="k">case</span> <span class="nx">s</span> <span class="o">&lt;-</span> <span class="nx">v</span><span class="p">:</span> <span class="c1">// 将数组元素塞入到chan中
+</span><span class="c1"></span>            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+    <span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>流创建好以后，该咋处理呢？下面我再给你介绍下实现流的方法。</p>
+<ol>
+<li>takeN：只取流中的前 n 个数据；</li>
+<li>takeFn：筛选流中的数据，只保留满足条件的数据；</li>
+<li>takeWhile：只取前面满足条件的数据，一旦不满足条件，就不再取；</li>
+<li>skipN：跳过流中前几个数据；</li>
+<li>skipFn：跳过满足条件的数据；</li>
+<li>skipWhile：跳过前面满足条件的数据，一旦不满足条件，当前这个元素和以后的元素都会输出给 Channel 的 receiver。</li>
+</ol>
+<p>这些方法的实现很类似，我们以 takeN 为例来具体解释一下。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">takeN</span><span class="p">(</span><span class="nx">done</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{},</span> <span class="nx">valueStream</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">num</span> <span class="kt">int</span><span class="p">)</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+    <span class="nx">takeStream</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span> <span class="c1">// 创建输出流
+</span><span class="c1"></span>    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">takeStream</span><span class="p">)</span>
+        <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">num</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span> <span class="c1">// 只读取前num个元素
+</span><span class="c1"></span>            <span class="k">select</span> <span class="p">{</span>
+            <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">done</span><span class="p">:</span>
+                <span class="k">return</span>
+            <span class="k">case</span> <span class="nx">takeStream</span> <span class="o">&lt;-</span> <span class="o">&lt;-</span><span class="nx">valueStream</span><span class="p">:</span> <span class="c1">//从输入流中读取元素
+</span><span class="c1"></span>            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+    <span class="k">return</span> <span class="nx">takeStream</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="map-reduce">Map-Reduce</h3>
+<p>map-reduce 是一种处理数据的方式,最早是由 Google 公司研究提出的一种面向大规模数据处理的并行计算模型和方法,开源的版本是 hadoop,前几年比较火。</p>
+<p>不过,我要讲的并不是分布式的 map-reduce,而是单机单进程的 map-reduce 方法。</p>
+<p>map-reduce 分为两个步骤,第一步是映射(map),处理队列中的数据,第二步是规约(reduce),把列表中的每一个元素按照一定的处理方式处理成结果,放入到结果队列中。</p>
+<p>就像做汉堡一样,map 就是单独处理每一种食材,reduce 就是从每一份食材中取一部分,做成一个汉堡。</p>
+<p>我们先来看下 map 函数的处理逻辑:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">
+<span class="kd">func</span> <span class="nf">mapChan</span><span class="p">(</span><span class="nx">in</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">fn</span> <span class="kd">func</span><span class="p">(</span><span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{})</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+    <span class="nx">out</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span> <span class="c1">//创建一个输出chan
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">in</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span> <span class="c1">// 异常检查
+</span><span class="c1"></span>        <span class="nb">close</span><span class="p">(</span><span class="nx">out</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nx">out</span>
+    <span class="p">}</span>
+
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span> <span class="c1">// 启动一个goroutine,实现map的主要逻辑
+</span><span class="c1"></span>        <span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">out</span><span class="p">)</span>
+        <span class="k">for</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">in</span> <span class="p">{</span> <span class="c1">// 从输入chan读取数据，执行业务操作，也就是map操作
+</span><span class="c1"></span>            <span class="nx">out</span> <span class="o">&lt;-</span> <span class="nf">fn</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+
+    <span class="k">return</span> <span class="nx">out</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>reduce 函数的处理逻辑如下:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">reduce</span><span class="p">(</span><span class="nx">in</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">fn</span> <span class="kd">func</span><span class="p">(</span><span class="nx">r</span><span class="p">,</span> <span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">in</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span> <span class="c1">// 异常检查
+</span><span class="c1"></span>        <span class="k">return</span> <span class="kc">nil</span>
+    <span class="p">}</span>
+
+    <span class="nx">out</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">in</span> <span class="c1">// 先读取第一个元素
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">in</span> <span class="p">{</span> <span class="c1">// 实现reduce的主要逻辑
+</span><span class="c1"></span>        <span class="nx">out</span> <span class="p">=</span> <span class="nf">fn</span><span class="p">(</span><span class="nx">out</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="nx">out</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们可以写一个程序,这个程序使用 map-reduce 模式处理一组整数,map 函数就是为每个整数乘以 10,reduce 函数就是把 map 处理的结果累加起来:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 生成一个数据流
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">asStream</span><span class="p">(</span><span class="nx">done</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+    <span class="nx">s</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{})</span>
+    <span class="nx">values</span> <span class="o">:=</span> <span class="p">[]</span><span class="kt">int</span><span class="p">{</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">}</span>
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+        <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">values</span> <span class="p">{</span> <span class="c1">// 从数组生成
+</span><span class="c1"></span>            <span class="k">select</span> <span class="p">{</span>
+            <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">done</span><span class="p">:</span>
+                <span class="k">return</span>
+            <span class="k">case</span> <span class="nx">s</span> <span class="o">&lt;-</span> <span class="nx">v</span><span class="p">:</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+    <span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">in</span> <span class="o">:=</span> <span class="nf">asStream</span><span class="p">(</span><span class="kc">nil</span><span class="p">)</span>
+
+    <span class="c1">// map操作: 乘以10
+</span><span class="c1"></span>    <span class="nx">mapFn</span> <span class="o">:=</span> <span class="kd">func</span><span class="p">(</span><span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nx">v</span><span class="p">.(</span><span class="kt">int</span><span class="p">)</span> <span class="o">*</span> <span class="mi">10</span>
+    <span class="p">}</span>
+
+    <span class="c1">// reduce操作: 对map的结果进行累加
+</span><span class="c1"></span>    <span class="nx">reduceFn</span> <span class="o">:=</span> <span class="kd">func</span><span class="p">(</span><span class="nx">r</span><span class="p">,</span> <span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nx">r</span><span class="p">.(</span><span class="kt">int</span><span class="p">)</span> <span class="o">+</span> <span class="nx">v</span><span class="p">.(</span><span class="kt">int</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="nx">sum</span> <span class="o">:=</span> <span class="nf">reduce</span><span class="p">(</span><span class="nf">mapChan</span><span class="p">(</span><span class="nx">in</span><span class="p">,</span> <span class="nx">mapFn</span><span class="p">),</span> <span class="nx">reduceFn</span><span class="p">)</span> <span class="c1">//返回累加结果
+</span><span class="c1"></span>    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">sum</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="参考">参考</h2>
+<p><a href="https://github.com/abulo/ratel">ratel</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-09-15
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go/">Go</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/%E6%9C%8D%E5%8A%A1%E5%8F%91%E7%8E%B0%E6%96%B9%E6%A1%88%E4%BB%8B%E7%BB%8D/">
+            <span class="next-text nav-default">服务发现方案介绍</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021<span class="heart"><i class="iconfont icon-heart"></i></span><span>Forz</span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.js"></script>
+<script>
+docsearch({
+    apiKey: "b4b9da2eba53aa6dabe4b8ac9e8676e1",
+    indexName: "forz.forzvina.com",
+    appId: "IAR2EF5L65",
+    inputSelector: '.docsearch-input',
+    debug: false,
+});
+</script>
+</body>
+</html>

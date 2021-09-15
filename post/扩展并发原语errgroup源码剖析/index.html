@@ -49,7 +49,7 @@
 <meta itemprop="name" content="扩展并发原语ErrGroup源码剖析">
 <meta itemprop="description" content="ErrGroup ErrGroup是 Go 官方提供的一个同步扩展库。我们经常会碰到需要将一个通用的父任务拆成几个小任务并发执行的场景，其实，将一个大的任务拆成几"><meta itemprop="datePublished" content="2020-12-08T11:23:21+00:00" />
 <meta itemprop="dateModified" content="2020-12-08T11:23:21+00:00" />
-<meta itemprop="wordCount" content="9997">
+<meta itemprop="wordCount" content="11281">
 <meta itemprop="keywords" content="Go,errgroup," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="扩展并发原语ErrGroup源码剖析"/>
 <meta name="twitter:description" content="ErrGroup ErrGroup是 Go 官方提供的一个同步扩展库。我们经常会碰到需要将一个通用的父任务拆成几个小任务并发执行的场景，其实，将一个大的任务拆成几"/>
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/go/"> Go </a>
             </div>
-          <span class="more-meta"> 约 9997 字 </span>
-          <span class="more-meta"> 预计阅读 20 分钟 </span>
+          <span class="more-meta"> 约 11281 字 </span>
+          <span class="more-meta"> 预计阅读 23 分钟 </span>
         
       </div>
     </header>
@@ -163,6 +163,7 @@
     <li><a href="#kratoserrgroup">kratos/errgroup</a>
       <ul>
         <li><a href="#使用方式">使用方式</a></li>
+        <li><a href="#源码分析">源码分析</a></li>
       </ul>
     </li>
     <li><a href="#neilotooleerrgroup">neilotoole/errgroup</a></li>
@@ -185,6 +186,7 @@
       </ul>
     </li>
     <li><a href="#schedgroup">schedgroup</a></li>
+    <li><a href="#参考">参考</a></li>
   </ul>
 </nav>
   </div>
@@ -1221,6 +1223,229 @@
 </span><span class="c1"></span><span class="nx">g</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span> <span class="c1">// task3 运行
 </span></code></pre></td></tr></table>
 </div>
+</div><h3 id="源码分析">源码分析</h3>
+<p>errgroup 在sync.WaitGroup的功能之上添加了错误传递，以及在发生不可恢复的错误时取消整个goroutine集合的功能(返回值cancel)。</p>
+<p>kratos的加强版errgroup从统一goroutine控制，defer错误捕获，并发数量控制等方面对errgroup进行了功能扩充，利用匿名函数的参数context.Context的参数传递从整体上控制goroutine的生命周期。</p>
+<h4 id="group-结构">Group 结构</h4>
+<p>与原生 errgroup 库相比，增加了三个成员：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Group</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">err</span>     <span class="kt">error</span>
+	<span class="nx">wg</span>      <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+	<span class="nx">errOnce</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Once</span>
+
+	<span class="nx">workerOnce</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Once</span>
+	<span class="nx">ch</span>         <span class="kd">chan</span> <span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="kt">error</span>
+	<span class="nx">chs</span>        <span class="p">[]</span><span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="kt">error</span>
+
+	<span class="nx">ctx</span>    <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span>
+	<span class="nx">cancel</span> <span class="kd">func</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们先从结构体定义的角度来看待加强点。</p>
+<ul>
+<li>ch、chs、workerOnce用于控制goroutine的并发数量,在基础版的代码中我们发现在使用<code>Go(function()error)</code>函数的调用过程中是全开放的，即对于同时进行的goroutine数量并没有做限制。kratos在基础版本的基础上添加了一个chan控制并发数量，一个slice来缓存为并发的函数指针。</li>
+<li>kratos将产生的context对象缓存，并且更改了方法Go的函数签名加入了context参数，即<code>func (g *Group) Go(f func(ctx context.Context) error)</code>。在基础版本中，当error发生的是时候函数，仍然需要等到所有goroutine运行结束才会返回，kratos的Group可以使用成员函数ctx作为参数，从而控制全部并发的生命周期。</li>
+</ul>
+<p>Go 方法改造</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Go calls the given function in a new goroutine.
+</span><span class="c1">//
+</span><span class="c1">// The first call to return a non-nil error cancels the group; its error will be
+</span><span class="c1">// returned by Wait.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">g</span> <span class="o">*</span><span class="nx">Group</span><span class="p">)</span> <span class="nf">Go</span><span class="p">(</span><span class="nx">f</span> <span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">g</span><span class="p">.</span><span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">g</span><span class="p">.</span><span class="nx">ch</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">select</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="nx">g</span><span class="p">.</span><span class="nx">ch</span> <span class="o">&lt;-</span> <span class="nx">f</span><span class="p">:</span>
+		<span class="k">default</span><span class="p">:</span>
+			<span class="nx">g</span><span class="p">.</span><span class="nx">chs</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">g</span><span class="p">.</span><span class="nx">chs</span><span class="p">,</span> <span class="nx">f</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="k">go</span> <span class="nx">g</span><span class="p">.</span><span class="nf">do</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>从Go函数中我们看到，当g.ch != nil时，f函数首先尝试进入g.ch中，当g.ch满的时候存入g.chs中，这就是上面提到的，利用chan控制并发数量，利用slice作为函数指针的缓存。</p>
+<p>再看看 do 方法的实现，do 方法在 defer 结构中加入了捕获异常的逻辑，具体步骤是：</p>
+<ol>
+<li>执行用户方法 err = f(ctx)</li>
+<li>defer 中实现对堆栈信息的存储（如果发生错误）及 err 的保存</li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">g</span> <span class="o">*</span><span class="nx">Group</span><span class="p">)</span> <span class="nf">do</span><span class="p">(</span><span class="nx">f</span> <span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">ctx</span> <span class="o">:=</span> <span class="nx">g</span><span class="p">.</span><span class="nx">ctx</span>
+	<span class="k">if</span> <span class="nx">ctx</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">ctx</span> <span class="p">=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">Background</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="kd">var</span> <span class="nx">err</span> <span class="kt">error</span>
+	<span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">r</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">r</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">buf</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="mi">64</span><span class="o">&lt;&lt;</span><span class="mi">10</span><span class="p">)</span>
+			<span class="nx">buf</span> <span class="p">=</span> <span class="nx">buf</span><span class="p">[:</span><span class="nx">runtime</span><span class="p">.</span><span class="nf">Stack</span><span class="p">(</span><span class="nx">buf</span><span class="p">,</span> <span class="kc">false</span><span class="p">)]</span>
+			<span class="nx">err</span> <span class="p">=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;errgroup: panic recovered: %s\n%s&#34;</span><span class="p">,</span> <span class="nx">r</span><span class="p">,</span> <span class="nx">buf</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">g</span><span class="p">.</span><span class="nx">errOnce</span><span class="p">.</span><span class="nf">Do</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+				<span class="nx">g</span><span class="p">.</span><span class="nx">err</span> <span class="p">=</span> <span class="nx">err</span>
+				<span class="k">if</span> <span class="nx">g</span><span class="p">.</span><span class="nx">cancel</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+					<span class="nx">g</span><span class="p">.</span><span class="nf">cancel</span><span class="p">()</span>
+				<span class="p">}</span>
+			<span class="p">})</span>
+		<span class="p">}</span>
+		<span class="nx">g</span><span class="p">.</span><span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+	<span class="p">}()</span>
+	<span class="nx">err</span> <span class="p">=</span> <span class="nf">f</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>此外，Kratos 还提供了 errgroup.GOMAXPROCS 方法，用来设置最大并行数 GOMAXPROCS，其原理也比较简单，利用一个长度为 n 来 channel 来并发调用 do 方法：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// GOMAXPROCS set max goroutine to work.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">g</span> <span class="o">*</span><span class="nx">Group</span><span class="p">)</span> <span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="nx">n</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">n</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="s">&#34;errgroup: GOMAXPROCS must great than 0&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">g</span><span class="p">.</span><span class="nx">workerOnce</span><span class="p">.</span><span class="nf">Do</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="c1">// 利用 channel 实现限制
+</span><span class="c1"></span>		<span class="nx">g</span><span class="p">.</span><span class="nx">ch</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">func</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="kt">error</span><span class="p">,</span> <span class="nx">n</span><span class="p">)</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">n</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+				<span class="k">for</span> <span class="nx">f</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">g</span><span class="p">.</span><span class="nx">ch</span> <span class="p">{</span>
+					<span class="nx">g</span><span class="p">.</span><span class="nf">do</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span>
+				<span class="p">}</span>
+			<span class="p">}()</span>
+		<span class="p">}</span>
+	<span class="p">})</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>GOMAXPROCE 函数初始化g.ch用于开启并发数量控制的开关。并且启动n个goroutine来消费传入的函数。</p>
+<p>Wait函数中会不断将缓存中的函数不断压入chan中进行消费。</p>
+<p>Wait 方法</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Wait blocks until all function calls from the Go method have returned, then
+</span><span class="c1">// returns the first non-nil error (if any) from them.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">g</span><span class="o">*</span><span class="nx">Group</span><span class="p">)</span> <span class="nf">Wait</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">g</span><span class="p">.</span><span class="nx">ch</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">f</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">g</span><span class="p">.</span><span class="nx">chs</span> <span class="p">{</span>
+			<span class="nx">g</span><span class="p">.</span><span class="nx">ch</span> <span class="o">&lt;-</span> <span class="nx">f</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="nx">g</span><span class="p">.</span><span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">g</span><span class="p">.</span><span class="nx">ch</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nb">close</span><span class="p">(</span><span class="nx">g</span><span class="p">.</span><span class="nx">ch</span><span class="p">)</span> <span class="c1">// let all receiver exit
+</span><span class="c1"></span>	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">g</span><span class="p">.</span><span class="nx">cancel</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">g</span><span class="p">.</span><span class="nf">cancel</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">g</span><span class="p">.</span><span class="nx">err</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
 </div><h2 id="neilotooleerrgroup">neilotoole/errgroup</h2>
 <p>neilotoole/errgroup 是今年年中新出现的一个 ErrGroup 扩展库，它可以直接替换官方的 ErrGroup，方法都一样，原有功能也一样，只不过增加了可以控制并发 goroutine 的功能。它的方法集如下：</p>
 <div class="highlight"><div class="chroma">
@@ -1736,7 +1961,10 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div>
+</div><h2 id="参考">参考</h2>
+<p><a href="https://pandaychen.github.io/2020/07/20/KRATOS-ERRGROUP/">Kratos 源码分析：Errgroup 机制</a></p>
+<p><a href="https://toutiao.io/posts/hm24419/preview">【GoCN酷Go推荐】 errgroup 并发小工具</a></p>
+
     </div>
 
     <div class="post-copyright">
