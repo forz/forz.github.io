@@ -1,0 +1,1949 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>BBR自适应限流算法实现 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="前言 传统的限流算法，如漏桶、令牌桶等，他们的缺点是单一限流和无差别限流。此外，系统需要先做压测，拿到一个初始的限流参考值，超过这个值才启动限" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.89.3 with theme even" />
+
+
+<link rel="canonical" href="/post/bbr%E8%87%AA%E9%80%82%E5%BA%94%E9%99%90%E6%B5%81%E7%AE%97%E6%B3%95%E5%AE%9E%E7%8E%B0/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.98f8e47918247c097fa26317cbb567fe9f05503485bf08d8547f5579543303b1.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="BBR自适应限流算法实现" />
+<meta property="og:description" content="前言 传统的限流算法，如漏桶、令牌桶等，他们的缺点是单一限流和无差别限流。此外，系统需要先做压测，拿到一个初始的限流参考值，超过这个值才启动限" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/bbr%E8%87%AA%E9%80%82%E5%BA%94%E9%99%90%E6%B5%81%E7%AE%97%E6%B3%95%E5%AE%9E%E7%8E%B0/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-11-14T17:28:43+00:00" />
+<meta property="article:modified_time" content="2021-11-14T17:28:43+00:00" />
+
+<meta itemprop="name" content="BBR自适应限流算法实现">
+<meta itemprop="description" content="前言 传统的限流算法，如漏桶、令牌桶等，他们的缺点是单一限流和无差别限流。此外，系统需要先做压测，拿到一个初始的限流参考值，超过这个值才启动限"><meta itemprop="datePublished" content="2021-11-14T17:28:43+00:00" />
+<meta itemprop="dateModified" content="2021-11-14T17:28:43+00:00" />
+<meta itemprop="wordCount" content="9794">
+<meta itemprop="keywords" content="服务治理," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="BBR自适应限流算法实现"/>
+<meta name="twitter:description" content="前言 传统的限流算法，如漏桶、令牌桶等，他们的缺点是单一限流和无差别限流。此外，系统需要先做压测，拿到一个初始的限流参考值，超过这个值才启动限"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">Forz Blog</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+      <a class="menu-item-link" href="/">Home</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/post/">Archives</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/tags/">Tags</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/categories/">Categories</a>
+    </li>
+  </ul>
+</nav><div class="docsearch-input__container">
+  <input type="search" class="docsearch-input" placeholder="Search" />
+</div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">BBR自适应限流算法实现</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-11-14 </span>
+        <div class="post-category">
+            <a href="/categories/%E6%9C%8D%E5%8A%A1%E6%B2%BB%E7%90%86/"> 服务治理 </a>
+            </div>
+          <span class="more-meta"> 约 9794 字 </span>
+          <span class="more-meta"> 预计阅读 20 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#前言">前言</a></li>
+    <li><a href="#算法原理">算法原理</a>
+      <ul>
+        <li><a href="#背景">背景</a></li>
+        <li><a href="#原理">原理</a></li>
+      </ul>
+    </li>
+    <li><a href="#限流规则">限流规则</a></li>
+    <li><a href="#bbr-struct">BBR struct</a></li>
+    <li><a href="#公共接口-limiter">公共接口: Limiter</a></li>
+    <li><a href="#cpu计算">CPU计算</a></li>
+    <li><a href="#allow-方法">Allow 方法</a></li>
+    <li><a href="#滑动窗口">滑动窗口</a>
+      <ul>
+        <li><a href="#单元节点-bucket">单元节点: Bucket</a></li>
+        <li><a href="#环形数组-window">环形数组: Window</a></li>
+        <li><a href="#滑动窗口-rollingpolicy">滑动窗口: RollingPolicy</a></li>
+        <li><a href="#计数器-rollingcounter">计数器: RollingCounter</a></li>
+        <li><a href="#瞬时统计-rollinggauge">瞬时统计: RollingGauge</a></li>
+      </ul>
+    </li>
+    <li><a href="#maxpass--minrt">MaxPass &amp;&amp; MinRT</a></li>
+    <li><a href="#判断规则">判断规则</a></li>
+    <li><a href="#shoulddrop">shouldDrop</a></li>
+    <li><a href="#流程图">流程图</a></li>
+    <li><a href="#压测报告">压测报告</a></li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="前言">前言</h2>
+<p>传统的限流算法，如漏桶、令牌桶等，他们的缺点是单一限流和无差别限流。此外，系统需要先做压测，拿到一个初始的限流参考值，超过这个值才启动限流机制。</p>
+<p>而 BBR 限流的思路 和传统方式有很大区别：</p>
+<p>TCP BBR 拥塞控制算法 的思想给了我们一个很大的启发。</p>
+<p>我们应该根据系统能够处理的请求，和允许进来的请求，来做平衡，而不是根据一个间接的指标（系统 load）来做限流。最终我们追求的目标是 在系统不被拖垮的情况下，提高系统的吞吐率，而不是 load 一定要到低于某个阈值。如果我们还是按照固有的思维，超过特定的 load 就禁止流量进入，系统 load 恢复就放开流量，这样做的结果是无论我们怎么调参数，调比例，都是按照果来调节因，都无法取得良好的效果。</p>
+<p>简言之，自适应限流就是根据当前负载情况，来嗅探 load 的值，尽可能提高系统的吞吐量。</p>
+<h2 id="算法原理">算法原理</h2>
+<h3 id="背景">背景</h3>
+<p>系统自适应限流从整体维度对应用入口流量进行控制，结合 应用的 Load、CPU 使用率、总体平均 RT、入口 QPS 和并发线程数 等几个维度的监控指标，通过自适应的流控策略，让系统的入口流量和系统的负载达到一个平衡，让系统尽可能跑在最大吞吐量的同时保证系统整体的稳定性。</p>
+<p>在开始之前，我们先了解一下系统保护的目的：</p>
+<ul>
+<li>保证系统不被拖垮</li>
+<li>在系统稳定的前提下，保持系统的吞吐量</li>
+</ul>
+<p>长期以来，系统保护的思路是根据硬指标，即系统的负载（load1）来做系统过载保护。当系统负载高于某个阈值，就禁止或者减少流量的进入；当 load 开始好转，则恢复流量的进入。这个思路给我们带来了不可避免的两个问题：</p>
+<ul>
+<li>load 是一个 “结果”，如果根据 load 的情况来调节流量的通过率，那么就始终有延迟性。也就意味着通过率的任何调整，都会过一段时间才能看到效果。当前通过率是使 load 恶化的一个动作，那么也至少要过 1 秒之后才能观测到；同理，如果当前通过率调整是让 load 好转的一个动作，也需要 1 秒之后才能继续调整，这样就浪费了系统的处理能力。所以我们看到的曲线，总是会有抖动。</li>
+<li>恢复慢。想象一下这样的一个场景（真实），出现了这样一个问题，下游应用不可靠，导致应用 RT 很高，从而 load 到了一个很高的点。过了一段时间之后下游应用恢复了，应用 RT 也相应减少。这个时候，其实应该大幅度增大流量的通过率；但是由于这个时候 load 仍然很高，通过率的恢复仍然不高。</li>
+</ul>
+<p>TCP BBR 的思想给了我们一个很大的启发。我们应该根据系统能够处理的请求，和允许进来的请求，来做平衡，而不是根据一个间接的指标（系统 load）来做限流。最终我们追求的目标是 在系统不被拖垮的情况下，提高系统的吞吐率，而不是 load 一定要到低于某个阈值 。如果我们还是按照固有的思维，超过特定的 load 就禁止流量进入，系统 load 恢复就放开流量，这样做的结果是无论我们怎么调参数，调比例，都是按照果来调节因，都无法取得良好的效果。</p>
+<p>在系统自适应保护的做法是， 用 load1 作为启动自适应保护的因子，而允许通过的流量由处理请求的能力，即请求的响应时间以及当前系统正在处理的请求速率来决定。</p>
+<h3 id="原理">原理</h3>
+<p>我们把系统处理请求的过程想象为一个水管，到来的请求是往这个水管灌水，当系统处理顺畅的时候， 请求不需要排队，直接从水管中穿过，这个请求的 RT 是最短的 ；反之， 当请求堆积的时候，那么处理请求的时间则会变为：排队时间 + 最短处理时间 。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210110222152.png" alt=""></p>
+<p>常见做法：利特尔法则</p>
+<ul>
+<li>CPU、内存作为信号量进行节流。</li>
+<li>队列管理: 队列长度、LIFO。</li>
+<li>可控延迟算法: CoDel。</li>
+</ul>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210110222134.png" alt=""></p>
+<p>如上图所示，如果我们开一个小店，平均每分钟进店 2 个客人(λ)，每位客人从等待到完成交易需要 4 分钟(W)，那我们店里能承载的客人数量就是 2 * 4 = 8 个人</p>
+<p>同理，我们可以将 λ 当做 QPS， W 呢是每个请求需要花费的时间，那我们的系统的吞吐就是 L = λ * W ，所以我们可以使用利特尔法则来计算系统的吞吐量。</p>
+<ul>
+<li>推论一: 如果我们能够保证水管里的水量，能够让水顺畅的流动，则不会增加排队的请求；也就是说，这个时候的系统负载不会进一步恶化。 我们用 T 来表示（水管内部的水量），用 RT 来表示请求的处理时间，用 P 来表示进来的请求数，那么一个请求从进入水管道到从水管出来，这个水管会存在 P*RT个请求。换一句话来说，当 T≈QPS*Avg(RT) 的时候，我们可以认为系统的处理能力和允许进入的请求个数达到了平衡，系统的负载不会进一步恶化。</li>
+</ul>
+<p>接下来的问题是，水管的水位是可以达到了一个平衡点，但是这个平衡点只能保证水管的水位不再继续增高，但是还面临一个问题，就是在达到平衡点之前，这个水管里已经堆积了多少水。如果之前水管的水已经在一个量级了，那么这个时候系统允许通过的水量可能只能缓慢通过，RT 会大，之前堆积在水管里的水会滞留；反之，如果之前的水管水位偏低，那么又会浪费了系统的处理能力。</p>
+<ul>
+<li>推论二:　当保持入口的流量是水管出来的流量的最大的值的时候，可以最大利用水管的处理能力。</li>
+</ul>
+<p>然而，和 TCP BBR 的不一样的地方在于，还需要用一个系统负载的值（load1）来激发这套机制启动。</p>
+<p>注：这种系统自适应算法对于低 load 的请求，它的效果是一个 &ldquo;兜底&rdquo; 的角色。对于不是应用本身造成的 load 高的情况（如其它进程导致的不稳定的情况），效果不明显。</p>
+<h2 id="限流规则">限流规则</h2>
+<p>kratos 借鉴了sentinel项目的自适应限流系统，通过综合分析服务的 cpu 使用率、请求成功的 qps 和请求成功的 rt（请求成功的响应耗时） 来做自适应限流保护。从官方文档上看，限流算法要实现的核心目标有如下两点：</p>
+<ol>
+<li>自动嗅探负载和 qps，减少人工配置 &amp;&amp; 干预</li>
+<li>削顶， 保证超载时系统不被拖垮，并能以高水位 qps 继续运行</li>
+</ol>
+<p>BBR 限流规则依靠下面 4 个指标共同确定：</p>
+<table>
+<thead>
+<tr>
+<th>指标名称</th>
+<th>指标含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>cpu</td>
+<td>使用一个独立的线程采样，每隔 250ms 触发一次。在计算均值时，使用了简单滑动平均去除峰值的影响。</td>
+</tr>
+<tr>
+<td>inflight</td>
+<td>当前处理中正在处理的请求数量</td>
+</tr>
+<tr>
+<td>Pass&amp;RT</td>
+<td>最近5s，pass 为每100ms采样窗口内成功请求的数量，rt 为单个采样窗口中平均响应时间。</td>
+</tr>
+</tbody>
+</table>
+<p>为什么只需要CPU就能代表系统负载?</p>
+<p>因为Go的内存如果增长过快,一定会触发GC,CPU一定会迅速增高.</p>
+<h2 id="bbr-struct">BBR struct</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// BBR implements bbr-like limiter.
+</span><span class="c1">// It is inspired by sentinel.
+</span><span class="c1">// https://github.com/alibaba//wiki/%E7%B3%BB%E7%BB%9F%E8%87%AA%E9%80%82%E5%BA%94%E9%99%90%E6%B5%81
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">BBR</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">cpu</span>             <span class="nx">cpuGetter</span>
+	<span class="c1">// passStat：请求处理成功的量（滑动窗口计数器）
+</span><span class="c1"></span>	<span class="nx">passStat</span>        <span class="nx">metric</span><span class="p">.</span><span class="nx">RollingCounter</span>
+	<span class="c1">// rtStat：请求成功的响应耗时（滑动窗口计数器）
+</span><span class="c1"></span>	<span class="nx">rtStat</span>          <span class="nx">metric</span><span class="p">.</span><span class="nx">RollingCounter</span>
+	<span class="nx">inFlight</span>        <span class="kt">int64</span>
+	<span class="nx">winBucketPerSec</span> <span class="kt">int64</span>
+	<span class="nx">bucketDuration</span>  <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span>
+	<span class="nx">winSize</span>         <span class="kt">int</span>
+	<span class="nx">conf</span>            <span class="o">*</span><span class="nx">Config</span>
+	<span class="c1">// 对应于公式的 prevDrop
+</span><span class="c1"></span>	<span class="nx">prevDrop</span>        <span class="nx">atomic</span><span class="p">.</span><span class="nx">Value</span>
+	<span class="nx">maxPASSCache</span>    <span class="nx">atomic</span><span class="p">.</span><span class="nx">Value</span>
+	<span class="nx">minRtCache</span>      <span class="nx">atomic</span><span class="p">.</span><span class="nx">Value</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>cpu: cpu的指标函数，CPU的使用率， 这里为了减小误差，把数字扩大化，乘以1000，比如使用率60%，也就是0.6 cpu的值就为600</li>
+<li>passStat: 请求数的采样数据，使用滑动窗口进行统计</li>
+<li>rtStat: 响应时间的采样数据，同样使用滑动窗口进行统计</li>
+<li>inFlight: 当前系统中的请求数，数据得来方法是：中间件原理在处理前+1，处理handle之后不管成功失败都减去1</li>
+<li>bucketPerSecond: 一个 bucket 的时间</li>
+<li>bucketSize: 桶的数量</li>
+<li>prevDropTime: 上次触发限流时间</li>
+<li>maxPASSCache: 单个采样窗口中最大的请求数的缓存数据</li>
+<li>minRtCache: 单个采样窗口中最小的响应时间的缓存数据</li>
+</ul>
+<h2 id="公共接口-limiter">公共接口: Limiter</h2>
+<p>Limter 公共接口 limiter.go 定义如下： 核心 Allow 方法，返回 error 不为 nil 表示需要限流，回调函数 func(info DoneInfo)，传入的参数为 Doneifno，有点类似于 gPRC 的 balancer.picker 实现，在 RPC 返回成功时调用的回调方法。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="p">(</span>
+	<span class="c1">// Success opertion type: success
+</span><span class="c1"></span>	<span class="nx">Success</span> <span class="nx">Op</span> <span class="p">=</span> <span class="kc">iota</span>
+	<span class="c1">// Ignore opertion type: ignore
+</span><span class="c1"></span>	<span class="nx">Ignore</span>
+	<span class="c1">// Drop opertion type: drop
+</span><span class="c1"></span>	<span class="nx">Drop</span>
+<span class="p">)</span>
+
+<span class="c1">// DoneInfo done info.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">DoneInfo</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">Err</span> <span class="kt">error</span>
+	<span class="nx">Op</span>  <span class="nx">Op</span>
+<span class="p">}</span>
+
+<span class="c1">// Limiter limit interface.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Limiter</span> <span class="kd">interface</span> <span class="p">{</span>
+	<span class="c1">//func(info DoneInfo) 调用参数为 Doneinfo，返回值无
+</span><span class="c1"></span>	<span class="nf">Allow</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">opts</span> <span class="o">...</span><span class="nx">AllowOption</span><span class="p">)</span> <span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">info</span> <span class="nx">DoneInfo</span><span class="p">),</span> <span class="kt">error</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>全局变量:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="p">(</span>
+	<span class="nx">cpu</span>         <span class="kt">int64</span>
+	<span class="nx">decay</span>       <span class="p">=</span> <span class="mf">0.95</span>
+	<span class="nx">initTime</span>    <span class="p">=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">()</span>
+	<span class="nx">defaultConf</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">Config</span><span class="p">{</span>
+		<span class="nx">Window</span><span class="p">:</span>       <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span> <span class="o">*</span> <span class="mi">10</span><span class="p">,</span>
+		<span class="nx">WinBucket</span><span class="p">:</span>    <span class="mi">100</span><span class="p">,</span>
+		<span class="nx">CPUThreshold</span><span class="p">:</span> <span class="mi">800</span><span class="p">,</span>
+	<span class="p">}</span>
+<span class="p">)</span>
+
+<span class="kd">type</span> <span class="nx">cpuGetter</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">int64</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在 limiter 中，也有分组的概念，比如针对后端某个 CGI 或 RPC 方法，应用不通的限速策略及规则，这里直接就使用了 container/group 来进行封装： 封装 group.Group 的指针成员，作为 bbr.Group：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Group represents a class of BBRLimiter and forms a namespace in which
+</span><span class="c1">// units of BBRLimiter.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Group</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">group</span> <span class="o">*</span><span class="nx">group</span><span class="p">.</span><span class="nx">Group</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>初始化 bbr.Group：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// NewGroup new a limiter group container, if conf nil use default conf.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewGroup</span><span class="p">(</span><span class="nx">conf</span> <span class="o">*</span><span class="nx">Config</span><span class="p">)</span><span class="o">*</span><span class="nx">Group</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">conf</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// 使用默认 group 配置
+</span><span class="c1"></span>		<span class="nx">conf</span> <span class="p">=</span> <span class="nx">defaultConf</span>
+	<span class="p">}</span>
+	<span class="c1">// 创建 group
+</span><span class="c1"></span>	<span class="nx">group</span> <span class="o">:=</span> <span class="nx">group</span><span class="p">.</span><span class="nf">NewGroup</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nf">newLimiter</span><span class="p">(</span><span class="nx">conf</span><span class="p">)</span>
+	<span class="p">})</span>
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">Group</span><span class="p">{</span>
+		<span class="nx">group</span><span class="p">:</span> <span class="nx">group</span><span class="p">,</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>通过 key 获取对应的 limter 配置（不存在则创建），获取到 limter 对象之后，直接调用 limiter.Allow() 就可以进行限速判定了：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Get get a limiter by a specified key, if limiter not exists then make a new one.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">g</span> <span class="o">*</span><span class="nx">Group</span><span class="p">)</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="nx">limit</span><span class="p">.</span><span class="nx">Limiter</span> <span class="p">{</span>
+	<span class="nx">limiter</span> <span class="o">:=</span> <span class="nx">g</span><span class="p">.</span><span class="nx">group</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">limiter</span><span class="p">.(</span><span class="nx">limit</span><span class="p">.</span><span class="nx">Limiter</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>通过 newLimiter 方法创建一个 bbr.Limiter 并返回，注意看初始化的参数，</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">newLimiter</span><span class="p">(</span><span class="nx">conf</span> <span class="o">*</span><span class="nx">Config</span><span class="p">)</span> <span class="nx">limit</span><span class="p">.</span><span class="nx">Limiter</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">conf</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">conf</span> <span class="p">=</span> <span class="nx">defaultConf</span>
+	<span class="p">}</span>
+	<span class="nx">size</span> <span class="o">:=</span> <span class="nx">conf</span><span class="p">.</span><span class="nx">WinBucket</span>
+	<span class="nx">bucketDuration</span> <span class="o">:=</span> <span class="nx">conf</span><span class="p">.</span><span class="nx">Window</span> <span class="o">/</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="nx">conf</span><span class="p">.</span><span class="nx">WinBucket</span><span class="p">)</span>
+
+	<span class="c1">//
+</span><span class="c1"></span>	<span class="nx">passStat</span> <span class="o">:=</span> <span class="nx">metric</span><span class="p">.</span><span class="nf">NewRollingCounter</span><span class="p">(</span><span class="nx">metric</span><span class="p">.</span><span class="nx">RollingCounterOpts</span><span class="p">{</span><span class="nx">Size</span><span class="p">:</span> <span class="nx">size</span><span class="p">,</span> <span class="nx">BucketDuration</span><span class="p">:</span> <span class="nx">bucketDuration</span><span class="p">})</span>
+	<span class="nx">rtStat</span> <span class="o">:=</span> <span class="nx">metric</span><span class="p">.</span><span class="nf">NewRollingCounter</span><span class="p">(</span><span class="nx">metric</span><span class="p">.</span><span class="nx">RollingCounterOpts</span><span class="p">{</span><span class="nx">Size</span><span class="p">:</span> <span class="nx">size</span><span class="p">,</span> <span class="nx">BucketDuration</span><span class="p">:</span> <span class="nx">bucketDuration</span><span class="p">})</span>
+	<span class="c1">// 定义了 cpu 为 func，直接返回全局变量 cpu 的值（atomic 方式）
+</span><span class="c1"></span>	<span class="nx">cpu</span> <span class="o">:=</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">int64</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">cpu</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">limiter</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">BBR</span><span class="p">{</span>
+		<span class="nx">cpu</span><span class="p">:</span>             <span class="nx">cpu</span><span class="p">,</span>
+		<span class="nx">conf</span><span class="p">:</span>            <span class="nx">conf</span><span class="p">,</span>
+		<span class="nx">passStat</span><span class="p">:</span>        <span class="nx">passStat</span><span class="p">,</span>
+		<span class="nx">rtStat</span><span class="p">:</span>          <span class="nx">rtStat</span><span class="p">,</span>
+		<span class="nx">winBucketPerSec</span><span class="p">:</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="nb">int64</span><span class="p">(</span><span class="nx">conf</span><span class="p">.</span><span class="nx">Window</span><span class="p">)</span> <span class="o">/</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">conf</span><span class="p">.</span><span class="nx">WinBucket</span><span class="p">)),</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">limiter</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="cpu计算">CPU计算</h2>
+<p>在包初始化函数 init 中，启动了一个新的子协程来计算 CPU 的利用率数据，此外，计算出的 CPU 使用率是一个 Gauge，使用 atomic 包存储在全局变量 cpu int64 中。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">init</span><span class="p">()</span> <span class="p">{</span>
+	<span class="k">go</span> <span class="nf">cpuproc</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="c1">// cpu = cpuᵗ⁻¹ * decay + cpuᵗ * (1 - decay)
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">cpuproc</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">ticker</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTicker</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span> <span class="o">*</span> <span class="mi">250</span><span class="p">)</span>
+	<span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">ticker</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">log</span><span class="p">.</span><span class="nf">Error</span><span class="p">(</span><span class="s">&#34;rate.limit.cpuproc() err(%+v)&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="c1">// 在 recover 中重启 CPU 监控
+</span><span class="c1"></span>			<span class="k">go</span> <span class="nf">cpuproc</span><span class="p">()</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+
+	<span class="c1">// EMA algorithm: https://blog.csdn.net/m0_38106113/article/details/81542863
+</span><span class="c1"></span>	<span class="k">for</span> <span class="k">range</span> <span class="nx">ticker</span><span class="p">.</span><span class="nx">C</span> <span class="p">{</span>
+		<span class="nx">stat</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">cpustat</span><span class="p">.</span><span class="nx">Stat</span><span class="p">{}</span>
+		<span class="nx">cpustat</span><span class="p">.</span><span class="nf">ReadStat</span><span class="p">(</span><span class="nx">stat</span><span class="p">)</span>
+		<span class="c1">// 获取前一个周期的 cpu 数据
+</span><span class="c1"></span>		<span class="nx">prevCpu</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">cpu</span><span class="p">)</span>
+		<span class="c1">//decay = 0.95
+</span><span class="c1"></span>		<span class="nx">curCpu</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">prevCpu</span><span class="p">)</span><span class="o">*</span><span class="nx">decay</span> <span class="o">+</span> <span class="nb">float64</span><span class="p">(</span><span class="nx">stat</span><span class="p">.</span><span class="nx">Usage</span><span class="p">)</span><span class="o">*</span><span class="p">(</span><span class="mf">1.0</span><span class="o">-</span><span class="nx">decay</span><span class="p">))</span>
+		<span class="c1">// 保存新的校准后的 CPU 数据
+</span><span class="c1"></span>		<span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">cpu</span><span class="p">,</span> <span class="nx">curCpu</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>CPU获取的是cgroup的cpu:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span><span class="lnt">103
+</span><span class="lnt">104
+</span><span class="lnt">105
+</span><span class="lnt">106
+</span><span class="lnt">107
+</span><span class="lnt">108
+</span><span class="lnt">109
+</span><span class="lnt">110
+</span><span class="lnt">111
+</span><span class="lnt">112
+</span><span class="lnt">113
+</span><span class="lnt">114
+</span><span class="lnt">115
+</span><span class="lnt">116
+</span><span class="lnt">117
+</span><span class="lnt">118
+</span><span class="lnt">119
+</span><span class="lnt">120
+</span><span class="lnt">121
+</span><span class="lnt">122
+</span><span class="lnt">123
+</span><span class="lnt">124
+</span><span class="lnt">125
+</span><span class="lnt">126
+</span><span class="lnt">127
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">cpu</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;bufio&#34;</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;io&#34;</span>
+	<span class="s">&#34;os&#34;</span>
+	<span class="s">&#34;path&#34;</span>
+	<span class="s">&#34;strconv&#34;</span>
+	<span class="s">&#34;strings&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">const</span> <span class="nx">cgroupRootDir</span> <span class="p">=</span> <span class="s">&#34;/sys/fs/cgroup&#34;</span>
+
+<span class="c1">// cgroup Linux cgroup
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">cgroup</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">cgroupSet</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span>
+<span class="p">}</span>
+
+<span class="c1">// CPUCFSQuotaUs cpu.cfs_quota_us
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">cgroup</span><span class="p">)</span> <span class="nf">CPUCFSQuotaUs</span><span class="p">()</span> <span class="p">(</span><span class="kt">int64</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">data</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">readFile</span><span class="p">(</span><span class="nx">path</span><span class="p">.</span><span class="nf">Join</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">cgroupSet</span><span class="p">[</span><span class="s">&#34;cpu&#34;</span><span class="p">],</span> <span class="s">&#34;cpu.cfs_quota_us&#34;</span><span class="p">))</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">strconv</span><span class="p">.</span><span class="nf">ParseInt</span><span class="p">(</span><span class="nx">data</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="mi">64</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">// CPUCFSPeriodUs cpu.cfs_period_us
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">cgroup</span><span class="p">)</span> <span class="nf">CPUCFSPeriodUs</span><span class="p">()</span> <span class="p">(</span><span class="kt">uint64</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">data</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">readFile</span><span class="p">(</span><span class="nx">path</span><span class="p">.</span><span class="nf">Join</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">cgroupSet</span><span class="p">[</span><span class="s">&#34;cpu&#34;</span><span class="p">],</span> <span class="s">&#34;cpu.cfs_period_us&#34;</span><span class="p">))</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nf">parseUint</span><span class="p">(</span><span class="nx">data</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">// CPUAcctUsage cpuacct.usage
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">cgroup</span><span class="p">)</span> <span class="nf">CPUAcctUsage</span><span class="p">()</span> <span class="p">(</span><span class="kt">uint64</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">data</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">readFile</span><span class="p">(</span><span class="nx">path</span><span class="p">.</span><span class="nf">Join</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">cgroupSet</span><span class="p">[</span><span class="s">&#34;cpuacct&#34;</span><span class="p">],</span> <span class="s">&#34;cpuacct.usage&#34;</span><span class="p">))</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nf">parseUint</span><span class="p">(</span><span class="nx">data</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">// CPUAcctUsagePerCPU cpuacct.usage_percpu
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">cgroup</span><span class="p">)</span> <span class="nf">CPUAcctUsagePerCPU</span><span class="p">()</span> <span class="p">([]</span><span class="kt">uint64</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">data</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">readFile</span><span class="p">(</span><span class="nx">path</span><span class="p">.</span><span class="nf">Join</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">cgroupSet</span><span class="p">[</span><span class="s">&#34;cpuacct&#34;</span><span class="p">],</span> <span class="s">&#34;cpuacct.usage_percpu&#34;</span><span class="p">))</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="kd">var</span> <span class="nx">usage</span> <span class="p">[]</span><span class="kt">uint64</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">strings</span><span class="p">.</span><span class="nf">Fields</span><span class="p">(</span><span class="nb">string</span><span class="p">(</span><span class="nx">data</span><span class="p">))</span> <span class="p">{</span>
+		<span class="kd">var</span> <span class="nx">u</span> <span class="kt">uint64</span>
+		<span class="k">if</span> <span class="nx">u</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nf">parseUint</span><span class="p">(</span><span class="nx">v</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+		<span class="p">}</span>
+		<span class="c1">// fix possible_cpu:https://www.ibm.com/support/knowledgecenter/en/linuxonibm/com.ibm.linux.z.lgdd/lgdd_r_posscpusparm.html
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">u</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">usage</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">usage</span><span class="p">,</span> <span class="nx">u</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">usage</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="c1">// CPUSetCPUs cpuset.cpus
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">cgroup</span><span class="p">)</span> <span class="nf">CPUSetCPUs</span><span class="p">()</span> <span class="p">([]</span><span class="kt">uint64</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">data</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">readFile</span><span class="p">(</span><span class="nx">path</span><span class="p">.</span><span class="nf">Join</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">cgroupSet</span><span class="p">[</span><span class="s">&#34;cpuset&#34;</span><span class="p">],</span> <span class="s">&#34;cpuset.cpus&#34;</span><span class="p">))</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="nx">cpus</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">ParseUintList</span><span class="p">(</span><span class="nx">data</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="kd">var</span> <span class="nx">sets</span> <span class="p">[]</span><span class="kt">uint64</span>
+	<span class="k">for</span> <span class="nx">k</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">cpus</span> <span class="p">{</span>
+		<span class="nx">sets</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">sets</span><span class="p">,</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">k</span><span class="p">))</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">sets</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="c1">// CurrentcGroup get current process cgroup
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">currentcGroup</span><span class="p">()</span> <span class="p">(</span><span class="o">*</span><span class="nx">cgroup</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">pid</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Getpid</span><span class="p">()</span>
+	<span class="nx">cgroupFile</span> <span class="o">:=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;/proc/%d/cgroup&#34;</span><span class="p">,</span> <span class="nx">pid</span><span class="p">)</span>
+	<span class="nx">cgroupSet</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">)</span>
+	<span class="nx">fp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Open</span><span class="p">(</span><span class="nx">cgroupFile</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="k">defer</span> <span class="nx">fp</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+	<span class="nx">buf</span> <span class="o">:=</span> <span class="nx">bufio</span><span class="p">.</span><span class="nf">NewReader</span><span class="p">(</span><span class="nx">fp</span><span class="p">)</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">line</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">buf</span><span class="p">.</span><span class="nf">ReadString</span><span class="p">(</span><span class="sc">&#39;\n&#39;</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">==</span> <span class="nx">io</span><span class="p">.</span><span class="nx">EOF</span> <span class="p">{</span>
+				<span class="k">break</span>
+			<span class="p">}</span>
+			<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+		<span class="p">}</span>
+		<span class="nx">col</span> <span class="o">:=</span> <span class="nx">strings</span><span class="p">.</span><span class="nf">Split</span><span class="p">(</span><span class="nx">strings</span><span class="p">.</span><span class="nf">TrimSpace</span><span class="p">(</span><span class="nx">line</span><span class="p">),</span> <span class="s">&#34;:&#34;</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">col</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">3</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;invalid cgroup format %s&#34;</span><span class="p">,</span> <span class="nx">line</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">dir</span> <span class="o">:=</span> <span class="nx">col</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+		<span class="c1">// When dir is not equal to /, it must be in docker
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">dir</span> <span class="o">!=</span> <span class="s">&#34;/&#34;</span> <span class="p">{</span>
+			<span class="nx">cgroupSet</span><span class="p">[</span><span class="nx">col</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span> <span class="p">=</span> <span class="nx">path</span><span class="p">.</span><span class="nf">Join</span><span class="p">(</span><span class="nx">cgroupRootDir</span><span class="p">,</span> <span class="nx">col</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+			<span class="k">if</span> <span class="nx">strings</span><span class="p">.</span><span class="nf">Contains</span><span class="p">(</span><span class="nx">col</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="s">&#34;,&#34;</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">k</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">strings</span><span class="p">.</span><span class="nf">Split</span><span class="p">(</span><span class="nx">col</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="s">&#34;,&#34;</span><span class="p">)</span> <span class="p">{</span>
+					<span class="nx">cgroupSet</span><span class="p">[</span><span class="nx">k</span><span class="p">]</span> <span class="p">=</span> <span class="nx">path</span><span class="p">.</span><span class="nf">Join</span><span class="p">(</span><span class="nx">cgroupRootDir</span><span class="p">,</span> <span class="nx">k</span><span class="p">)</span>
+				<span class="p">}</span>
+			<span class="p">}</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">cgroupSet</span><span class="p">[</span><span class="nx">col</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span> <span class="p">=</span> <span class="nx">path</span><span class="p">.</span><span class="nf">Join</span><span class="p">(</span><span class="nx">cgroupRootDir</span><span class="p">,</span> <span class="nx">col</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="nx">col</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+			<span class="k">if</span> <span class="nx">strings</span><span class="p">.</span><span class="nf">Contains</span><span class="p">(</span><span class="nx">col</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="s">&#34;,&#34;</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">k</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">strings</span><span class="p">.</span><span class="nf">Split</span><span class="p">(</span><span class="nx">col</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="s">&#34;,&#34;</span><span class="p">)</span> <span class="p">{</span>
+					<span class="nx">cgroupSet</span><span class="p">[</span><span class="nx">k</span><span class="p">]</span> <span class="p">=</span> <span class="nx">path</span><span class="p">.</span><span class="nf">Join</span><span class="p">(</span><span class="nx">cgroupRootDir</span><span class="p">,</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">col</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+				<span class="p">}</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">cgroup</span><span class="p">{</span><span class="nx">cgroupSet</span><span class="p">:</span> <span class="nx">cgroupSet</span><span class="p">},</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><p>注意这里使用了指数加权平均算法 来修正偏差，值得借鉴</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210110223135.png" alt=""></p>
+<h2 id="allow-方法">Allow 方法</h2>
+<p>先看看 Allow 方法的实现，在每次的服务端请求中都会调用此方法，注意下面节点：</p>
+<ul>
+<li>passStat 及 rtStat 的数据上报的逻辑</li>
+<li>rt–请求成功的响应耗时的计算方法</li>
+</ul>
+<p>rt 的计算方法比较巧妙：</p>
+<ol>
+<li>初始化全局变量 <code>initTime = time.Now()</code></li>
+<li>请求开始前计算 <code>stime := time.Since(initTime)</code></li>
+<li>Allow 返回一个函数对象 <code>func(info limit.DoneInfo)</code>，在函数对象中计算 <code>rt := int64((time.Since(initTime) - stime) / time.Millisecond)</code> 这样就成功的避免每次需要保存前一个周期计时点了，不过引入的成本就是需要取两次当前最新的时间戳。</li>
+</ol>
+<p>值得细品的是返回的这个函数对象，通过对这个函数对象的延迟调用，可以实现一些在 “某某事情（接口调用、请求执行）完成后再执行的” 功能，在 golang 中可以算是通用的解决方式了。比如，在 Warden 的服务端实现中，默认加载了 bbr.Limiter 作为服务端过载保护的手段，实现的 Limiter 拦截器代码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Limit is a server interceptor that detects and rejects overloaded traffic.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">RateLimiter</span><span class="p">)</span> <span class="nf">Limit</span><span class="p">()</span> <span class="nx">grpc</span><span class="p">.</span><span class="nx">UnaryServerInterceptor</span> <span class="p">{</span>
+<span class="k">return</span> <span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">req</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">args</span><span class="o">*</span><span class="nx">grpc</span><span class="p">.</span><span class="nx">UnaryServerInfo</span><span class="p">,</span> <span class="nx">handler</span> <span class="nx">grpc</span><span class="p">.</span><span class="nx">UnaryHandler</span><span class="p">)</span> <span class="p">(</span><span class="nx">resp</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">uri</span> <span class="o">:=</span> <span class="nx">args</span><span class="p">.</span><span class="nx">FullMethod</span>
+		<span class="nx">limiter</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">group</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">uri</span><span class="p">)</span>
+		<span class="nx">done</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">limiter</span><span class="p">.</span><span class="nf">Allow</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">_metricServerBBR</span><span class="p">.</span><span class="nf">Inc</span><span class="p">(</span><span class="nx">uri</span><span class="p">)</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+		<span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+			<span class="nf">done</span><span class="p">(</span><span class="nx">limit</span><span class="p">.</span><span class="nx">DoneInfo</span><span class="p">{</span><span class="nx">Op</span><span class="p">:</span> <span class="nx">limit</span><span class="p">.</span><span class="nx">Success</span><span class="p">})</span>
+			<span class="nx">b</span><span class="p">.</span><span class="nf">printStats</span><span class="p">(</span><span class="nx">uri</span><span class="p">,</span> <span class="nx">limiter</span><span class="p">)</span>
+		<span class="p">}()</span>
+		<span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nf">handler</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">req</span><span class="p">)</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>注意上面代码中的 <code>done, err := limiter.Allow(ctx)</code>，就是调用了 <code>bbr.Limiter</code> 实现的 <code>Allow()</code> 方法，然后在 <code>defer func() {......}</code> 中巧妙的调用了 <code>done</code> 方法。注意 <code>defer</code> 的调用位置在 <code>resp, err = handler(ctx, req)</code> 之后，这代表，在真正的 RPC 方法执行完之后才调用 <code>defer</code> 中的逻辑：<code>done(limit.DoneInfo{Op: limit.Success})</code>，这里就调用了函数对象里面的实现逻辑：</p>
+<ol>
+<li>计算 rt 的值</li>
+<li>向 rtStat 滑动窗口计数器中累加 rt 及次数</li>
+<li>当前正在处理请求数 inFlight 减 1</li>
+<li>根据 do.Op 取值，若为 limit.Success，则向滑动窗口计数器 passStat 累加计数</li>
+<li>返回</li>
+</ol>
+<p>代码片段如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span><span class="p">(</span><span class="nx">do</span> <span class="nx">limit</span><span class="p">.</span><span class="nx">DoneInfo</span><span class="p">)</span> <span class="p">{</span>
+	<span class="c1">// 获取执行过程的耗时
+</span><span class="c1"></span>	<span class="nx">rt</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">((</span><span class="nx">time</span><span class="p">.</span><span class="nf">Since</span><span class="p">(</span><span class="nx">initTime</span><span class="p">)</span> <span class="o">-</span> <span class="nx">stime</span><span class="p">)</span> <span class="o">/</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span><span class="p">)</span>
+	<span class="c1">// 向 RollingCounter 中添加 rt（这是把 RollingCounter 当做累加器使用）
+</span><span class="c1"></span>	<span class="nx">l</span><span class="p">.</span><span class="nx">rtStat</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">rt</span><span class="p">)</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">inFlight</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+	<span class="k">switch</span> <span class="nx">do</span><span class="p">.</span><span class="nx">Op</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="nx">limit</span><span class="p">.</span><span class="nx">Success</span><span class="p">:</span>
+		<span class="nx">l</span><span class="p">.</span><span class="nx">passStat</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+		<span class="k">return</span>
+	<span class="k">default</span><span class="p">:</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>完整的 Allow 实现代码如下，注意是在 shouldDrop 方法是基于 bbr 的限流算法来判断是否应该丢弃请求：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Allow checks all inbound traffic.
+</span><span class="c1">// Once overload is detected, it raises ecode.LimitExceed error.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">l</span> <span class="o">*</span><span class="nx">BBR</span><span class="p">)</span> <span class="nf">Allow</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">opts</span> <span class="o">...</span><span class="nx">limit</span><span class="p">.</span><span class="nx">AllowOption</span><span class="p">)</span> <span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">info</span> <span class="nx">limit</span><span class="p">.</span><span class="nx">DoneInfo</span><span class="p">),</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">allowOpts</span> <span class="o">:=</span> <span class="nx">limit</span><span class="p">.</span><span class="nf">DefaultAllowOpts</span><span class="p">()</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">opt</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">opts</span> <span class="p">{</span>
+		<span class="nx">opt</span><span class="p">.</span><span class="nf">Apply</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">allowOpts</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="c1">// shouldDrop 判断是否需要限流，如果true表示限流 之后重点讲
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">l</span><span class="p">.</span><span class="nf">shouldDrop</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">ecode</span><span class="p">.</span><span class="nx">LimitExceed</span>
+	<span class="p">}</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">inFlight</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="c1">// 之前说的，正在处理数+1
+</span><span class="c1"></span>	<span class="nx">stime</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Since</span><span class="p">(</span><span class="nx">initTime</span><span class="p">)</span> <span class="c1">// 现在时间减去程序初始化时间 表示程序开始执行时刻
+</span><span class="c1"></span>	<span class="k">return</span> <span class="kd">func</span><span class="p">(</span><span class="nx">do</span> <span class="nx">limit</span><span class="p">.</span><span class="nx">DoneInfo</span><span class="p">)</span> <span class="p">{</span> <span class="c1">// allow返回函数 在中间件（拦截器）中handle执行完成后调用
+</span><span class="c1"></span>		<span class="nx">rt</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">((</span><span class="nx">time</span><span class="p">.</span><span class="nf">Since</span><span class="p">(</span><span class="nx">initTime</span><span class="p">)</span> <span class="o">-</span> <span class="nx">stime</span><span class="p">)</span> <span class="o">/</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span><span class="p">)</span> <span class="c1">// 执行完handle的时间减去stime 表示 程序执行的总时间 单位ms
+</span><span class="c1"></span>		<span class="nx">l</span><span class="p">.</span><span class="nx">rtStat</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">rt</span><span class="p">)</span>	<span class="c1">// 把处理时间放进采样数据window
+</span><span class="c1"></span>		<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">inFlight</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="c1">// 正在处理数-1 便是处理完成
+</span><span class="c1"></span>		<span class="k">switch</span> <span class="nx">do</span><span class="p">.</span><span class="nx">Op</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="nx">limit</span><span class="p">.</span><span class="nx">Success</span><span class="p">:</span>
+			<span class="nx">l</span><span class="p">.</span><span class="nx">passStat</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>	<span class="c1">// 成功了，把通过数的采样数据window加1
+</span><span class="c1"></span>			<span class="k">return</span>
+		<span class="k">default</span><span class="p">:</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+	<span class="p">},</span> <span class="kc">nil</span>
+<span class="p">}</span>
+<span class="c1">// Stats contains the metrics’s snapshot of bbr. type Stat struct { Cpu int64 InFlight int64 MaxInFlight int64 MinRt int64 MaxPass int64 }
+</span><span class="c1"></span>
+<span class="c1">// Config contains configs of bbr limiter. type Config struct { Enabled bool Window time.Duration WinBucket int Rule string Debug bool CPUThreshold int64 }
+</span></code></pre></td></tr></table>
+</div>
+</div><h2 id="滑动窗口">滑动窗口</h2>
+<p>在自适应限流保护中，采集到的指标的时效性非常强，系统只需要采集最近一小段时间内的 qps、rt 即可，对于较老的数据，会自动丢弃。为了实现这个效果，kratos 使用了滑动窗口来保存采样数据。</p>
+<h3 id="单元节点-bucket">单元节点: Bucket</h3>
+<p>Bucket 提供了 Append 方法，用于向 Points 中添加数据，Points 是 float64 类型的 slice，主要存放单个指标的值，如延迟，错误次数等等</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Bucket</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">Points</span> <span class="p">[]</span><span class="kt">float64</span> <span class="c1">// 单个节点中的统计数据（数组）
+</span><span class="c1"></span>	<span class="nx">Count</span>  <span class="kt">int64</span>     <span class="c1">// 总数
+</span><span class="c1"></span>	<span class="nx">next</span>   <span class="o">*</span><span class="nx">Bucket</span>   <span class="c1">// 链表实现
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Bucket 提供了两种数值添加的接口：Append 和 Add，这两个方法会被上层 Window 的方法调用：</p>
+<p>Append 是在 Bucket 的 Points 数组中直接追加数据：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Append appends the given value to the bucket.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">Bucket</span><span class="p">)</span> <span class="nf">Append</span><span class="p">(</span><span class="nx">val</span> <span class="kt">float64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">b</span><span class="p">.</span><span class="nx">Points</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">Points</span><span class="p">,</span> <span class="nx">val</span><span class="p">)</span>
+	<span class="nx">b</span><span class="p">.</span><span class="nx">Count</span><span class="o">++</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Add 是在 Bucket 的 Points 数组中的指定 index 位置累加值：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Add adds the given value to the point.
+</span><span class="c1">// 给 []float64 指定位置累加值
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">b</span><span class="o">*</span><span class="nx">Bucket</span><span class="p">)</span> <span class="nf">Add</span><span class="p">(</span><span class="nx">offset</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">val</span> <span class="kt">float64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">b</span><span class="p">.</span><span class="nx">Points</span><span class="p">[</span><span class="nx">offset</span><span class="p">]</span> <span class="o">+=</span> <span class="nx">val</span>
+	<span class="nx">b</span><span class="p">.</span><span class="nx">Count</span><span class="o">++</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Bucket 的遍历方式：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Next returns the next bucket.
+</span><span class="c1">// 遍历链表用（返回当前 node 的下一个 node）
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">Bucket</span><span class="p">)</span> <span class="nf">Next</span><span class="p">()</span><span class="o">*</span><span class="nx">Bucket</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">b</span><span class="p">.</span><span class="nx">next</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>bucket 提供了 iterator 的封装，用于滑动窗口的遍历。遍历的目的是为了对窗口的数据做提取和计算；比如，计算截至当前时间滑动窗口的请求失败率，就需要遍历从窗口 start 位置到目前时间的所有 Bucket 的错误总数/请求总数。</p>
+<h3 id="环形数组-window">环形数组: Window</h3>
+<p>Window 的结构，就是 Bucket 组成的 slice：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Window</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">window</span> <span class="p">[]</span><span class="nx">Bucket</span> <span class="c1">// 滑动窗口实现
+</span><span class="c1"></span>	<span class="nx">size</span>   <span class="kt">int</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Window 的初始化逻辑，这里有个细节是将 Bucket 初始化为环形数组（RingQueue）：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// NewWindow creates a new Window based on WindowOpts.
+</span><span class="c1">// 初始化滑动窗口
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewWindow</span><span class="p">(</span><span class="nx">opts</span> <span class="nx">WindowOpts</span><span class="p">)</span> <span class="o">*</span><span class="nx">Window</span> <span class="p">{</span>
+	<span class="nx">buckets</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">Bucket</span><span class="p">,</span> <span class="nx">opts</span><span class="p">.</span><span class="nx">Size</span><span class="p">)</span>
+	<span class="k">for</span> <span class="nx">offset</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">buckets</span> <span class="p">{</span>
+		<span class="c1">// 初始化每个 bucket
+</span><span class="c1"></span>		<span class="nx">buckets</span><span class="p">[</span><span class="nx">offset</span><span class="p">]</span> <span class="p">=</span> <span class="nx">Bucket</span><span class="p">{</span><span class="nx">Points</span><span class="p">:</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">float64</span><span class="p">,</span> <span class="mi">0</span><span class="p">)}</span>
+		<span class="nx">nextOffset</span> <span class="o">:=</span> <span class="nx">offset</span> <span class="o">+</span> <span class="mi">1</span>
+		<span class="k">if</span> <span class="nx">nextOffset</span> <span class="o">==</span> <span class="nx">opts</span><span class="p">.</span><span class="nx">Size</span> <span class="p">{</span>
+			<span class="c1">// 构建一个 queue（环）
+</span><span class="c1"></span>			<span class="nx">nextOffset</span> <span class="p">=</span> <span class="mi">0</span>
+		<span class="p">}</span>
+
+		<span class="c1">// 初始化为一个链表（首尾相接）
+</span><span class="c1"></span>		<span class="nx">buckets</span><span class="p">[</span><span class="nx">offset</span><span class="p">].</span><span class="nx">next</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">buckets</span><span class="p">[</span><span class="nx">nextOffset</span><span class="p">]</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">Window</span><span class="p">{</span><span class="nx">window</span><span class="p">:</span> <span class="nx">buckets</span><span class="p">,</span> <span class="nx">size</span><span class="p">:</span> <span class="nx">opts</span><span class="p">.</span><span class="nx">Size</span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>同样的，Window 的数值添加方法也只是对 Bucket 提供接口的进一步封装：</p>
+<p>Window 的 Append 方法：向指定的偏移 offset（位于 offset 位置的 Bucket）添加值</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Append appends the given value to the bucket where index equals the given offset.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">w</span> <span class="o">*</span><span class="nx">Window</span><span class="p">)</span> <span class="nf">Append</span><span class="p">(</span><span class="nx">offset</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">val</span> <span class="kt">float64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="c1">// 调用了 Bucket 的 Append 方法
+</span><span class="c1"></span>	<span class="nx">w</span><span class="p">.</span><span class="nx">window</span><span class="p">[</span><span class="nx">offset</span><span class="p">].</span><span class="nf">Append</span><span class="p">(</span><span class="nx">val</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Window 的 Add 方法：向指定的偏移 offset 的 0 号位置累加值（和 Append 有稍许不同）</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Add adds the given value to the latest point within bucket where index equals the given offset.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">w</span><span class="o">*</span><span class="nx">Window</span><span class="p">)</span> <span class="nf">Add</span><span class="p">(</span><span class="nx">offset</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">val</span> <span class="kt">float64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">w</span><span class="p">.</span><span class="nx">window</span><span class="p">[</span><span class="nx">offset</span><span class="p">].</span><span class="nx">Count</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="c1">// 如果 bucket 是空的（没有统计值），直接 Append
+</span><span class="c1"></span>		<span class="nx">w</span><span class="p">.</span><span class="nx">window</span><span class="p">[</span><span class="nx">offset</span><span class="p">].</span><span class="nf">Append</span><span class="p">(</span><span class="nx">val</span><span class="p">)</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="c1">// bucket 非空，在 Point[] 的 0 号位置累加值
+</span><span class="c1"></span>	<span class="nx">w</span><span class="p">.</span><span class="nx">window</span><span class="p">[</span><span class="nx">offset</span><span class="p">].</span><span class="nf">Add</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nx">val</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Window 的迭代器生成</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 需要提供传入的 offset 和 count
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">w</span> <span class="o">*</span><span class="nx">Window</span><span class="p">)</span> <span class="nf">Iterator</span><span class="p">(</span><span class="nx">offset</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">count</span> <span class="kt">int</span><span class="p">)</span> <span class="nx">Iterator</span> <span class="p">{</span>
+	<span class="c1">// 构建 window 的 Iterator（迭代器），方便统计和遍历
+</span><span class="c1"></span>	<span class="k">return</span> <span class="nx">Iterator</span><span class="p">{</span>
+		<span class="nx">count</span><span class="p">:</span> <span class="nx">count</span><span class="p">,</span>
+		<span class="nx">cur</span><span class="p">:</span>   <span class="o">&amp;</span><span class="nx">w</span><span class="p">.</span><span class="nx">window</span><span class="p">[</span><span class="nx">offset</span><span class="p">],</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>迭代器的结构如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Iterator iterates the buckets within the window.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Iterator</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">count</span>         <span class="kt">int</span> <span class="c1">// 遍历完成的条件（i.count != i.iteratedCount）
+</span><span class="c1"></span>	<span class="nx">iteratedCount</span> <span class="kt">int</span>
+	<span class="nx">cur</span>           <span class="o">*</span><span class="nx">Bucket</span> <span class="c1">// 当前迭代器的位置
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>下面 Next 方法，定义了遍历器的退出条件：遍历完 count 个 Bucket（窗口）后完成，其中 iteratedCount 是计数器</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 这里很重要，Iter 的迭代规则是，移动 count 的次数 == 当前移动次数
+</span><span class="c1">// Next returns true util all of the buckets has been iterated.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">i</span> <span class="o">*</span><span class="nx">Iterator</span><span class="p">)</span> <span class="nf">Next</span><span class="p">()</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">i</span><span class="p">.</span><span class="nx">count</span> <span class="o">!=</span> <span class="nx">i</span><span class="p">.</span><span class="nx">iteratedCount</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Bucket 方法，获取当前的 Bucket，并且把指针指向下一个 Bucket</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Bucket gets current bucket.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">i</span> <span class="o">*</span><span class="nx">Iterator</span><span class="p">)</span> <span class="nf">Bucket</span><span class="p">()</span> <span class="nx">Bucket</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="p">!(</span><span class="nx">i</span><span class="p">.</span><span class="nf">Next</span><span class="p">())</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;stat/metric: iteration out of range iteratedCount: %d count: %d&#34;</span><span class="p">,</span> <span class="nx">i</span><span class="p">.</span><span class="nx">iteratedCount</span><span class="p">,</span> <span class="nx">i</span><span class="p">.</span><span class="nx">count</span><span class="p">))</span>
+	<span class="p">}</span>
+	<span class="nx">bucket</span> <span class="o">:=*</span><span class="nx">i</span><span class="p">.</span><span class="nx">cur</span>
+	<span class="nx">i</span><span class="p">.</span><span class="nx">iteratedCount</span><span class="o">++</span>	<span class="c1">// 累加计数器
+</span><span class="c1"></span>	<span class="nx">i</span><span class="p">.</span><span class="nx">cur</span> <span class="p">=</span> <span class="nx">i</span><span class="p">.</span><span class="nx">cur</span><span class="p">.</span><span class="nf">Next</span><span class="p">()</span>
+	<span class="k">return</span> <span class="nx">bucket</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="滑动窗口-rollingpolicy">滑动窗口: RollingPolicy</h3>
+<p>在项目中，如何在滑动窗口中加入时间跨度，用来实现滑动窗口结构的实例化？答案就是 Rolling 结构。如下图，一个 Bucket 代表 500ms，一个滑动窗口占据 2 个 Bucket。这是一个非常精妙的数据结构，表现在以下几点：</p>
+<ol>
+<li>采集到的指标的时效性非常强，系统只需要采集最近一小段时间内关注的 Metrics 即可，对于较老的数据，会自动丢弃</li>
+<li>如下图展示的的滑动窗口。整个滑动窗口用来保存最近 1s 的采样数据，每个小的桶用来保存 500ms 的采样数据。当时间流动之后，过期的桶会自动被新桶的数据覆盖掉，在图中，在 1000-1500ms 时，Bucket-1 的数据因为过期而被丢弃，之后 Bucket-3 的数据填到了窗口的头部。（由于在实现上滑动窗口被构造为一个环，所以 Bucket-3 的位置实际上在第 0 号位，即 Bucket-1 的位置）</li>
+<li>由于滑动窗口以时间为 key，外部接口调用 Add 方法添加新的指标时，会根据时间跨度将不同（相近）时间戳的指标汇总到一个 “窗口” 中，从而可以使得统计结果更加趋于平滑，不会受到单次统计波动的影响</li>
+</ol>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211115195400.png" alt=""></p>
+<p>Rolling_policy 中，封装了滑动窗口，加入了互斥锁、单位时间跨度（单个桶）、最后一次更新时间等，使其成为外部可调用的结构体，如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">RollingPolicy</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">mu</span>     <span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>		<span class="c1">//（子协程）并发的 add 操作必须加锁！
+</span><span class="c1"></span>	<span class="nx">size</span>   <span class="kt">int</span>			<span class="c1">// 滑动窗口的 size
+</span><span class="c1"></span>	<span class="nx">window</span> <span class="o">*</span><span class="nx">Window</span>			<span class="c1">// 滑动窗口
+</span><span class="c1"></span>	<span class="nx">offset</span> <span class="kt">int</span>
+
+	<span class="nx">bucketDuration</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span>		<span class="c1">// 一个桶代表多长时间
+</span><span class="c1"></span>	<span class="nx">lastAppendTime</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span>		<span class="c1">// 滑动窗口的 START 位置
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>通过，<code>time.Now()- 当前时间</code>、<code>bucketDuration</code> 以及 <code>lastAppendTime</code> 这几项时间因素的关联，是的 <code>RollingPolicy.window</code> 具有了基于时间的滑动窗口的概念。</p>
+<p>RollingPolicy 中有 3 个核心方法，分别为 timespan、add 和 Reduce。</p>
+<p>下面 timespan() 方法就是计算：当前调用此方法的时刻，距离上一次写入（lastAppendTime）滑过了几个 Bucket</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">RollingPolicy</span><span class="p">)</span> <span class="nf">timespan</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
+	<span class="nx">v</span> <span class="o">:=</span> <span class="nb">int</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Since</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">lastAppendTime</span><span class="p">)</span> <span class="o">/</span> <span class="nx">r</span><span class="p">.</span><span class="nx">bucketDuration</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">v</span> <span class="p">&gt;</span> <span class="o">-</span><span class="mi">1</span> <span class="p">{</span> <span class="c1">// maybe time backwards
+</span><span class="c1"></span>		<span class="k">return</span> <span class="nx">v</span>
+	<span class="p">}</span>
+	<span class="c1">// 时间调整了
+</span><span class="c1"></span>	<span class="k">return</span> <span class="nx">r</span><span class="p">.</span><span class="nx">size</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>RollingPolicy 的添加数据方法，分别调用了 window 的 Append 和 Add 方法：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Append appends the given points to the window.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">RollingPolicy</span><span class="p">)</span> <span class="nf">Append</span><span class="p">(</span><span class="nx">val</span> <span class="kt">float64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">r</span><span class="p">.</span><span class="nf">add</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">window</span><span class="p">.</span><span class="nx">Append</span><span class="p">,</span> <span class="nx">val</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">// Add adds the given value to the latest point within bucket.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">RollingPolicy</span><span class="p">)</span> <span class="nf">Add</span><span class="p">(</span><span class="nx">val</span> <span class="kt">float64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">r</span><span class="p">.</span><span class="nf">add</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">window</span><span class="p">.</span><span class="nx">Add</span><span class="p">,</span> <span class="nx">val</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>add 方法：通过计算出当前时间 <code>time.Now()</code> 与 <code>lastAppendTime</code> 的跨度差，在环形滑动窗口中获取正确的位置，然后调用传入的 f 进行插入操作。请注意，跨度超过了 Window 的 End 位置需要从 Start 位置重新计算。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">RollingPolicy</span><span class="p">)</span> <span class="nf">add</span><span class="p">(</span><span class="nx">f</span> <span class="kd">func</span><span class="p">(</span><span class="nx">offset</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">val</span> <span class="kt">float64</span><span class="p">),</span> <span class="nx">val</span> <span class="kt">float64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">r</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="c1">// 计算时间跨度（跨过了几个 bucket）
+</span><span class="c1"></span>	<span class="nx">timespan</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.</span><span class="nf">timespan</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">timespan</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="c1">// 当 timespan&gt;0 时，表示有跨度
+</span><span class="c1"></span>		<span class="c1">// 更新当前 append 时间
+</span><span class="c1"></span>		<span class="nx">r</span><span class="p">.</span><span class="nx">lastAppendTime</span> <span class="p">=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">lastAppendTime</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="nx">timespan</span><span class="o">*</span> <span class="nb">int</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">bucketDuration</span><span class="p">)))</span>
+		<span class="nx">offset</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">offset</span>
+		<span class="c1">// reset the expired buckets
+</span><span class="c1"></span>		<span class="nx">s</span> <span class="o">:=</span> <span class="nx">offset</span> <span class="o">+</span> <span class="mi">1</span> <span class="c1">//s 指向下一个位置
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">timespan</span> <span class="p">&gt;</span> <span class="nx">r</span><span class="p">.</span><span class="nx">size</span> <span class="p">{</span>
+			<span class="c1">// 如果跨度超过了 window 的大小，timespan 最大为 window 的 size
+</span><span class="c1"></span>			<span class="nx">timespan</span> <span class="p">=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">size</span>
+		<span class="p">}</span>
+		<span class="nx">e</span><span class="p">,</span> <span class="nx">e1</span> <span class="o">:=</span> <span class="nx">s</span><span class="o">+</span><span class="nx">timespan</span><span class="p">,</span> <span class="mi">0</span> <span class="c1">// e: reset offset must start from offset+1
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">e</span> <span class="p">&gt;</span> <span class="nx">r</span><span class="p">.</span><span class="nx">size</span> <span class="p">{</span>
+			<span class="nx">e1</span> <span class="p">=</span> <span class="nx">e</span> <span class="o">-</span> <span class="nx">r</span><span class="p">.</span><span class="nx">size</span>
+			<span class="nx">e</span> <span class="p">=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">size</span>
+		<span class="p">}</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">e</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="c1">// 清理 offset1---&gt; s+timespan 的之间的 bucket
+</span><span class="c1"></span>			<span class="nx">r</span><span class="p">.</span><span class="nx">window</span><span class="p">.</span><span class="nf">ResetBucket</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span>
+			<span class="nx">offset</span> <span class="p">=</span> <span class="nx">i</span>
+		<span class="p">}</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">e1</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="c1">// 如果超过一个跨度，那么说明时间跨度在两个区间上
+</span><span class="c1"></span>			<span class="nx">r</span><span class="p">.</span><span class="nx">window</span><span class="p">.</span><span class="nf">ResetBucket</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span>
+			<span class="nx">offset</span> <span class="p">=</span> <span class="nx">i</span>
+		<span class="p">}</span>
+		<span class="nx">r</span><span class="p">.</span><span class="nx">offset</span> <span class="p">=</span> <span class="nx">offset</span>
+	<span class="p">}</span>
+	<span class="c1">// 添加到 offset 位置
+</span><span class="c1"></span>	<span class="c1">//（当 timespan==0 时，说明，当前时间未出现 span，直接操作 r.offset 位置即可）
+</span><span class="c1"></span>	<span class="nf">f</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">offset</span><span class="p">,</span> <span class="nx">val</span><span class="p">)</span>
+	<span class="nx">r</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Reduce 方法，非常有意思，它的传入参数是 reduce.go 中定义的求值操作，如 Sum、Avg、Min、Max 和 Couter。 该方法的作用是，在 timespan 这个区间进行遍历，计算遍历的起始位置 offset 和长度 count，会调用上面这个几个方法之一（对遍历的这些 Bucket）进行计算，最终得到 val。比如，求当前时间 time.Now() 到 lastAppendTime 之间，滑动窗口的 Sum 累加值。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Reduce applies the reduction function to all buckets within the window.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">RollingPolicy</span><span class="p">)</span> <span class="nf">Reduce</span><span class="p">(</span><span class="nx">f</span> <span class="kd">func</span><span class="p">(</span><span class="nx">Iterator</span><span class="p">)</span> <span class="kt">float64</span><span class="p">)</span> <span class="p">(</span><span class="nx">val</span> <span class="kt">float64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">r</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+	<span class="nx">timespan</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.</span><span class="nf">timespan</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">count</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">size</span> <span class="o">-</span> <span class="nx">timespan</span><span class="p">;</span> <span class="nx">count</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">offset</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">offset</span> <span class="o">+</span> <span class="nx">timespan</span> <span class="o">+</span> <span class="mi">1</span>
+		<span class="k">if</span> <span class="nx">offset</span> <span class="o">&gt;=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">size</span> <span class="p">{</span>
+			<span class="nx">offset</span> <span class="p">=</span> <span class="nx">offset</span> <span class="o">-</span> <span class="nx">r</span><span class="p">.</span><span class="nx">size</span>
+		<span class="p">}</span>
+		<span class="c1">// 计算得到遍历的开始位置 offset 和遍历长度 count
+</span><span class="c1"></span>		<span class="c1">//f 的参数，就是 Iterator 的结果
+</span><span class="c1"></span>		<span class="nx">val</span> <span class="p">=</span> <span class="nf">f</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">window</span><span class="p">.</span><span class="nf">Iterator</span><span class="p">(</span><span class="nx">offset</span><span class="p">,</span> <span class="nx">count</span><span class="p">))</span>
+	<span class="p">}</span>
+	<span class="nx">r</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+	<span class="k">return</span> <span class="nx">val</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="计数器-rollingcounter">计数器: RollingCounter</h3>
+<p>RollingCounter 就是基于滑动窗口的计数器。是 RollingPolicy 的上一层封装：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">rollingCounter</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">policy</span> <span class="o">*</span><span class="nx">RollingPolicy</span>
+<span class="p">}</span>
+
+
+<span class="kd">type</span> <span class="nx">RollingCounter</span> <span class="kd">interface</span> <span class="p">{</span>
+	<span class="nx">Metric</span>			<span class="c1">// with prometheus
+</span><span class="c1"></span>	<span class="nx">Aggregation</span>
+	<span class="nf">Timespan</span><span class="p">()</span> <span class="kt">int</span>
+	<span class="c1">// Reduce applies the reduction function to all buckets within the window.
+</span><span class="c1"></span>	<span class="nf">Reduce</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">Iterator</span><span class="p">)</span> <span class="kt">float64</span><span class="p">)</span> <span class="kt">float64</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>RollingCounter 的 Add 方法，限制了计数器累加值不能为负数：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">rollingCounter</span><span class="p">)</span> <span class="nf">Add</span><span class="p">(</span><span class="nx">val</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// 计数器不能为负数
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">val</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;stat/metric: cannot decrease in value. val: %d&#34;</span><span class="p">,</span> <span class="nx">val</span><span class="p">))</span>
+	<span class="p">}</span>
+	<span class="nx">r</span><span class="p">.</span><span class="nx">policy</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">val</span><span class="p">))</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="瞬时统计-rollinggauge">瞬时统计: RollingGauge</h3>
+<p>RollingGauge 是基于滑动窗口的瞬时数据统计器。它和 RollingCounter 的最大不同是向 Bucket 的 Points 数组，追加数据（Points 数组的每个 index 代表了一种维度的 gauge）。RollingGauge 的结构如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">rollingGauge</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">policy</span> <span class="o">*</span><span class="nx">RollingPolicy</span>
+<span class="p">}</span>
+
+<span class="c1">// RollingGauge represents a ring window based on time duration.
+</span><span class="c1">// e.g. [[1, 2], [1, 2, 3], [1,2, 3, 4]]
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">RollingGauge</span> <span class="kd">interface</span> <span class="p">{</span>
+	<span class="nx">Metric</span>
+	<span class="nx">Aggregation</span>
+	<span class="c1">// Reduce applies the reduction function to all buckets within the window.
+</span><span class="c1"></span>	<span class="nf">Reduce</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">Iterator</span><span class="p">)</span> <span class="kt">float64</span><span class="p">)</span> <span class="kt">float64</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>RollingGauge 调用了 Window 的 Append 方法来完成存值：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">rollingGauge</span><span class="p">)</span> <span class="nf">Add</span><span class="p">(</span><span class="nx">val</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">r</span><span class="p">.</span><span class="nx">policy</span><span class="p">.</span><span class="nf">Append</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">val</span><span class="p">))</span>
+<span class="p">}</span>
+<span class="c1">// Append appends the given points to the window.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">r</span> <span class="o">*</span><span class="nx">RollingPolicy</span><span class="p">)</span> <span class="nf">Append</span><span class="p">(</span><span class="nx">val</span> <span class="kt">float64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">r</span><span class="p">.</span><span class="nf">add</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">window</span><span class="p">.</span><span class="nx">Append</span><span class="p">,</span> <span class="nx">val</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="maxpass--minrt">MaxPass &amp;&amp; MinRT</h2>
+<p>MaxPass 表示最近 5s 内，单个采样窗口（window）中最大的请求数。换言之，就是找出当前时间戳的滑动窗口的所有桶中，最大的请求计数器的值（单个桶）：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 单个采样窗口的最大的请求数, 默认的采样窗口是10s, 采样bucket数量100
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">l</span> <span class="o">*</span><span class="nx">BBR</span><span class="p">)</span> <span class="nf">maxPASS</span><span class="p">()</span> <span class="kt">int64</span> <span class="p">{</span>
+	<span class="nx">rawMaxPass</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">rawMaxPASS</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">rawMaxPass</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">l</span><span class="p">.</span><span class="nx">passStat</span><span class="p">.</span><span class="nf">Timespan</span><span class="p">()</span> <span class="p">&lt;</span> <span class="mi">1</span> <span class="p">{</span>
+		<span class="c1">// 当前的时间跨度未超过一个单位
+</span><span class="c1"></span>		<span class="k">return</span> <span class="nx">rawMaxPass</span>
+	<span class="p">}</span>
+
+	<span class="c1">// 通过 Reduce 方法来获取最大的 Pass 值
+</span><span class="c1"></span>	<span class="c1">// 遍历100个采样bucket, 找到采样bucket中最大的请求数
+</span><span class="c1"></span>	<span class="nx">rawMaxPass</span> <span class="p">=</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">l</span><span class="p">.</span><span class="nx">passStat</span><span class="p">.</span><span class="nf">Reduce</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">iterator</span> <span class="nx">metric</span><span class="p">.</span><span class="nx">Iterator</span><span class="p">)</span> <span class="kt">float64</span> <span class="p">{</span>
+		<span class="kd">var</span> <span class="nx">result</span> <span class="p">=</span> <span class="mf">1.0</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">1</span><span class="p">;</span> <span class="nx">iterator</span><span class="p">.</span><span class="nf">Next</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">l</span><span class="p">.</span><span class="nx">conf</span><span class="p">.</span><span class="nx">WinBucket</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="nx">bucket</span> <span class="o">:=</span> <span class="nx">iterator</span><span class="p">.</span><span class="nf">Bucket</span><span class="p">()</span>
+			<span class="nx">count</span> <span class="o">:=</span> <span class="mf">0.0</span>
+			<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">p</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">bucket</span><span class="p">.</span><span class="nx">Points</span> <span class="p">{</span>
+				<span class="c1">// 叠加 bucket.Points，注意 Points 的类型是 Points []float64
+</span><span class="c1"></span>				<span class="nx">count</span> <span class="o">+=</span> <span class="nx">p</span>
+			<span class="p">}</span>
+			<span class="nx">result</span> <span class="p">=</span> <span class="nx">math</span><span class="p">.</span><span class="nf">Max</span><span class="p">(</span><span class="nx">result</span><span class="p">,</span> <span class="nx">count</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="k">return</span> <span class="nx">result</span>
+	<span class="p">}))</span>
+	<span class="k">if</span> <span class="nx">rawMaxPass</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">rawMaxPass</span> <span class="p">=</span> <span class="mi">1</span>
+	<span class="p">}</span>
+	<span class="c1">// 存储在 rawMaxPASS 中并返回
+</span><span class="c1"></span>	<span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">rawMaxPASS</span><span class="p">,</span> <span class="nx">rawMaxPass</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">rawMaxPass</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>MinRt 表示最近 5s 内，单个采样窗口中最小的响应时间。windows 表示一秒内采样窗口的数量，默认配置中是 5s 50 个采样，那么 windows 的值为 10。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 单个采样窗口中最小的响应时间
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">l</span> <span class="o">*</span><span class="nx">BBR</span><span class="p">)</span> <span class="nf">minRT</span><span class="p">()</span> <span class="kt">int64</span> <span class="p">{</span>
+	<span class="nx">rawMinRT</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">rawMinRt</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">rawMinRT</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">l</span><span class="p">.</span><span class="nx">rtStat</span><span class="p">.</span><span class="nf">Timespan</span><span class="p">()</span> <span class="p">&lt;</span> <span class="mi">1</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">rawMinRT</span>
+	<span class="p">}</span>
+	<span class="c1">// 遍历100个采样bucket, 找到采样bucket中最小的响应时间
+</span><span class="c1"></span>	<span class="nx">rawMinRT</span> <span class="p">=</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">math</span><span class="p">.</span><span class="nf">Ceil</span><span class="p">(</span><span class="nx">l</span><span class="p">.</span><span class="nx">rtStat</span><span class="p">.</span><span class="nf">Reduce</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">iterator</span> <span class="nx">metric</span><span class="p">.</span><span class="nx">Iterator</span><span class="p">)</span> <span class="kt">float64</span> <span class="p">{</span>
+		<span class="kd">var</span> <span class="nx">result</span> <span class="p">=</span> <span class="nx">math</span><span class="p">.</span><span class="nx">MaxFloat64</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">1</span><span class="p">;</span> <span class="nx">iterator</span><span class="p">.</span><span class="nf">Next</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">l</span><span class="p">.</span><span class="nx">conf</span><span class="p">.</span><span class="nx">WinBucket</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+			<span class="nx">bucket</span> <span class="o">:=</span> <span class="nx">iterator</span><span class="p">.</span><span class="nf">Bucket</span><span class="p">()</span>
+			<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">bucket</span><span class="p">.</span><span class="nx">Points</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="k">continue</span>
+			<span class="p">}</span>
+			<span class="nx">total</span> <span class="o">:=</span> <span class="mf">0.0</span>
+			<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">p</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">bucket</span><span class="p">.</span><span class="nx">Points</span> <span class="p">{</span>
+				<span class="nx">total</span> <span class="o">+=</span> <span class="nx">p</span>
+			<span class="p">}</span>
+			<span class="nx">avg</span> <span class="o">:=</span> <span class="nx">total</span> <span class="o">/</span> <span class="nb">float64</span><span class="p">(</span><span class="nx">bucket</span><span class="p">.</span><span class="nx">Count</span><span class="p">)</span>
+			<span class="nx">result</span> <span class="p">=</span> <span class="nx">math</span><span class="p">.</span><span class="nf">Min</span><span class="p">(</span><span class="nx">result</span><span class="p">,</span> <span class="nx">avg</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="k">return</span> <span class="nx">result</span>
+	<span class="p">})))</span>
+	<span class="k">if</span> <span class="nx">rawMinRT</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">rawMinRT</span> <span class="p">=</span> <span class="mi">1</span>
+	<span class="p">}</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">rawMinRt</span><span class="p">,</span> <span class="nx">rawMinRT</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">rawMinRT</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="判断规则">判断规则</h2>
+<p>我们使用 CPU 的滑动均值(CPU &gt; 800)作为启发阈值，一旦触发进入到过载保护阶段，算法为：(pass* rt) &lt; inflight</p>
+<p>判断是否丢弃当前请求的算法如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">cpu</span> <span class="o">&gt;</span> <span class="m">800</span> <span class="nf">AND </span><span class="p">(</span><span class="n">Now</span> <span class="o">-</span> <span class="n">PrevDrop</span><span class="p">)</span> <span class="o">&lt;</span> <span class="m">1</span><span class="n">s</span> <span class="n">AND</span> <span class="n">maxFlight</span> <span class="o">&lt;</span> <span class="n">InFlight</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>(Now - PrevDrop) &lt; 1s 表示当前处于冷却时间内,限流效果生效后，CPU 会在临界值(800)附近抖动，如果不使用冷却时间，那么一个短时间的 CPU 下降就可能导致大量请求被放行，严重时会打满 CPU。</p>
+<p>在冷却时间后，重新判断阈值(CPU &gt; 800 )，是否持续进入过载保护。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210113213508.png" alt=""></p>
+<p>maxInFlight()方法代表过去的负载</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">l</span> <span class="o">*</span><span class="nx">BBR</span><span class="p">)</span> <span class="nf">maxFlight</span><span class="p">()</span> <span class="kt">int64</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">math</span><span class="p">.</span><span class="nf">Floor</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">l</span><span class="p">.</span><span class="nf">maxPASS</span><span class="p">()</span><span class="o">*</span><span class="nx">l</span><span class="p">.</span><span class="nf">minRT</span><span class="p">()</span><span class="o">*</span><span class="nx">l</span><span class="p">.</span><span class="nx">winBucketPerSec</span><span class="p">)</span><span class="o">/</span><span class="mf">1000.0</span> <span class="o">+</span> <span class="mf">0.5</span><span class="p">))</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>l.maxPass() * bucketPerSecond/1000 为每毫秒处理的请求数</p>
+<ul>
+<li>l.maxPass() 表示在采样周期内,单个采样窗口的最大的请求数</li>
+<li>l.minRT(): 表示在采样周期内,单个采样窗口中最小的响应时间</li>
+<li>T ≈ QPS* Avg(RT)</li>
+<li>+0.5为向上取整</li>
+<li>l.winBucketPerSec: 每秒内的采样桶数量,其计算方式:int64(time.Second)/(int64(conf.Window)/int64(conf.WinBucket)), conf.Window默认值10s, conf.WinBucket默认值100. 简化下公式: 1/(10/100) = 10, 所以每秒内的采样桶数就是10</li>
+</ul>
+<h2 id="shoulddrop">shouldDrop</h2>
+<p>shouldDrop 代码实现了前文的公式：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">l</span> <span class="o">*</span><span class="nx">BBR</span><span class="p">)</span> <span class="nf">shouldDrop</span><span class="p">()</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="c1">// 判断目前cpu的使用率是否达到设置的CPU的限制, 默认值800
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">l</span><span class="p">.</span><span class="nf">cpu</span><span class="p">()</span> <span class="p">&lt;</span> <span class="nx">l</span><span class="p">.</span><span class="nx">conf</span><span class="p">.</span><span class="nx">CPUThreshold</span> <span class="p">{</span>
+		<span class="c1">// 如果上一次舍弃请求的时间是0, 那么说明没有限流的需求, 直接返回
+</span><span class="c1"></span>		<span class="nx">prevDrop</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">l</span><span class="p">.</span><span class="nx">prevDrop</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">prevDrop</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="kc">false</span>
+		<span class="p">}</span>
+		<span class="c1">// 如果上一次请求的时间与当前的请求时间小于1s, 那么说明有限流的需求
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Since</span><span class="p">(</span><span class="nx">initTime</span><span class="p">)</span><span class="o">-</span><span class="nx">prevDrop</span> <span class="o">&lt;=</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">prevDropHit</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">prevDropHit</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="c1">// 增加正在处理的请求的数量
+</span><span class="c1"></span>			<span class="nx">inFlight</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">inFlight</span><span class="p">)</span>
+			<span class="c1">// 判断正在处理的请求数是否达到系统的最大的请求数量
+</span><span class="c1"></span>			<span class="k">return</span> <span class="nx">inFlight</span> <span class="p">&gt;</span> <span class="mi">1</span> <span class="o">&amp;&amp;</span> <span class="nx">inFlight</span> <span class="p">&gt;</span> <span class="nx">l</span><span class="p">.</span><span class="nf">maxFlight</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="c1">// 清空当前的prevDrop
+</span><span class="c1"></span>		<span class="nx">l</span><span class="p">.</span><span class="nx">prevDrop</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+		<span class="k">return</span> <span class="kc">false</span>
+	<span class="p">}</span>
+	<span class="c1">// 增加正在处理的请求的数量
+</span><span class="c1"></span>	<span class="nx">inFlight</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">inFlight</span><span class="p">)</span>
+	<span class="c1">// 判断正在处理的请求数是否达到系统的最大的请求数量
+</span><span class="c1"></span>	<span class="nx">drop</span> <span class="o">:=</span> <span class="nx">inFlight</span> <span class="p">&gt;</span> <span class="mi">1</span> <span class="o">&amp;&amp;</span> <span class="nx">inFlight</span> <span class="p">&gt;</span> <span class="nx">l</span><span class="p">.</span><span class="nf">maxFlight</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">drop</span> <span class="p">{</span>
+		<span class="nx">prevDrop</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">l</span><span class="p">.</span><span class="nx">prevDrop</span><span class="p">.</span><span class="nf">Load</span><span class="p">().(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">)</span>
+		<span class="c1">// 如果判断达到了最大请求数量, 并且当前有限流需求
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">prevDrop</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">drop</span>
+		<span class="p">}</span>
+		<span class="nx">l</span><span class="p">.</span><span class="nx">prevDrop</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Since</span><span class="p">(</span><span class="nx">initTime</span><span class="p">))</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">drop</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="流程图">流程图</h2>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211114230654.png" alt=""></p>
+<h2 id="压测报告">压测报告</h2>
+<p>场景1，请求以每秒增加1个的速度不停上升，压测效果如下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211114223828.png" alt=""></p>
+<p>左测是没有限流的压测效果，右侧是带限流的压测效果。可以看到，没有限流的场景里，系统在 700qps 时开始抖动，在 1k qps 时被拖垮，几乎没有新的请求能被放行，然而在使用限流之后，系统请求能够稳定在 600 qps 左右，rt 没有暴增，服务也没有被打垮，可见，限流有效的保护了服务。</p>
+<h2 id="参考">参考</h2>
+<p><a href="https://mp.weixin.qq.com/s/gLsdHw9E7Zp971ZhGXdHFA">Kratos 源码分析 - BBR限流源码实现</a></p>
+<p><a href="https://juejin.cn/post/7004848252109455368">从kratos分析BBR限流源码实现</a></p>
+<p><a href="https://www.haohongfan.com/posts/2020-07-05-bbr/">限流器系列(3)&ndash;自适应限流</a></p>
+<p><a href="https://pandaychen.github.io/2020/05/12/KRATOS-METRICS-ANALYSIS-2/">Kratos 源码分析：理解 Kratos 的数据统计类型 Metrics（二）</a></p>
+<p><a href="https://pandaychen.github.io/2020/04/12/KRATOS-METRICS-ANALYSIS/">Kratos 源码分析：理解 Kratos 的数据统计类型 Metrics（一）</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-11-14
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/%E6%9C%8D%E5%8A%A1%E6%B2%BB%E7%90%86/">服务治理</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/%E8%8E%B7%E5%8F%96%E7%B3%BB%E7%BB%9F%E5%92%8C%E7%A1%AC%E4%BB%B6%E4%BF%A1%E6%81%AFgopsutil/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">获取系统和硬件信息:gopsutil</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/%E6%9C%8D%E5%8A%A1%E9%9A%94%E7%A6%BB%E4%B8%8E%E5%A4%9A%E9%9B%86%E7%BE%A4%E8%AE%BE%E8%AE%A1/">
+            <span class="next-text nav-default">服务隔离与多集群设计</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021<span class="heart"><i class="iconfont icon-heart"></i></span><span>Forz</span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.js"></script>
+<script>
+docsearch({
+    apiKey: "b4b9da2eba53aa6dabe4b8ac9e8676e1",
+    indexName: "forz.forzvina.com",
+    appId: "IAR2EF5L65",
+    inputSelector: '.docsearch-input',
+    debug: false,
+});
+</script>
+</body>
+</html>

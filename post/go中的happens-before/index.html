@@ -16,14 +16,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
 
 
-<meta name="author" content="Forz" /><meta name="description" content="前言 Go 官方文档里专门介绍了 Go 的 内存模型,你不要误解这里的内存模型的含义,它并不是指 Go 对象的内存分配、内存回收和内存整理的规范,它描述的是并发" /><meta name="keywords" content="Hugo, theme, even" />
+<meta name="author" content="Forz" /><meta name="description" content="内存重排 https://golang.org/ref/mem 如何保证在一个 goroutine 中看到在另一个 goroutine 修改的变量的值，如果程序中修改数据时有其他 goroutine 同时读取，那么必须将读取串行化。为了串行化访问，请使用" /><meta name="keywords" content="Hugo, theme, even" />
 
 
 
 
 
 
-<meta name="generator" content="Hugo 0.88.1 with theme even" />
+<meta name="generator" content="Hugo 0.89.3 with theme even" />
 
 
 <link rel="canonical" href="/post/go%E4%B8%AD%E7%9A%84happens-before/" />
@@ -40,19 +40,19 @@
 
 
 <meta property="og:title" content="Go中的happens-before" />
-<meta property="og:description" content="前言 Go 官方文档里专门介绍了 Go 的 内存模型,你不要误解这里的内存模型的含义,它并不是指 Go 对象的内存分配、内存回收和内存整理的规范,它描述的是并发" />
+<meta property="og:description" content="内存重排 https://golang.org/ref/mem 如何保证在一个 goroutine 中看到在另一个 goroutine 修改的变量的值，如果程序中修改数据时有其他 goroutine 同时读取，那么必须将读取串行化。为了串行化访问，请使用" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/go%E4%B8%AD%E7%9A%84happens-before/" /><meta property="article:section" content="post" />
 <meta property="article:published_time" content="2021-05-23T23:21:53+00:00" />
 <meta property="article:modified_time" content="2021-05-23T23:21:53+00:00" />
 
 <meta itemprop="name" content="Go中的happens-before">
-<meta itemprop="description" content="前言 Go 官方文档里专门介绍了 Go 的 内存模型,你不要误解这里的内存模型的含义,它并不是指 Go 对象的内存分配、内存回收和内存整理的规范,它描述的是并发"><meta itemprop="datePublished" content="2021-05-23T23:21:53+00:00" />
+<meta itemprop="description" content="内存重排 https://golang.org/ref/mem 如何保证在一个 goroutine 中看到在另一个 goroutine 修改的变量的值，如果程序中修改数据时有其他 goroutine 同时读取，那么必须将读取串行化。为了串行化访问，请使用"><meta itemprop="datePublished" content="2021-05-23T23:21:53+00:00" />
 <meta itemprop="dateModified" content="2021-05-23T23:21:53+00:00" />
-<meta itemprop="wordCount" content="6942">
+<meta itemprop="wordCount" content="7742">
 <meta itemprop="keywords" content="Go," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go中的happens-before"/>
-<meta name="twitter:description" content="前言 Go 官方文档里专门介绍了 Go 的 内存模型,你不要误解这里的内存模型的含义,它并不是指 Go 对象的内存分配、内存回收和内存整理的规范,它描述的是并发"/>
+<meta name="twitter:description" content="内存重排 https://golang.org/ref/mem 如何保证在一个 goroutine 中看到在另一个 goroutine 修改的变量的值，如果程序中修改数据时有其他 goroutine 同时读取，那么必须将读取串行化。为了串行化访问，请使用"/>
 
 <!--[if lte IE 9]>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/go/"> Go </a>
             </div>
-          <span class="more-meta"> 约 6942 字 </span>
-          <span class="more-meta"> 预计阅读 14 分钟 </span>
+          <span class="more-meta"> 约 7742 字 </span>
+          <span class="more-meta"> 预计阅读 16 分钟 </span>
         
       </div>
     </header>
@@ -143,7 +143,7 @@
   <div class="post-toc-content always-active">
     <nav id="TableOfContents">
   <ul>
-    <li><a href="#前言">前言</a></li>
+    <li><a href="#内存重排">内存重排</a></li>
     <li><a href="#重排和可见性的问题">重排和可见性的问题</a></li>
     <li><a href="#happens-before">happens-before</a></li>
     <li><a href="#go-语言中保证的-happens-before-关系">Go 语言中保证的 happens-before 关系</a>
@@ -163,13 +163,49 @@
   </div>
 </div>
     <div class="post-content">
-      <h2 id="前言">前言</h2>
-<p>Go 官方文档里专门介绍了 Go 的 内存模型,你不要误解这里的内存模型的含义,它并不是指 Go 对象的内存分配、内存回收和内存整理的规范,它描述的是并发环境中多 goroutine 读相同变量的时候,变量的可见性条件。具体点说,就是指,在什么条件下, goroutine 在读取一个变量的值的时候,能够看到其它 goroutine 对这个变量进行的写的结果。</p>
-<p>由于 CPU 指令重排和多级 Cache 的存在,保证多核访问同一个变量这件事儿变得非常复杂。毕竟,不同 CPU 架构(x86/amd64、ARM、Power 等)的处理方式也不一样,再加上编译器的优化也可能对指令进行重排,所以编程语言需要一个规范,来明确多线程同时访问同一个变量的可见性和顺序( Russ Cox 在麻省理工学院 6.824 分布式系统 Distributed Systems 课程 的一课,专门介绍了相关的知识)。在编程语言中,这个规范被叫做内存模型。</p>
-<p>除了 Go,Java、C++、C、C#、Rust 等编程语言也有内存模型。为什么这些编程语言都要定义内存模型呢?在我看来,主要是两个目的。</p>
-<p>向广大的程序员提供一种保证,以便他们在做设计和开发程序时,面对同一个数据同时被多个 goroutine 访问的情况,可以做一些串行化访问的控制,比如使用 Channel 或者 sync 包和 sync/atomic 包中的并发原语。</p>
-<p>允许编译器和硬件对程序做一些优化。这一点其实主要是为编译器开发者提供的保证, 这样可以方便他们对 Go 的编译器做优化。</p>
-<p>首先,我们要先弄明白重排和可见性的问题,因为它们影响着程序实际执行的顺序关系。</p>
+      <h2 id="内存重排">内存重排</h2>
+<p><a href="https://golang.org/ref/mem">https://golang.org/ref/mem</a></p>
+<p>如何保证在一个 goroutine 中看到在另一个 goroutine 修改的变量的值，如果程序中修改数据时有其他 goroutine 同时读取，那么必须将读取串行化。为了串行化访问，请使用 channel 或其他同步原语，例如 sync 和 sync/atomic 来保护数据。</p>
+<p>Happen-Before</p>
+<p>在一个 goroutine 中，读和写一定是按照程序中的顺序执行的。即编译器和处理器只有在不会改变这个 goroutine 的行为时才可能修改读和写的执行顺序。由于重排，不同的goroutine 可能会看到不同的执行顺序。例如，一个goroutine 执行 a = 1;b = 2;，另一个 goroutine 可能看到 b 在 a 之前更新。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201206182848.png" alt=""></p>
+<p>用户写下的代码，先要编译成汇编代码，也就是各种指令，包括读写内存的指令。CPU 的设计者们，为了榨干 CPU 的性能，无所不用其极，各种手段都用上了，你可能听过不少，像流水线、分支预测等等。其中，为了提高读写内存的效率，会对读写指令进行重新排列，这就是所谓的 内存重排，英文为 MemoryReordering。
+这一部分说的是 CPU 重排，其实还有编译器重排。比如:</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201206182948.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201206183010.png" alt=""></p>
+<p>但是，编译器无法感知到多个线程同时访问同一变量,所以编译器做的指令重排可能会带来BUG.</p>
+<p>如果这时有另外一个线程同时干了这么一件事：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201206183019.png" alt=""></p>
+<p>上述两段代码的输出结果就会出现不同,出现了&quot;BUG&quot;.</p>
+<p>在多核心场景下,没有办法轻易地判断两段程序是“等价”的。</p>
+<p>现代 CPU 为了“抚平” 内核、内存、硬盘之间的速度差异，搞出了各种策略，例如三级缓存等。为了让 (2) 不必等待 (1) 的执行“效果”可见之后才能执行，我们可以把 (1) 的效果保存到 store buffer：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201206183857.png" alt=""></p>
+<p>store buffer 对单线程是完美的</p>
+<p>先执行 (1) 和 (3)，将他们直接写入 store buffer，接着执行 (2) 和 (4)。“奇迹”要发生了：(2) 看了下 store buffer，并没有发现有 B 的值，于是从 Memory 读出了 0，(4) 同样从 Memory 读出了 0。最后，打印出了 00。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201206203328.png" alt=""></p>
+<p>因此，对于多线程的程序，所有的 CPU 都会提供“锁”支持，称之为 barrier，或者 fence。它要求：barrier 指令要求所有对内存的操作都必须要“扩散”到 memory 之后才能继续执行其他对 memory 的操作。因此，我们可以用高级点的 atomic compare-and-swap，或者直接用更高级的锁，通常是标准库提供。</p>
+<p>为了说明读和写的必要条件，我们定义了先行发生(Happens Before)。如果事件 e1 发生在 e2 前，我们可以说 e2 发生在 e1 后。如果 e1不发生在 e2 前也不发生在 e2 后，我们就说 e1 和 e2 是并发的。</p>
+<p>在单一的独立的 goroutine 中先行发生的顺序即是程序中表达的顺序。</p>
+<p>当下面条件满足时，对变量 v 的读操作 r 是被允许看到对 v 的写操作 w 的：</p>
+<ol>
+<li>r 不先行发生于 w</li>
+<li>在 w 后 r 前没有对 v 的其他写操作</li>
+</ol>
+<p>为了保证对变量 v 的读操作 r 看到对 v 的写操作 w，要确保 w 是 r 允许看到的唯一写操作。即当下面条件满足时，r 被保证看到 w：</p>
+<ol>
+<li>w 先行发生于 r</li>
+<li>其他对共享变量 v 的写操作要么在 w 前，要么在 r 后。</li>
+</ol>
+<p>这一对条件比前面的条件更严格，需要没有其他写操作与 w 或 r 并发发生。</p>
+<p>单个 goroutine 中没有并发，所以上面两个定义是相同的：</p>
+<p>读操作 r 看到最近一次的写操作 w 写入 v 的值。</p>
+<p>当多个 goroutine 访问共享变量 v 时，它们必须使用同步事件来建立先行发生这一条件来保证读操作能看到需要的写操作。</p>
+<ul>
+<li>对变量 v 的零值初始化在内存模型中表现的与写操作相同。</li>
+<li>对大于 single machine word 的变量的读写操作表现的像以不确定顺序对多个 single machine word的变量的操作。</li>
+</ul>
+<p>64位机器的machine word为8byte(64位),对于小于等于single machine word 的变量的写操作是原子性的.</p>
+<p><a href="https://www.jianshu.com/p/5e44168f47a3">https://www.jianshu.com/p/5e44168f47a3</a></p>
 <h2 id="重排和可见性的问题">重排和可见性的问题</h2>
 <p>由于指令重排,代码并不一定会按照你写的顺序执行。</p>
 <p>举个例子,当两个 goroutine 同时对一个数据进行读写时,假设 goroutine g1 对这个变量进行写操作 w,goroutine g2 同时对这个变量进行读操作 r,那么,如果 g2 在执行读操作 r 的时候,已经看到了 g1 写操作 w 的结果,那么,也不意味着 g2 能看到在 w 之前的其它的写操作。这是一个反直观的结果,不过的确可能会存在。</p>

@@ -23,7 +23,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.88.1 with theme even" />
+<meta name="generator" content="Hugo 0.89.3 with theme even" />
 
 
 <link rel="canonical" href="/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADatomic%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
@@ -49,7 +49,7 @@
 <meta itemprop="name" content="并发原语atomic源码剖析">
 <meta itemprop="description" content="atomic 原理 在现在的系统中,write 的地址基本上都是对齐的(aligned)。 比如,32 位的操作系统、CPU 以及编译器,write 的地址总是 4 的"><meta itemprop="datePublished" content="2021-05-21T14:39:43+00:00" />
 <meta itemprop="dateModified" content="2021-05-21T14:39:43+00:00" />
-<meta itemprop="wordCount" content="2697">
+<meta itemprop="wordCount" content="3121">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="并发原语atomic源码剖析"/>
 <meta name="twitter:description" content="atomic 原理 在现在的系统中,write 的地址基本上都是对齐的(aligned)。 比如,32 位的操作系统、CPU 以及编译器,write 的地址总是 4 的"/>
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 2697 字 </span>
-          <span class="more-meta"> 预计阅读 6 分钟 </span>
+          <span class="more-meta"> 约 3121 字 </span>
+          <span class="more-meta"> 预计阅读 7 分钟 </span>
         
       </div>
     </header>
@@ -148,6 +148,11 @@
         <li><a href="#原理">原理</a></li>
         <li><a href="#原子操作">原子操作</a></li>
         <li><a href="#原子值">原子值</a></li>
+      </ul>
+    </li>
+    <li><a href="#应用cow模式">应用:COW模式</a>
+      <ul>
+        <li><a href="#配置中心">配置中心</a></li>
       </ul>
     </li>
     <li><a href="#参考">参考</a></li>
@@ -541,6 +546,37 @@
 <p>真正的赋值，无论是第一次，还是后续的 data 赋值，在 Store 内，只涉及到指针的原子操作，不涉及到数据拷贝；</p>
 <p>如果 <code>p.Store( /* */ )</code> 传入的不是指针，而是一个结构体呢？编译器识别到这种情况，编译期间就会多生成一段代码，用 runtime.convT2E  函数把结构体赋值转化成 eface （注意，这里会涉及到结构体数据的拷贝）；然后再调用 Value.Store 方法，所以就 Store 方法而言，行为还是不变；</p>
 <p>再思考一个问题：既然是指针的操作，为什么还要有个 for 循环，还要有个  CompareAndSwapPointer  ？这是因为 ifaceWords 是两个字段的结构体，初始赋值的时候，要赋值类型和数据指针两部分。<code>atomic.Value</code> 是服务所有类型，此类需求的，通用封装。</p>
+<h2 id="应用cow模式">应用:COW模式</h2>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201206224539.png" alt=""></p>
+<p>cfg 作为包级全局对象，在这个例子中被多个 goroutine 同时访问，因此这里存在 data race，会看到不连续的内存输出。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201206222309.png" alt=""></p>
+<p>我们想到使用 Go 同步语义解决:</p>
+<ul>
+<li>Mutex:锁粒度很大,不适合读多写少场景</li>
+<li>RWMutex:适合读多写少场景,性能依旧不够.</li>
+<li>Atomic:性能最好.</li>
+</ul>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201206225724.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201206225656.png" alt=""></p>
+<p>Benchmark 是出结果真相的真理，即便我们知道可能 Mutex vs Atomic 的情况里，Mutex 相对更重。因为涉及到更多的 goroutine 之间的上下文切换 pack blocking goroutine，以及唤醒 goroutine。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="k">go</span> <span class="nx">test</span> <span class="o">-</span><span class="nx">bench</span><span class="p">=.</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201206225753.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201206225818.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201206225827.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201206225835.png" alt=""></p>
+<h3 id="配置中心">配置中心</h3>
+<p>Copy-On-Write 思路在微服务降级或者 local cache 场景中经常使用。写时复制指的是，写操作时候复制全量老数据到一个新的对象中，携带上本次新写的数据，之后利用原子替换(atomic.Value)，更新调用者的变量。来完成无锁访问共享数据。</p>
+<p>因为COW策略会将原始数据复制一份,写入性能很低,适合读极多写少的场景.</p>
+<p>看如下代码,我们定期(每10s)利用loadconfig读取配置,然后存入config.在使用的时候,利用load读出来,再进行处理.</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201207215749.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201207220246.png" alt=""></p>
 <h2 id="参考">参考</h2>
 <p><a href="https://colobu.com/2017/07/11/dive-into-sync-Map">https://colobu.com/2017/07/11/dive-into-sync-Map</a></p>
 <p><a href="https://segmentfault.com/a/1190000015242373">https://segmentfault.com/a/1190000015242373</a></p>

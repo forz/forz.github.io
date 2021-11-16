@@ -16,14 +16,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
 
 
-<meta name="author" content="Forz" /><meta name="description" content="应用场景 Channel 的应用场景分为五种类型。 数据交流: 当作并发的 buffer 或者 queue,解决生产者 - 消费者问题。多个 goroutine 可以并发当作生产者(Producer)" /><meta name="keywords" content="Hugo, theme, even" />
+<meta name="author" content="Forz" /><meta name="description" content="channel channels 是一种类型安全的消息队列，充当两个 goroutine 之间的管道，将通过它同步的进行任意资源的交换。chan 控制 goroutines 交互的能力从而创建了 Go 同步机制。当创建的" /><meta name="keywords" content="Hugo, theme, even" />
 
 
 
 
 
 
-<meta name="generator" content="Hugo 0.88.1 with theme even" />
+<meta name="generator" content="Hugo 0.89.3 with theme even" />
 
 
 <link rel="canonical" href="/post/channel%E4%BD%BF%E7%94%A8%E5%AE%9E%E8%B7%B5/" />
@@ -40,19 +40,19 @@
 
 
 <meta property="og:title" content="Channel使用实践" />
-<meta property="og:description" content="应用场景 Channel 的应用场景分为五种类型。 数据交流: 当作并发的 buffer 或者 queue,解决生产者 - 消费者问题。多个 goroutine 可以并发当作生产者(Producer)" />
+<meta property="og:description" content="channel channels 是一种类型安全的消息队列，充当两个 goroutine 之间的管道，将通过它同步的进行任意资源的交换。chan 控制 goroutines 交互的能力从而创建了 Go 同步机制。当创建的" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/channel%E4%BD%BF%E7%94%A8%E5%AE%9E%E8%B7%B5/" /><meta property="article:section" content="post" />
 <meta property="article:published_time" content="2021-05-21T14:58:45+00:00" />
 <meta property="article:modified_time" content="2021-05-21T14:58:45+00:00" />
 
 <meta itemprop="name" content="Channel使用实践">
-<meta itemprop="description" content="应用场景 Channel 的应用场景分为五种类型。 数据交流: 当作并发的 buffer 或者 queue,解决生产者 - 消费者问题。多个 goroutine 可以并发当作生产者(Producer)"><meta itemprop="datePublished" content="2021-05-21T14:58:45+00:00" />
+<meta itemprop="description" content="channel channels 是一种类型安全的消息队列，充当两个 goroutine 之间的管道，将通过它同步的进行任意资源的交换。chan 控制 goroutines 交互的能力从而创建了 Go 同步机制。当创建的"><meta itemprop="datePublished" content="2021-05-21T14:58:45+00:00" />
 <meta itemprop="dateModified" content="2021-05-21T14:58:45+00:00" />
-<meta itemprop="wordCount" content="4310">
+<meta itemprop="wordCount" content="5472">
 <meta itemprop="keywords" content="Go," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Channel使用实践"/>
-<meta name="twitter:description" content="应用场景 Channel 的应用场景分为五种类型。 数据交流: 当作并发的 buffer 或者 queue,解决生产者 - 消费者问题。多个 goroutine 可以并发当作生产者(Producer)"/>
+<meta name="twitter:description" content="channel channels 是一种类型安全的消息队列，充当两个 goroutine 之间的管道，将通过它同步的进行任意资源的交换。chan 控制 goroutines 交互的能力从而创建了 Go 同步机制。当创建的"/>
 
 <!--[if lte IE 9]>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/go/"> Go </a>
             </div>
-          <span class="more-meta"> 约 4310 字 </span>
-          <span class="more-meta"> 预计阅读 9 分钟 </span>
+          <span class="more-meta"> 约 5472 字 </span>
+          <span class="more-meta"> 预计阅读 11 分钟 </span>
         
       </div>
     </header>
@@ -143,6 +143,15 @@
   <div class="post-toc-content always-active">
     <nav id="TableOfContents">
   <ul>
+    <li><a href="#channel">channel</a>
+      <ul>
+        <li><a href="#unbuffered-channels">Unbuffered Channels</a></li>
+        <li><a href="#buffered-channels">Buffered Channels</a></li>
+        <li><a href="#latencies-due-to-under-sized-buffer">Latencies due to under-sized buffer</a></li>
+        <li><a href="#go-concurrency-patterns">Go Concurrency Patterns</a></li>
+        <li><a href="#design-philosophy">Design Philosophy</a></li>
+      </ul>
+    </li>
     <li><a href="#应用场景">应用场景</a></li>
     <li><a href="#操作结果">操作结果</a></li>
     <li><a href="#使用反射操作-channel">使用反射操作 Channel</a></li>
@@ -155,7 +164,122 @@
   </div>
 </div>
     <div class="post-content">
-      <h2 id="应用场景">应用场景</h2>
+      <h2 id="channel">channel</h2>
+<p>channels 是一种类型安全的消息队列，充当两个 goroutine 之间的管道，将通过它同步的进行任意资源的交换。chan 控制 goroutines 交互的能力从而创建了 Go 同步机制。当创建的 chan 没有容量时，称为无缓冲通道。反过来，使用容量创建的 chan 称为缓冲通道。</p>
+<p>要了解通过 chan 交互的 goroutine 的同步行为是什么，我们需要知道通道的类型和状态。根据我们使用的是无缓冲通道还是缓冲通道，场景会有所不同，所以让我们单独讨论每个场景。</p>
+<h3 id="unbuffered-channels">Unbuffered Channels</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">ch</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>无缓冲 chan 没有容量，因此进行任何交换前需要两个 goroutine 同时准备好。当 goroutine 试图将一个资源发送到一个无缓冲的通道并且没有goroutine 等待接收该资源时，该通道将锁住发送 goroutine 并使其等待。当 goroutine 尝试从无缓冲通道接收，并且没有 goroutine 等待发送资源时，该通道将锁住接收 goroutine 并使其等待。</p>
+<p>无缓冲信道的本质是保证同步。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201208223304.png" alt=""></p>
+<p>第一个 goroutine 在发送消息 foo 之后被阻塞，因为还没有接收者准备好。规范中对这种行为进行了很好的解释：<a href="https://golang.org/ref/spec#Channel_types">https://golang.org/ref/spec#Channel_types</a></p>
+<p>“If the capacity is zero or absent, the channel is unbuffered and communication succeeds only when both a sender and receiver are ready.”</p>
+<p><a href="https://golang.org/doc/effective_go.html#channels">https://golang.org/doc/effective_go.html#channels</a></p>
+<p>“If the channel is unbuffered, the sender blocks until the receiver has received the value”</p>
+<ul>
+<li>Receive 先于 Send 发生。</li>
+<li>好处: 100% 保证能收到。</li>
+<li>代价: 延迟时间未知。</li>
+</ul>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201208223508.png" alt=""></p>
+<h3 id="buffered-channels">Buffered Channels</h3>
+<p>buffered channel 具有容量，因此其行为可能有点不同。当 goroutine 试图将资源发送到缓冲通道，而该通道已满时，该通道将锁住 goroutine并使其等待缓冲区可用。如果通道中有空间，发送可以立即进行，goroutine 可以继续。当goroutine 试图从缓冲通道接收数据，而缓冲通道为空时，该通道将锁住 goroutine 并使其等待资源被发送。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201208223541.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201208223552.png" alt=""></p>
+<h3 id="latencies-due-to-under-sized-buffer">Latencies due to under-sized buffer</h3>
+<p>我们在 chan 创建过程中定义的缓冲区大小可能会极大地影响性能。我将使用密集使用 chan 的扇出模式来查看不同缓冲区大小的影响。在我们的基准测试中，一个 producer 将在通道中注入百万个整数元素，而5个 worker 将读取并将它们追加到一个名为 total 的结果变量中。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201208223639.png" alt=""></p>
+<ul>
+<li>Send 先于 Receive 发生。</li>
+<li>好处: 延迟更小。</li>
+<li>代价: 不保证数据到达，越大的 buffer，越小的保障到达。buffer = 1 时，给你延迟一个消息的保障。</li>
+</ul>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201208223649.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201208223700.png" alt=""></p>
+<h3 id="go-concurrency-patterns">Go Concurrency Patterns</h3>
+<ul>
+<li>Timing out</li>
+<li>Moving on</li>
+<li>Pipeline</li>
+<li>Fan-out, Fan-in</li>
+<li>Cancellation
+<ul>
+<li>Close 先于 Receive 发生(类似 Buffered)。</li>
+<li>不需要传递数据，或者传递 nil。</li>
+<li>非常适合取消和超时控制。</li>
+</ul>
+</li>
+<li>Contex</li>
+</ul>
+<p><a href="https://blog.golang.org/concurrency-timeouts">https://blog.golang.org/concurrency-timeouts</a>
+<a href="https://blog.golang.org/pipelines">https://blog.golang.org/pipelines</a>
+<a href="https://talks.golang.org/2013/advconc.slide#1">https://talks.golang.org/2013/advconc.slide#1</a>
+<a href="https://github.com/go-kratos/kratos/tree/master/pkg/sync">https://github.com/go-kratos/kratos/tree/master/pkg/sync</a></p>
+<h3 id="design-philosophy">Design Philosophy</h3>
+<ul>
+<li>If any given Send on a channel CAN cause the sending goroutine to block:
+<ul>
+<li>Not allowed to use a Buffered channel larger than 1.
+<ul>
+<li>Buffers larger than 1 must have reason/measurements.</li>
+</ul>
+</li>
+<li>Must know what happens when the sending goroutine blocks.</li>
+</ul>
+</li>
+<li>If any given Send on a channel WON’T cause the sending goroutine to block:
+<ul>
+<li>You have the exact number of buffers for each send.
+<ul>
+<li>Fan Out pattern</li>
+</ul>
+</li>
+<li>You have the buffer measured for max capacity.
+<ul>
+<li>Drop pattern
+<ul>
+<li>丢弃数据</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>Less is more with buffers.
+<ul>
+<li>Don’t think about performance when thinking about buffers.
+<ul>
+<li>不要把channel buffer 的size大小当做性能提升,它只是缓冲的变多了,阻塞延迟变小了.吞吐量依靠多个goroutine来消费</li>
+</ul>
+</li>
+<li>Buffers can help to reduce blocking latency between signaling.
+<ul>
+<li>buffer只能减少阻塞延迟.</li>
+<li>Reducing blocking latency towards zero does not necessarily mean better throughput.
+<ul>
+<li>阻塞延迟变少不意味吞吐提升</li>
+</ul>
+</li>
+<li>If a buffer of one is giving you good enough throughput then keep it.
+<ul>
+<li>channel的size,最好依据压测来得出.</li>
+</ul>
+</li>
+<li>Question buffers that are larger than one and measure for size.</li>
+<li>Find the smallest buffer possible that provides good enough throughput.</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<h2 id="应用场景">应用场景</h2>
 <p>Channel 的应用场景分为五种类型。</p>
 <ol>
 <li>数据交流: 当作并发的 buffer 或者 queue,解决生产者 - 消费者问题。多个 goroutine 可以并发当作生产者(Producer)和消费者(Consumer)。</li>
