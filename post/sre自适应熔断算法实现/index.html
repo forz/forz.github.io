@@ -16,7 +16,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
 
 
-<meta name="author" content="Forz" /><meta name="description" content="前言 任何一个服务，都要保护自己，不被依赖的外部服务响应慢/不响应拖死: 需要有熔断保护 如果可以的话，可以返回之前缓存的数据 Hystrix-Go 熔断算法的算法核心" /><meta name="keywords" content="Hugo, theme, even" />
+<meta name="author" content="Forz" /><meta name="description" content="前言 断路器(Circuit Breakers): 为了限制操作的持续时间，我们可以使用超时，超时可以防止挂起操作并保证系统可以响应。因为我们处于高度动态的环境中，" /><meta name="keywords" content="Hugo, theme, even" />
 
 
 
@@ -40,19 +40,19 @@
 
 
 <meta property="og:title" content="SRE自适应熔断算法实现" />
-<meta property="og:description" content="前言 任何一个服务，都要保护自己，不被依赖的外部服务响应慢/不响应拖死: 需要有熔断保护 如果可以的话，可以返回之前缓存的数据 Hystrix-Go 熔断算法的算法核心" />
+<meta property="og:description" content="前言 断路器(Circuit Breakers): 为了限制操作的持续时间，我们可以使用超时，超时可以防止挂起操作并保证系统可以响应。因为我们处于高度动态的环境中，" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/sre%E8%87%AA%E9%80%82%E5%BA%94%E7%86%94%E6%96%AD%E7%AE%97%E6%B3%95%E5%AE%9E%E7%8E%B0/" /><meta property="article:section" content="post" />
 <meta property="article:published_time" content="2021-03-21T10:36:35+00:00" />
 <meta property="article:modified_time" content="2021-03-21T10:36:35+00:00" />
 
 <meta itemprop="name" content="SRE自适应熔断算法实现">
-<meta itemprop="description" content="前言 任何一个服务，都要保护自己，不被依赖的外部服务响应慢/不响应拖死: 需要有熔断保护 如果可以的话，可以返回之前缓存的数据 Hystrix-Go 熔断算法的算法核心"><meta itemprop="datePublished" content="2021-03-21T10:36:35+00:00" />
+<meta itemprop="description" content="前言 断路器(Circuit Breakers): 为了限制操作的持续时间，我们可以使用超时，超时可以防止挂起操作并保证系统可以响应。因为我们处于高度动态的环境中，"><meta itemprop="datePublished" content="2021-03-21T10:36:35+00:00" />
 <meta itemprop="dateModified" content="2021-03-21T10:36:35+00:00" />
-<meta itemprop="wordCount" content="3762">
+<meta itemprop="wordCount" content="3959">
 <meta itemprop="keywords" content="服务治理," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="SRE自适应熔断算法实现"/>
-<meta name="twitter:description" content="前言 任何一个服务，都要保护自己，不被依赖的外部服务响应慢/不响应拖死: 需要有熔断保护 如果可以的话，可以返回之前缓存的数据 Hystrix-Go 熔断算法的算法核心"/>
+<meta name="twitter:description" content="前言 断路器(Circuit Breakers): 为了限制操作的持续时间，我们可以使用超时，超时可以防止挂起操作并保证系统可以响应。因为我们处于高度动态的环境中，"/>
 
 <!--[if lte IE 9]>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
@@ -132,7 +132,7 @@
         <div class="post-category">
             <a href="/categories/%E6%9C%8D%E5%8A%A1%E6%B2%BB%E7%90%86/"> 服务治理 </a>
             </div>
-          <span class="more-meta"> 约 3762 字 </span>
+          <span class="more-meta"> 约 3959 字 </span>
           <span class="more-meta"> 预计阅读 8 分钟 </span>
         
       </div>
@@ -160,12 +160,13 @@
 </div>
     <div class="post-content">
       <h2 id="前言">前言</h2>
-<p>任何一个服务，都要保护自己，不被依赖的外部服务响应慢/不响应拖死:</p>
-<ol>
-<li>需要有熔断保护</li>
-<li>如果可以的话，可以返回之前缓存的数据</li>
-</ol>
-<p>Hystrix-Go 熔断算法的算法核心是：当请求失败比率达到一定阈值之后，熔断器开启，并休眠一段时间（由配置决定），这段休眠期过后，熔断器将处于半开状态，在此状态下将试探性的放过一部分流量，如果这部分流量调用成功后，再次将熔断器关闭，否则熔断器继续保持开启并进入下一轮休眠周期。</p>
+<p>断路器(Circuit Breakers): 为了限制操作的持续时间，我们可以使用超时，超时可以防止挂起操作并保证系统可以响应。因为我们处于高度动态的环境中，几乎不可能确定在每种情况下都能正常工作的准确的时间限制。断路器以现实世界的电子元件命名，因为它们的行为是都是相同的。断路器在分布式系统中非常有用，因为重复的故障可能会导致雪球效应，并使整个系统崩溃。</p>
+<ul>
+<li>服务依赖的资源出现大量错误。</li>
+<li>某个用户超过资源配额时，后端任务会快速拒绝请求，返回“配额不足”的错误，但是拒绝回复仍然会消耗一定资源。有可能后端忙着不停发送拒绝请求，导致过载。</li>
+</ul>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210113223815.png" alt=""></p>
+<p>这类熔断算法的算法核心是：当请求失败比率达到一定阈值之后，熔断器开启，并休眠一段时间（由配置决定），这段休眠期过后，熔断器将处于半开状态，在此状态下将试探性的放过一部分流量，如果这部分流量调用成功后，再次将熔断器关闭，否则熔断器继续保持开启并进入下一轮休眠周期。</p>
 <p>但这个熔断算法有一个问题，过于一刀切。是否可以做到在熔断器开启状态下（但是后端未 Shutdown）仍然可以放行少部分流量呢？当然，这里有个前提，需要看后端此时还能够接受多少流量。下一步我们来看看 Google 的策略实现。</p>
 <h2 id="算法原理">算法原理</h2>
 <p>We implemented client-side throttling through a technique we call adaptive throttling：该算法称为（客户端）自适应限流。</p>
