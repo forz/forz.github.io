@@ -16,7 +16,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
 
 
-<meta name="author" content="Forz" /><meta name="description" content="前言 传统的限流算法，如漏桶、令牌桶等，他们的缺点是单一限流和无差别限流。此外，系统需要先做压测，拿到一个初始的限流参考值，超过这个值才启动限" /><meta name="keywords" content="Hugo, theme, even" />
+<meta name="author" content="Forz" /><meta name="description" content="算法原理 TCP BBR BBR一种拥塞控制算法，主动探测出站数据（带宽）和往返时间（round-trip time，RTT），不断调整发送速率的一种算法。" /><meta name="keywords" content="Hugo, theme, even" />
 
 
 
@@ -40,19 +40,19 @@
 
 
 <meta property="og:title" content="BBR自适应限流算法实现" />
-<meta property="og:description" content="前言 传统的限流算法，如漏桶、令牌桶等，他们的缺点是单一限流和无差别限流。此外，系统需要先做压测，拿到一个初始的限流参考值，超过这个值才启动限" />
+<meta property="og:description" content="算法原理 TCP BBR BBR一种拥塞控制算法，主动探测出站数据（带宽）和往返时间（round-trip time，RTT），不断调整发送速率的一种算法。" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/bbr%E8%87%AA%E9%80%82%E5%BA%94%E9%99%90%E6%B5%81%E7%AE%97%E6%B3%95%E5%AE%9E%E7%8E%B0/" /><meta property="article:section" content="post" />
 <meta property="article:published_time" content="2021-11-14T17:28:43+00:00" />
 <meta property="article:modified_time" content="2021-11-14T17:28:43+00:00" />
 
 <meta itemprop="name" content="BBR自适应限流算法实现">
-<meta itemprop="description" content="前言 传统的限流算法，如漏桶、令牌桶等，他们的缺点是单一限流和无差别限流。此外，系统需要先做压测，拿到一个初始的限流参考值，超过这个值才启动限"><meta itemprop="datePublished" content="2021-11-14T17:28:43+00:00" />
+<meta itemprop="description" content="算法原理 TCP BBR BBR一种拥塞控制算法，主动探测出站数据（带宽）和往返时间（round-trip time，RTT），不断调整发送速率的一种算法。"><meta itemprop="datePublished" content="2021-11-14T17:28:43+00:00" />
 <meta itemprop="dateModified" content="2021-11-14T17:28:43+00:00" />
-<meta itemprop="wordCount" content="9794">
+<meta itemprop="wordCount" content="9726">
 <meta itemprop="keywords" content="服务治理," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="BBR自适应限流算法实现"/>
-<meta name="twitter:description" content="前言 传统的限流算法，如漏桶、令牌桶等，他们的缺点是单一限流和无差别限流。此外，系统需要先做压测，拿到一个初始的限流参考值，超过这个值才启动限"/>
+<meta name="twitter:description" content="算法原理 TCP BBR BBR一种拥塞控制算法，主动探测出站数据（带宽）和往返时间（round-trip time，RTT），不断调整发送速率的一种算法。"/>
 
 <!--[if lte IE 9]>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
@@ -132,7 +132,7 @@
         <div class="post-category">
             <a href="/categories/%E6%9C%8D%E5%8A%A1%E6%B2%BB%E7%90%86/"> 服务治理 </a>
             </div>
-          <span class="more-meta"> 约 9794 字 </span>
+          <span class="more-meta"> 约 9726 字 </span>
           <span class="more-meta"> 预计阅读 20 分钟 </span>
         
       </div>
@@ -143,9 +143,9 @@
   <div class="post-toc-content always-active">
     <nav id="TableOfContents">
   <ul>
-    <li><a href="#前言">前言</a></li>
     <li><a href="#算法原理">算法原理</a>
       <ul>
+        <li><a href="#tcp-bbr">TCP BBR</a></li>
         <li><a href="#背景">背景</a></li>
         <li><a href="#原理">原理</a></li>
       </ul>
@@ -175,13 +175,18 @@
   </div>
 </div>
     <div class="post-content">
-      <h2 id="前言">前言</h2>
-<p>传统的限流算法，如漏桶、令牌桶等，他们的缺点是单一限流和无差别限流。此外，系统需要先做压测，拿到一个初始的限流参考值，超过这个值才启动限流机制。</p>
-<p>而 BBR 限流的思路 和传统方式有很大区别：</p>
-<p>TCP BBR 拥塞控制算法 的思想给了我们一个很大的启发。</p>
-<p>我们应该根据系统能够处理的请求，和允许进来的请求，来做平衡，而不是根据一个间接的指标（系统 load）来做限流。最终我们追求的目标是 在系统不被拖垮的情况下，提高系统的吞吐率，而不是 load 一定要到低于某个阈值。如果我们还是按照固有的思维，超过特定的 load 就禁止流量进入，系统 load 恢复就放开流量，这样做的结果是无论我们怎么调参数，调比例，都是按照果来调节因，都无法取得良好的效果。</p>
-<p>简言之，自适应限流就是根据当前负载情况，来嗅探 load 的值，尽可能提高系统的吞吐量。</p>
-<h2 id="算法原理">算法原理</h2>
+      <h2 id="算法原理">算法原理</h2>
+<h3 id="tcp-bbr">TCP BBR</h3>
+<p>BBR一种拥塞控制算法，主动探测出站数据（带宽）和往返时间（round-trip time，RTT），不断调整发送速率的一种算法。</p>
+<p>基于丢包拥塞算法与BBR拥塞算法性能图示</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211117182306.png" alt=""></p>
+<p>BDP带宽延时积</p>
+<p>BDP(Bandwidth-Delay Product)，带宽延时积也就是带宽和延迟的乘积，表示允许通过的最大流量（数据）。</p>
+<p>公式：BDP = min(RTT) * max(bandwidth)</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211117182444.png" alt=""></p>
+<p>应用到Sentinel系统自适应限流中：</p>
+<p>公式：系统容量（BDP）= maxQps * minRt</p>
+<p>小结：图示中红色区域面积即Sentinle中的系统容量，长度为最小RT，宽带为最大Qps，当前流量超过系统容量时触发自适应限流。</p>
 <h3 id="背景">背景</h3>
 <p>系统自适应限流从整体维度对应用入口流量进行控制，结合 应用的 Load、CPU 使用率、总体平均 RT、入口 QPS 和并发线程数 等几个维度的监控指标，通过自适应的流控策略，让系统的入口流量和系统的负载达到一个平衡，让系统尽可能跑在最大吞吐量的同时保证系统整体的稳定性。</p>
 <p>在开始之前，我们先了解一下系统保护的目的：</p>
@@ -1829,6 +1834,7 @@
 <p><a href="https://www.haohongfan.com/posts/2020-07-05-bbr/">限流器系列(3)&ndash;自适应限流</a></p>
 <p><a href="https://pandaychen.github.io/2020/05/12/KRATOS-METRICS-ANALYSIS-2/">Kratos 源码分析：理解 Kratos 的数据统计类型 Metrics（二）</a></p>
 <p><a href="https://pandaychen.github.io/2020/04/12/KRATOS-METRICS-ANALYSIS/">Kratos 源码分析：理解 Kratos 的数据统计类型 Metrics（一）</a></p>
+<p><a href="https://cloud.tencent.com/developer/article/1760199">Sentinel系统自适应限流【原理源码】</a></p>
 
     </div>
 

@@ -16,7 +16,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
 
 
-<meta name="author" content="Forz" /><meta name="description" content="动态WRR算法(权重轮询) Kratos 在传统的 Nginx-WRR 算法 的基础上，为加权轮询算法增加了 动态调节权重值 ，用户可以在为每一个 Backend 先配置一个初始的权重分，之后算法" /><meta name="keywords" content="Hugo, theme, even" />
+<meta name="author" content="Forz" /><meta name="description" content="动态WRR算法(权重轮询) 数据中心内部的负载均衡 在理想情况下，某个服务的负载会完全均匀地分发给所有的后端任务。在任何时刻，最忙和最不忙的节点" /><meta name="keywords" content="Hugo, theme, even" />
 
 
 
@@ -40,19 +40,19 @@
 
 
 <meta property="og:title" content="P2C&#43;EWMA负载均衡算法实现" />
-<meta property="og:description" content="动态WRR算法(权重轮询) Kratos 在传统的 Nginx-WRR 算法 的基础上，为加权轮询算法增加了 动态调节权重值 ，用户可以在为每一个 Backend 先配置一个初始的权重分，之后算法" />
+<meta property="og:description" content="动态WRR算法(权重轮询) 数据中心内部的负载均衡 在理想情况下，某个服务的负载会完全均匀地分发给所有的后端任务。在任何时刻，最忙和最不忙的节点" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/p2c&#43;ewma%E8%B4%9F%E8%BD%BD%E5%9D%87%E8%A1%A1%E7%AE%97%E6%B3%95%E5%AE%9E%E7%8E%B0/" /><meta property="article:section" content="post" />
 <meta property="article:published_time" content="2021-01-24T11:29:23+00:00" />
 <meta property="article:modified_time" content="2021-01-24T11:29:23+00:00" />
 
 <meta itemprop="name" content="P2C&#43;EWMA负载均衡算法实现">
-<meta itemprop="description" content="动态WRR算法(权重轮询) Kratos 在传统的 Nginx-WRR 算法 的基础上，为加权轮询算法增加了 动态调节权重值 ，用户可以在为每一个 Backend 先配置一个初始的权重分，之后算法"><meta itemprop="datePublished" content="2021-01-24T11:29:23+00:00" />
+<meta itemprop="description" content="动态WRR算法(权重轮询) 数据中心内部的负载均衡 在理想情况下，某个服务的负载会完全均匀地分发给所有的后端任务。在任何时刻，最忙和最不忙的节点"><meta itemprop="datePublished" content="2021-01-24T11:29:23+00:00" />
 <meta itemprop="dateModified" content="2021-01-24T11:29:23+00:00" />
-<meta itemprop="wordCount" content="8304">
+<meta itemprop="wordCount" content="8841">
 <meta itemprop="keywords" content="服务治理," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="P2C&#43;EWMA负载均衡算法实现"/>
-<meta name="twitter:description" content="动态WRR算法(权重轮询) Kratos 在传统的 Nginx-WRR 算法 的基础上，为加权轮询算法增加了 动态调节权重值 ，用户可以在为每一个 Backend 先配置一个初始的权重分，之后算法"/>
+<meta name="twitter:description" content="动态WRR算法(权重轮询) 数据中心内部的负载均衡 在理想情况下，某个服务的负载会完全均匀地分发给所有的后端任务。在任何时刻，最忙和最不忙的节点"/>
 
 <!--[if lte IE 9]>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/%E6%9C%8D%E5%8A%A1%E6%B2%BB%E7%90%86/"> 服务治理 </a>
             </div>
-          <span class="more-meta"> 约 8304 字 </span>
-          <span class="more-meta"> 预计阅读 17 分钟 </span>
+          <span class="more-meta"> 约 8841 字 </span>
+          <span class="more-meta"> 预计阅读 18 分钟 </span>
         
       </div>
     </header>
@@ -158,7 +158,7 @@
         <li><a href="#衰减函数调整β值">衰减函数调整β值</a></li>
       </ul>
     </li>
-    <li><a href="#算法实现">算法实现</a></li>
+    <li><a href="#算法原理">算法原理</a></li>
     <li><a href="#代码分析">代码分析</a>
       <ul>
         <li><a href="#全局变量--init">全局变量 &amp; init</a></li>
@@ -174,6 +174,39 @@
 </div>
     <div class="post-content">
       <h2 id="动态wrr算法权重轮询">动态WRR算法(权重轮询)</h2>
+<p>数据中心内部的负载均衡</p>
+<p>在理想情况下，某个服务的负载会完全均匀地分发给所有的后端任务。在任何时刻，最忙和最不忙的节点永远消耗同样数量的CPU。</p>
+<p>目标：</p>
+<ul>
+<li>均衡的流量分发。</li>
+<li>可靠的识别异常节点。</li>
+<li>scale-out，增加同质节点扩容。</li>
+<li>减少错误，提高可用性。</li>
+</ul>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210117220020.png" alt=""></p>
+<p>我们发现在 backend 之间的 load 差异比较大：</p>
+<ul>
+<li>
+<p>每个请求的处理成本不同。</p>
+</li>
+<li>
+<p>物理机环境的差异:</p>
+<ul>
+<li>服务器很难强同质性。</li>
+<li>存在共享资源争用（内存缓存、带宽、IO等）。</li>
+</ul>
+</li>
+<li>
+<p>性能因素:</p>
+<ul>
+<li>FullGC。</li>
+<li>JVM JIT。</li>
+</ul>
+</li>
+</ul>
+<p>参考JSQ（最闲轮训）负载均衡算法带来的问题，缺乏的是服务端全局视图，因此我们目标需要综合考虑：负载+可用性。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210117221339.png" alt=""></p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210117221353.png" alt=""></p>
 <p>Kratos 在传统的 Nginx-WRR 算法 的基础上，为加权轮询算法增加了 动态调节权重值 ，用户可以在为每一个 Backend 先配置一个初始的权重分，之后算法会根据 Backend 节点 CPU、延迟、服务端错误率、客户端错误率动态打分，（每一次 RPC 调用后）在将打分乘用户自定义的初始权重分得到最后的权重值。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211116213103.png" alt=""></p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211116213336.png" alt=""></p>
@@ -326,7 +359,14 @@
 <p>衰减系数为600时的走势图，可以看出在抖动发生时，仍然可以迅速感知，后续恢复时的衰减速度跟上面结果一样慢</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210124195938.png" alt=""></p>
 <p>衰减系数为50时的走势图，可以看出在抖动发生时，可以非常迅速的感知，后续恢复时的衰减速度跟上面结果一样快</p>
-<h2 id="算法实现">算法实现</h2>
+<h2 id="算法原理">算法原理</h2>
+<p>参考了《The power of two choices in randomized load balancing》的思路，我们使用 the choice-of-2 算法，随机选取的两个节点进行打分，选择更优的节点:</p>
+<ul>
+<li>选择 backend：CPU，client：health、inflight、latency 作为指标，使用一个简单的线性方程进行打分。</li>
+<li>对新启动的节点使用常量惩罚值(penalty)，以及使用探针方式最小化放量，进行预热。</li>
+<li>打分比较低的节点，避免进入“永久黑名单”而无法恢复，使用统计衰减的方式，让节点指标逐渐恢复到初始状态(即默认值)。
+指标计算结合 moving average，使用时间衰减，计算vt = v(t-1) <em>β + at</em> (1-β) ，β为若干次幂的倒数即: Math.Exp((-span) / 600ms)</li>
+</ul>
 <p>本算法通过随机选择两个 node 选择优胜者来避免羊群效应，并通过 ewma（指数加权移动平均法） 尽量获取服务端的实时状态。</p>
 <p>针对 服务端 的指标： 服务端获取最近 500ms 内的 CPU 使用率（针对容器场景：需要将 cgroup 设置的限制考虑进去，并除于 CPU 核心数），并将 CPU 使用率乘与 1000 后塞入每次 gRPC 请求中的的 Trailer 中夹带返回</p>
 <p>针对 客户端 的指标：</p>
