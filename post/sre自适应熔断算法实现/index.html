@@ -23,7 +23,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.89.3 with theme even" />
+<meta name="generator" content="Hugo 0.89.4 with theme even" />
 
 
 <link rel="canonical" href="/post/sre%E8%87%AA%E9%80%82%E5%BA%94%E7%86%94%E6%96%AD%E7%AE%97%E6%B3%95%E5%AE%9E%E7%8E%B0/" />
@@ -49,7 +49,7 @@
 <meta itemprop="name" content="SRE自适应熔断算法实现">
 <meta itemprop="description" content="前言 断路器(Circuit Breakers): 为了限制操作的持续时间，我们可以使用超时，超时可以防止挂起操作并保证系统可以响应。因为我们处于高度动态的环境中，"><meta itemprop="datePublished" content="2021-03-21T10:36:35+00:00" />
 <meta itemprop="dateModified" content="2021-03-21T10:36:35+00:00" />
-<meta itemprop="wordCount" content="3959">
+<meta itemprop="wordCount" content="5017">
 <meta itemprop="keywords" content="服务治理," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="SRE自适应熔断算法实现"/>
 <meta name="twitter:description" content="前言 断路器(Circuit Breakers): 为了限制操作的持续时间，我们可以使用超时，超时可以防止挂起操作并保证系统可以响应。因为我们处于高度动态的环境中，"/>
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/%E6%9C%8D%E5%8A%A1%E6%B2%BB%E7%90%86/"> 服务治理 </a>
             </div>
-          <span class="more-meta"> 约 3959 字 </span>
-          <span class="more-meta"> 预计阅读 8 分钟 </span>
+          <span class="more-meta"> 约 5017 字 </span>
+          <span class="more-meta"> 预计阅读 11 分钟 </span>
         
       </div>
     </header>
@@ -153,6 +153,12 @@
     <li><a href="#marksuccess--markfailed">MarkSuccess &amp; MarkFailed</a></li>
     <li><a href="#熔断判定-allow">熔断判定: Allow</a></li>
     <li><a href="#一般使用">一般使用</a></li>
+    <li><a href="#降级策略">降级策略</a>
+      <ul>
+        <li><a href="#降级方案">降级方案</a></li>
+        <li><a href="#降级---case-study">降级 - Case Study</a></li>
+      </ul>
+    </li>
     <li><a href="#参考">参考</a></li>
   </ul>
 </nav>
@@ -769,7 +775,55 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h2 id="参考">参考</h2>
+</div><h2 id="降级策略">降级策略</h2>
+<p>配置自动熔断降级前，首先我们需要识别出可能出现不稳定的服务，然后判断其是否可降级。降级处理通常是快速失败，当然我们业可以自定义降级处理结果（Fallback），例如：尝试包装返回默认结果（兜底降级），返回上一次请求的缓存结果（时效性降级），包装返回处理失败的提示结果等。</p>
+<p>对弱依赖和次要功能的降级通常是人工推送开关来完成的，而Sentinel的熔断降级主要是在“调用端”自动判断并执行的，Sentinel基于规则中配置的时间窗口内的平均响应时间、错误比例、错误数等统计指标来执行自动熔断降级。</p>
+<p>举个例子：我们系统同时支持“余额支付”和“银行卡支付”，这两个功能对应的接口默认在相同应用的同一线程池中，任何一方出现RT抖动和大量超时都可能请求积压并导致线程池被耗尽。假设从业务角度来看“余额支付”的比例更高，保障的优先级也更高。那么我们可以在检查到 “银行卡支付”接口（依赖第三方，不稳定）中RT持续上升或者发生大量异常时对其执行“自动熔断降级”（前提是不能导致数据不一致等影响业务流程的问题），这样优先保证“余额支付”的功能可以继续正常使用。</p>
+<p>通过降级回复来减少工作量，或者丢弃不重要的请求。而且需要了解哪些流量可以降级，并且有能力区分不同的请求。我们通常提供降低回复的质量来答复减少所需的计算量或者时间。我们自动降级通常需要考虑几个点：</p>
+<ul>
+<li>确定具体采用哪个指标作为流量评估和优雅降级的决定性指标(如，CPU、延迟、队列长度、线程数量、错误等)。</li>
+<li>当服务进入降级模式时，需要执行什么动作？
+<ul>
+<li>从远程缓存返回数据</li>
+<li>从本地缓存返回数据</li>
+<li>返回空回复</li>
+</ul>
+</li>
+<li>流量抛弃或者优雅降级应该在服务的哪一层实现？是否需要在整个服务的每一层都实现，还是可以选择某个高层面的关键节点来实现？</li>
+</ul>
+<p>同时我们要考虑一下几点：</p>
+<ul>
+<li>优雅降级不应该被经常触发 - 通常触发条件显示了容量规划的失误，或者是意外的负载。</li>
+<li>演练，代码平时不会触发和使用，需要定期针对一小部分的流量进行演练，保证模式的正常。</li>
+<li>应该足够简单。</li>
+</ul>
+<h3 id="降级方案">降级方案</h3>
+<p>降级本质为: 提供有损服务。</p>
+<ul>
+<li>UI 模块化，非核心模块降级。
+<ul>
+<li>BFF 层聚合 API，模块降级。</li>
+</ul>
+</li>
+<li>页面上一次缓存副本。</li>
+<li>默认值、热门推荐等。</li>
+<li>流量拦截 + 定期数据缓存(过期副本策略)。
+处理策略</li>
+<li>页面降级、延迟服务、写/读降级、缓存降级</li>
+<li>抛异常、返回约定协议、Mock 数据、Fallback 处理</li>
+</ul>
+<h3 id="降级---case-study">降级 - Case Study</h3>
+<ul>
+<li>客户端解析协议失败，app 奔溃。</li>
+<li>客户端部分协议不兼容，导致页面失败。</li>
+<li>local cache 数据源缓存，发版失效 + 依赖接口故障，引起的白屏。
+<ul>
+<li>local cache 在 remote cache缓存一份,双保险.</li>
+</ul>
+</li>
+<li>没有 playbook，导致的 MTTR 上升。</li>
+</ul>
+<h2 id="参考">参考</h2>
 <p><a href="https://pandaychen.github.io/2020/07/12/KRATOS-BREAKER-ANALYSIS/">Kratos 源码分析：熔断器 Breaker</a></p>
 
     </div>
