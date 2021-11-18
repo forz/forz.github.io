@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>分布式限流实现 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="为什么要分布式限流 其实大多数场景下你并不需要使用集群限流，单机限流就足够了。仔细思考其实只有几种情况下可能需要使用到集群限流： 当想要配置单机" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.89.4 with theme even" />
+
+
+<link rel="canonical" href="/post/%E5%88%86%E5%B8%83%E5%BC%8F%E9%99%90%E6%B5%81%E5%AE%9E%E7%8E%B0/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.98f8e47918247c097fa26317cbb567fe9f05503485bf08d8547f5579543303b1.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="分布式限流实现" />
+<meta property="og:description" content="为什么要分布式限流 其实大多数场景下你并不需要使用集群限流，单机限流就足够了。仔细思考其实只有几种情况下可能需要使用到集群限流： 当想要配置单机" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/%E5%88%86%E5%B8%83%E5%BC%8F%E9%99%90%E6%B5%81%E5%AE%9E%E7%8E%B0/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-05-21T15:32:09+00:00" />
+<meta property="article:modified_time" content="2021-05-21T15:32:09+00:00" />
+
+<meta itemprop="name" content="分布式限流实现">
+<meta itemprop="description" content="为什么要分布式限流 其实大多数场景下你并不需要使用集群限流，单机限流就足够了。仔细思考其实只有几种情况下可能需要使用到集群限流： 当想要配置单机"><meta itemprop="datePublished" content="2021-05-21T15:32:09+00:00" />
+<meta itemprop="dateModified" content="2021-05-21T15:32:09+00:00" />
+<meta itemprop="wordCount" content="6752">
+<meta itemprop="keywords" content="服务治理," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="分布式限流实现"/>
+<meta name="twitter:description" content="为什么要分布式限流 其实大多数场景下你并不需要使用集群限流，单机限流就足够了。仔细思考其实只有几种情况下可能需要使用到集群限流： 当想要配置单机"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">Forz Blog</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+      <a class="menu-item-link" href="/">Home</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/post/">Archives</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/tags/">Tags</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/categories/">Categories</a>
+    </li>
+  </ul>
+</nav><div class="docsearch-input__container">
+  <input type="search" class="docsearch-input" placeholder="Search" />
+</div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">分布式限流实现</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-05-21 </span>
+        <div class="post-category">
+            <a href="/categories/%E6%9C%8D%E5%8A%A1%E6%B2%BB%E7%90%86/"> 服务治理 </a>
+            </div>
+          <span class="more-meta"> 约 6752 字 </span>
+          <span class="more-meta"> 预计阅读 14 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#为什么要分布式限流">为什么要分布式限流</a></li>
+    <li><a href="#限流方案">限流方案</a>
+      <ul>
+        <li><a href="#服务端限流-vs-客户端限流-vs-网关限流">服务端限流 vs 客户端限流 vs 网关限流</a></li>
+        <li><a href="#服务端限流-1">服务端限流</a></li>
+        <li><a href="#限流组件">限流组件</a></li>
+        <li><a href="#从架构维度考虑限流设计">从架构维度考虑限流设计</a></li>
+      </ul>
+    </li>
+    <li><a href="#限流粒度">限流粒度</a>
+      <ul>
+        <li><a href="#服务粒度">服务粒度</a></li>
+      </ul>
+    </li>
+    <li><a href="#服务端限流方案">服务端限流方案</a>
+      <ul>
+        <li><a href="#qps统一分配">QPS统一分配</a></li>
+        <li><a href="#redis令牌桶">Redis令牌桶</a></li>
+        <li><a href="#发票服务器">发票服务器</a></li>
+      </ul>
+    </li>
+    <li><a href="#redis令牌桶实现">Redis令牌桶实现</a>
+      <ul>
+        <li><a href="#原理">原理</a></li>
+        <li><a href="#代码">代码</a></li>
+      </ul>
+    </li>
+    <li><a href="#限流策略">限流策略</a>
+      <ul>
+        <li><a href="#限流---重要性">限流 - 重要性</a></li>
+        <li><a href="#限流---case-study">限流 - Case Study</a></li>
+      </ul>
+    </li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="为什么要分布式限流">为什么要分布式限流</h2>
+<p>其实大多数场景下你并不需要使用集群限流，单机限流就足够了。仔细思考其实只有几种情况下可能需要使用到集群限流：</p>
+<ol>
+<li>
+<p>当想要配置单机QPS限制 &lt;1 时单机模式是无法满足的，只能使用集群限流模式来限制集群的总QPS。比如有个性能极差的接口单机最多只能扛住0.5QPS，部署了10台机器那么需要将集群最大容量是5 QPS，当然这个例子有点极端。再比如我们希望某个客户调用某个接口总的最大QPS为10，但是实际我们部署了20台机器，这种情况是真实存在的；</p>
+</li>
+<li>
+<p>如果单机限流阈值是10 QPS，部署了3个节点，理论上集群的总QPS可以达到30，但是实际上由于流量不均匀导致集群总QPS还没有达到30就已经触发限流了。很多人会说这不合理，但我认为需要按真实情况来分析。如果这个 “10QPS”是根据容量规划的系统承载能力推算出来的阈值（或者说该接口请求如果超过10 QPS就可能会导致系统崩溃），那这个限流的结果就是让人满意的。如果这个“10QPS”只是业务层面的限制，即便某个节点的QPS超过10了也不会导致什么问题，其实我们本质上是想限制整个集群总的QPS，那么这个限流的结果就不是合理的，并没有达到最佳效果；</p>
+</li>
+</ol>
+<p>所以，实际取决于你的限流是为了实现“过载保护”，还是实现业务层的限制。</p>
+<p>还有一点需要说明的是：集群限流并无法解决流量不均匀的问题，限流组件并不能帮助你重新分配或者调度流量。集群限流只是能让流量不均匀场景下整体限流的效果更好。</p>
+<p>实际使用建议是：集群限流（实现业务层限制）+ 单机限流（系统兜底，防止被打爆）</p>
+<h2 id="限流方案">限流方案</h2>
+<h3 id="服务端限流-vs-客户端限流-vs-网关限流">服务端限流 vs 客户端限流 vs 网关限流</h3>
+<p>绝大多数情况下限流都是发生在服务端的，因为很多情况下客户端的数量是不确定的。但有时候为了防止单个客户端过度使用服务，那么此处可以在客户端来完成，当然在服务端也可以同时进行。</p>
+<p>一般都推荐在服务端做限流</p>
+<h4 id="服务端限流">服务端限流</h4>
+<p>服务在处理请求前，应该对请求进行限流计算，防止系统过载。
+同时也要考虑到为不同的业务的客户端提供不同的限流策略，不能因为某个业务的问题达到达到限流阈值而造成其他业务无法请求服务。</p>
+<p>优点</p>
+<ul>
+<li>更好控制整个服务的负载情况：服务端的限流阈值不会因为客户端数量增加或减少而改变</li>
+<li>方便对不同上游服务进行不同阈值的限流策略：可以对不同的调用者进行不同的限流配额，也可以给不同业务打上不同的tag再根据tag来限流。</li>
+</ul>
+<p>缺点</p>
+<ul>
+<li>如果服务端只针对QPS限流，而不考虑连接数：服务在建连过程中也会产生一些资源消耗，而这些压力往往可能会成为瓶颈。特别是短连接，不断的建链过程会产生大量的资源消耗</li>
+<li>如果服务端也针对连接数进行限制：则不好对不同链路或服务进行配额区分。容易造成某个业务或服务的连接过多而导致其他服务也被限制</li>
+</ul>
+<h4 id="客户端限流">客户端限流</h4>
+<p>客户端调用下游服务时，以每个服务集群的限流配额对下游服务进行过载保护。
+优点</p>
+<ul>
+<li>达到阈值不会请求服务端，避免服务端产生额外的资源消耗，如建立连接</li>
+</ul>
+<p>缺点</p>
+<ul>
+<li>客户端的数量的增加或减少需要重新计算每个客户端的限流阈值</li>
+<li>客户端限流可能出现bug，或者客户端负载均衡产生倾斜导致限流失效</li>
+<li>服务不同API不同限流阈值：下游服务较多，而每个服务的不同API有不同限流配额，则客户端的限流较为复杂</li>
+</ul>
+<h4 id="网关限流">网关限流</h4>
+<p>请求通过网关来请求服务端，在网关中对不同服务及不同的API进行限流。
+优点</p>
+<ul>
+<li>能很好的保护整个集群的负载压力，服务端数量增加或减少，则网关进行相应的阈值调整即可</li>
+<li>对不同的上游业务的服务设置不同的限流配额和不同的限流策略</li>
+</ul>
+<p>缺点</p>
+<ul>
+<li>需要网关资源</li>
+<li>网关本身高可用性</li>
+</ul>
+<h3 id="服务端限流-1">服务端限流</h3>
+<p>我们有没有一个解决方案，将限流下沉到业务层来，让开发团队可以自行控制？我们来思考一下如何在分布式环境中引入服务层限流。</p>
+<p>对于分布式环境来说，无非是需要一个类似中心节点的地方存储限流数据。打个比方，如果我希望控制接口的访问速率为每秒100个请求，那么我就需要将当前1s内已经接收到的请求的数量保存在某个地方，并且可以让集群环境中所有节点都能访问。那我们可以用什么技术来存储这个临时数据呢？这个场景天然适合我们的中间件大显神威！而且还得需要支持超高并发的中间件，谁能堪此重任？</p>
+<p>一并中间件这下起劲儿了，纷纷表示“选我选我选我”。数据库行不行？不行，并发量不够。Message Queue行不行？好像MQ的运作模式不太适合这个场景，而且并发量也就差强人意。Kafka行不行，嗯，并发量杠杠的，是个Option。那Redis呢？OMG，憋说话就你了！理由这就给足你！</p>
+<p>Redis简直就是为服务端限流量身打造的利器。利用Redis过期时间特性，我们可以轻松设置限流的时间跨度（比如每秒10个请求，或者每10秒10个请求）。同时Redis还有一个特殊技能–脚本编程，我们可以将限流逻辑编写成一段脚本植入到Redis中，这样就将限流的重任从服务层完全剥离出来，同时Redis强大的并发量特性以及高可用集群架构也可以很好的支持庞大集群的限流访问。</p>
+<h3 id="限流组件">限流组件</h3>
+<p>除了上面介绍的几种方式以外，目前也有一些开源组件提供了类似的功能，比如Sentinel就是一个不错的选择。Sentinel是阿里出品的开源组件，并且包含在了Spring Cloud Alibaba组件库中，可以为Cloud服务在下一个“微服务架构设计与落地”的大章节中，我们将详细介绍Sentinel在分布式限流中的应用。</p>
+<h3 id="从架构维度考虑限流设计">从架构维度考虑限流设计</h3>
+<p>在真实的大型项目里，不会只使用一种限流手段，往往是几种方式互相搭配使用，让限流策略有一种层次感，达到资源的最大使用率。在这个过程中，限流策略的设计也可以参考前面提到的漏斗模型，上宽下紧，漏斗不同部位的限流方案设计要尽量关注当前组件的高可用。</p>
+<h2 id="限流粒度">限流粒度</h2>
+<p>限流的粒度可以分为：</p>
+<ul>
+<li>服务：对服务所有API进行统一的限流策略</li>
+<li>API：每个API会有不同的请求链路，则相应会有不同的限流策略(阈值等)</li>
+<li>API参数：很多时候我们希望能够对某个热点数据中访问频次最高的 Top K 数据进行限制。例如：秒杀，大促等场景，不要因为某个商品的频繁访问引起的限流导致其他商品无法访问。</li>
+</ul>
+<h3 id="服务粒度">服务粒度</h3>
+<p>服务粒度:</p>
+<p>一个服务提供一个统一的限流的策略。</p>
+<p>优点是非常简单，但很容易造成限流失效，无法保护服务本身及下游。</p>
+<p>如：服务提供两种API，都是访问数据，两种API的查询语句并不一致，API1 查询非常复杂，数据库安全水位只能提供10/s的TPS，而对于API2，数据库可以提供1000/s的TPS，这种情况下，如果按照服务粒度进行限流，则只能提供10/s QPS的限流阈值。所以是非常不合理的。</p>
+<p>API粒度:</p>
+<p>不同的API进行不同的限流策略，这种方式相对复杂些，但是更为合理，也能很好的保护服务。</p>
+<p>要考虑几种情况：</p>
+<ul>
+<li>增加或减少API，则限流策略要做相应的调整</li>
+<li>API实现的改变：请求处理实现变化则可能需要重新对限流阈值进行调整，避免因为增加一些业务逻辑而导致服务本身或者下游服务过载。</li>
+</ul>
+<p>大多数情况下，都应该进行API粒度的限流，这样才能更好的保护服务本身及服务的下游服务和中间件，达到更好的限流效果。</p>
+<h2 id="服务端限流方案">服务端限流方案</h2>
+<h3 id="qps统一分配">QPS统一分配</h3>
+<p>这种方案的思想是将集群限流最大程度的本地化。</p>
+<p>举个例子，我们有两台服务器实例，对应的是同一个应用程序（Application.name相同），程序中设置的QPS为100，将应用程序与同一个控制台程序进行连接，控制台端依据应用的实例数量将QPS进行均分，动态设置每个实例的QPS为50，若是遇到两个服务器的配置并不相同，在负载均衡层的就已经根据服务器的优劣对流量进行分配，例如一台分配70%流量，另一台分配30%的流量。面对这种情况，控制台也可以对其实行加权分配QPS的策略。</p>
+<p>客观来说，这是一种集群限流的实现方案，但依旧存在不小的问题。该模式的分配比例是建立在大数据流量下的趋势进行分配，实际情况中可能并不是严格的五五分或三七分，误差不可控，极容易出现用户连续访问某一台服务器遇到请求驳回而另一台服务器此刻空闲流量充足的尴尬情况。</p>
+<h3 id="redis令牌桶">Redis令牌桶</h3>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211118223036.png" alt=""></p>
+<p>令牌桶算法概念如下：</p>
+<ul>
+<li>令牌以固定速率生成；</li>
+<li>生成的令牌放入令牌桶中存放，如果令牌桶满了则多余的令牌会直接丢弃，当请求到达时，会尝试从令牌桶中取令牌，取到了令牌的请求可以执行；</li>
+<li>如果桶空了，那么尝试取令牌的请求会被直接丢弃。</li>
+</ul>
+<p>令牌桶算法既能够将所有的请求平均分布到时间区间内，又能接受服务器能够承受范围内的突发请求，因此是目前使用较为广泛的一种限流算法。</p>
+<p>这种方案存在的问题：</p>
+<ul>
+<li>要和redis进行交互：时延较差</li>
+<li>热点资源redis容易成为瓶颈</li>
+<li>redis进行主从切换会导致限流失效</li>
+<li>服务的时钟会有误差：由于lua中有写操作就不能使用带随机性质的读操作所以不能通过redis lua获取</li>
+</ul>
+<h3 id="发票服务器">发票服务器</h3>
+<p>这种方案的思想是建立在Redis令牌桶方案的基础之上的。如何解决每次取令牌都伴随一次网络开销，该方案的解决方法是建立一层控制端，利用该控制端与Redis令牌桶进行交互，只有当客户端的剩余令牌数不足时，客户端才向该发票服务器取令牌并且每次取一批。如阿里开源的sentinel</p>
+<p>发票服务器一般由一些服务进程组成一个或多个发票集群。而服务通过RPC向发票服务器领票，成功则可以执行，否则则进入限流机制。为了减少RPC通信带来的延迟，一般可以批量获取。</p>
+<p>发票规则(限流算法)可以存储到一致性存储或者数据库等，发票服务器定期更新或者监听通知来获取规则的变化。也可以通过其他服务来动态调整算法和阈值，然后通知发票服务器，也可以发票服务器自己根据负载情况来计算。</p>
+<p>集群流控中共有两种身份：</p>
+<ul>
+<li>Token Client：集群流控客户端，用于向所属 Token Server 通信请求 token。集群限流服务端会返回给客户端结果，决定是否限流。</li>
+<li>Token Server：即集群流控服务端，处理来自 Token Client 的请求，根据配置的集群规则判断是否应该发放 token（是否允许通过）。</li>
+</ul>
+<p>基于redis的分布式限流算法有以下缺点:</p>
+<ul>
+<li>单个大流量的接口，使用 redis 容易产生热点。</li>
+<li>pre-request 模式对性能有一定影响，高频的网络往返。</li>
+</ul>
+<p>改进:</p>
+<ul>
+<li>从获取单个 quota 升级成批量 quota。quota: 表示速率，获取后使用令牌桶算法来限制。
+<img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210113215820.png" alt=""></li>
+<li>每次心跳后，异步批量获取 quota，可以大大减少请求 redis 的频次，获取完以后本地消费，基于令牌桶拦截。</li>
+</ul>
+<h4 id="分配规则最大最小公平分享">分配规则(最大最小公平分享)</h4>
+<p>每次申请的配额需要手动设定静态值略欠灵活，比如每次要20，还是50。如何基于单个节点按需申请，并且避免出现不公平的现象？</p>
+<p>初次使用默认值，一旦有过去历史窗口的数据，可以基于历史窗口数据进行 quota 请求。</p>
+<p>我们经常面临给一组用户划分稀有资源的问题，他们都享有等价的权利来获取资源，但是其中一些用户实际上只需要比其他用户少的资源。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210113220352.png" alt=""></p>
+<p>那么我们如何来分配资源呢？一种在实际中广泛使用的分享技术称作“最大最小公平分享”(Max-Min Fairness)。</p>
+<p>直观上，公平分享分配给每个用户想要的可以满足的最小需求，然后将没有使用的资源均匀的分配给需要‘大资源’的用户。</p>
+<p>最大最小公平分配算法的形式化定义如下：</p>
+<ul>
+<li>资源按照需求递增的顺序进行分配。</li>
+<li>不存在用户得到的资源超过自己的需求。</li>
+<li>未得到满足的用户等价的分享资源。</li>
+</ul>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210113220453.png" alt=""></p>
+<h4 id="特点">特点</h4>
+<ul>
+<li>发票服务器可用性高：通过集群模式，且可以持久化到数据库。</li>
+<li>发票服务器负载均衡：服务从发票服务集群领票要注意发票服务器负载均衡，避免造成有的发票服务器发票领完有的却有大量剩余发票</li>
+<li>发票服务器高性能：因为发票服务器的计算和存储都基于内存，所以性能不容易成为瓶颈</li>
+<li>发票服务器一致性：类似于ID生成器，对于极高要求的场景，可以定期将发票服务器发票的信息等进行持久化存储，故障时再从中进行恢复</li>
+</ul>
+<h2 id="redis令牌桶实现">Redis令牌桶实现</h2>
+<h3 id="原理">原理</h3>
+<p>从整体上令牌桶生产token逻辑如下：</p>
+<ul>
+<li>用户配置的平均发送速率为r，则每隔1/r秒一个令牌被加入到桶中；</li>
+<li>假设桶中最多可以存放b个令牌。如果令牌到达时令牌桶已经满了，那么这个令牌会被丢弃；</li>
+<li>当流量以速率v进入，从桶中以速率v取令牌，拿到令牌的流量通过，拿不到令牌流量不通过，执行熔断逻辑；</li>
+</ul>
+<p>下面来看看 lua script 控制的几个关键属性：</p>
+<table>
+<thead>
+<tr>
+<th>argument</th>
+<th>mean</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ARGV[1]</td>
+<td>rate 「每秒生成几个令牌」</td>
+</tr>
+<tr>
+<td>ARGV[2]</td>
+<td>burst 「令牌桶最大值」</td>
+</tr>
+<tr>
+<td>ARGV[3]</td>
+<td>now_time「当前时间戳」</td>
+</tr>
+<tr>
+<td>ARGV[4]</td>
+<td>get token nums 「开发者需要获取的token数」</td>
+</tr>
+<tr>
+<td>KEYS[1]</td>
+<td>表示资源的tokenkey</td>
+</tr>
+<tr>
+<td>KEYS[2]</td>
+<td>表示刷新时间的key</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-lua" data-lang="lua"><span class="c1">-- 返回是否可以获得预期的token</span>
+
+<span class="kd">local</span> <span class="n">rate</span> <span class="o">=</span> <span class="n">tonumber</span><span class="p">(</span><span class="n">ARGV</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+<span class="kd">local</span> <span class="n">capacity</span> <span class="o">=</span> <span class="n">tonumber</span><span class="p">(</span><span class="n">ARGV</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+<span class="kd">local</span> <span class="n">now</span> <span class="o">=</span> <span class="n">tonumber</span><span class="p">(</span><span class="n">ARGV</span><span class="p">[</span><span class="mi">3</span><span class="p">])</span>
+<span class="kd">local</span> <span class="n">requested</span> <span class="o">=</span> <span class="n">tonumber</span><span class="p">(</span><span class="n">ARGV</span><span class="p">[</span><span class="mi">4</span><span class="p">])</span>
+
+<span class="c1">-- fill_time：需要填满 token_bucket 需要多久</span>
+<span class="kd">local</span> <span class="n">fill_time</span> <span class="o">=</span> <span class="n">capacity</span><span class="o">/</span><span class="n">rate</span>
+<span class="c1">-- 将填充时间向下取整</span>
+<span class="kd">local</span> <span class="n">ttl</span> <span class="o">=</span> <span class="n">math.floor</span><span class="p">(</span><span class="n">fill_time</span><span class="o">*</span><span class="mi">2</span><span class="p">)</span>
+
+<span class="c1">-- 获取目前 token_bucket 中剩余 token 数</span>
+<span class="c1">-- 如果是第一次进入，则设置 token_bucket 数量为 令牌桶最大值</span>
+<span class="kd">local</span> <span class="n">last_tokens</span> <span class="o">=</span> <span class="n">tonumber</span><span class="p">(</span><span class="n">redis.call</span><span class="p">(</span><span class="s2">&#34;get&#34;</span><span class="p">,</span> <span class="n">KEYS</span><span class="p">[</span><span class="mi">1</span><span class="p">]))</span>
+<span class="kr">if</span> <span class="n">last_tokens</span> <span class="o">==</span> <span class="kc">nil</span> <span class="kr">then</span>
+    <span class="n">last_tokens</span> <span class="o">=</span> <span class="n">capacity</span>
+<span class="kr">end</span>
+
+<span class="c1">-- 上一次更新 token_bucket 的时间</span>
+<span class="kd">local</span> <span class="n">last_refreshed</span> <span class="o">=</span> <span class="n">tonumber</span><span class="p">(</span><span class="n">redis.call</span><span class="p">(</span><span class="s2">&#34;get&#34;</span><span class="p">,</span> <span class="n">KEYS</span><span class="p">[</span><span class="mi">2</span><span class="p">]))</span>
+<span class="kr">if</span> <span class="n">last_refreshed</span> <span class="o">==</span> <span class="kc">nil</span> <span class="kr">then</span>
+    <span class="n">last_refreshed</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="kr">end</span>
+
+<span class="kd">local</span> <span class="n">delta</span> <span class="o">=</span> <span class="n">math.max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">now</span><span class="o">-</span><span class="n">last_refreshed</span><span class="p">)</span>
+<span class="c1">-- 通过当前时间与上一次更新时间的跨度，以及生产token的速率，计算出新的token数</span>
+<span class="c1">-- 如果超过 max_burst，多余生产的token会被丢弃</span>
+<span class="kd">local</span> <span class="n">filled_tokens</span> <span class="o">=</span> <span class="n">math.min</span><span class="p">(</span><span class="n">capacity</span><span class="p">,</span> <span class="n">last_tokens</span><span class="o">+</span><span class="p">(</span><span class="n">delta</span><span class="o">*</span><span class="n">rate</span><span class="p">))</span>
+<span class="kd">local</span> <span class="n">allowed</span> <span class="o">=</span> <span class="n">filled_tokens</span> <span class="o">&gt;=</span> <span class="n">requested</span>
+<span class="kd">local</span> <span class="n">new_tokens</span> <span class="o">=</span> <span class="n">filled_tokens</span>
+<span class="kr">if</span> <span class="n">allowed</span> <span class="kr">then</span>
+    <span class="n">new_tokens</span> <span class="o">=</span> <span class="n">filled_tokens</span> <span class="o">-</span> <span class="n">requested</span>
+<span class="kr">end</span>
+
+<span class="c1">-- 更新新的token数，以及更新时间</span>
+<span class="n">redis.call</span><span class="p">(</span><span class="s2">&#34;setex&#34;</span><span class="p">,</span> <span class="n">KEYS</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">ttl</span><span class="p">,</span> <span class="n">new_tokens</span><span class="p">)</span>
+<span class="n">redis.call</span><span class="p">(</span><span class="s2">&#34;setex&#34;</span><span class="p">,</span> <span class="n">KEYS</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">ttl</span><span class="p">,</span> <span class="n">now</span><span class="p">)</span>
+
+<span class="kr">return</span> <span class="n">allowed</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>上述可以看出 lua script ：只涉及对 token 操作，保证 token 生产合理和读取合理。</p>
+<p>流程中包含：</p>
+<ul>
+<li>有多重保障机制，保证限流一定会完成。</li>
+<li>如果redis limiter失效，至少在进程内rate limiter兜底。</li>
+<li>重试 redis limiter 机制保证尽可能地正常运行。</li>
+</ul>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211118232742.png" alt=""></p>
+<h3 id="代码">代码</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span><span class="lnt">103
+</span><span class="lnt">104
+</span><span class="lnt">105
+</span><span class="lnt">106
+</span><span class="lnt">107
+</span><span class="lnt">108
+</span><span class="lnt">109
+</span><span class="lnt">110
+</span><span class="lnt">111
+</span><span class="lnt">112
+</span><span class="lnt">113
+</span><span class="lnt">114
+</span><span class="lnt">115
+</span><span class="lnt">116
+</span><span class="lnt">117
+</span><span class="lnt">118
+</span><span class="lnt">119
+</span><span class="lnt">120
+</span><span class="lnt">121
+</span><span class="lnt">122
+</span><span class="lnt">123
+</span><span class="lnt">124
+</span><span class="lnt">125
+</span><span class="lnt">126
+</span><span class="lnt">127
+</span><span class="lnt">128
+</span><span class="lnt">129
+</span><span class="lnt">130
+</span><span class="lnt">131
+</span><span class="lnt">132
+</span><span class="lnt">133
+</span><span class="lnt">134
+</span><span class="lnt">135
+</span><span class="lnt">136
+</span><span class="lnt">137
+</span><span class="lnt">138
+</span><span class="lnt">139
+</span><span class="lnt">140
+</span><span class="lnt">141
+</span><span class="lnt">142
+</span><span class="lnt">143
+</span><span class="lnt">144
+</span><span class="lnt">145
+</span><span class="lnt">146
+</span><span class="lnt">147
+</span><span class="lnt">148
+</span><span class="lnt">149
+</span><span class="lnt">150
+</span><span class="lnt">151
+</span><span class="lnt">152
+</span><span class="lnt">153
+</span><span class="lnt">154
+</span><span class="lnt">155
+</span><span class="lnt">156
+</span><span class="lnt">157
+</span><span class="lnt">158
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">limit</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;log&#34;</span>
+	<span class="s">&#34;strconv&#34;</span>
+	<span class="s">&#34;sync&#34;</span>
+	<span class="s">&#34;sync/atomic&#34;</span>
+	<span class="s">&#34;time&#34;</span>
+
+	<span class="s">&#34;github.com/go-redis/redis&#34;</span>
+	<span class="nx">xrate</span> <span class="s">&#34;golang.org/x/time/rate&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">const</span> <span class="p">(</span>
+	<span class="c1">// to be compatible with aliyun redis, we cannot use `local key = KEYS[1]` to reuse the key
+</span><span class="c1"></span>	<span class="c1">// KEYS[1] as tokens_key
+</span><span class="c1"></span>	<span class="c1">// KEYS[2] as timestamp_key
+</span><span class="c1"></span>	<span class="nx">script</span> <span class="p">=</span> <span class="s">`local rate = tonumber(ARGV[1])
+</span><span class="s">local capacity = tonumber(ARGV[2])
+</span><span class="s">local now = tonumber(ARGV[3])
+</span><span class="s">local requested = tonumber(ARGV[4])
+</span><span class="s">local fill_time = capacity/rate
+</span><span class="s">local ttl = math.floor(fill_time*2)
+</span><span class="s">local last_tokens = tonumber(redis.call(&#34;get&#34;, KEYS[1]))
+</span><span class="s">if last_tokens == nil then
+</span><span class="s">    last_tokens = capacity
+</span><span class="s">end
+</span><span class="s">local last_refreshed = tonumber(redis.call(&#34;get&#34;, KEYS[2]))
+</span><span class="s">if last_refreshed == nil then
+</span><span class="s">    last_refreshed = 0
+</span><span class="s">end
+</span><span class="s">local delta = math.max(0, now-last_refreshed)
+</span><span class="s">local filled_tokens = math.min(capacity, last_tokens+(delta*rate))
+</span><span class="s">local allowed = filled_tokens &gt;= requested
+</span><span class="s">local new_tokens = filled_tokens
+</span><span class="s">if allowed then
+</span><span class="s">    new_tokens = filled_tokens - requested
+</span><span class="s">end
+</span><span class="s">redis.call(&#34;setex&#34;, KEYS[1], ttl, new_tokens)
+</span><span class="s">redis.call(&#34;setex&#34;, KEYS[2], ttl, now)
+</span><span class="s">return allowed`</span>
+	<span class="nx">tokenFormat</span>     <span class="p">=</span> <span class="s">&#34;{%s}.tokens&#34;</span>
+	<span class="nx">timestampFormat</span> <span class="p">=</span> <span class="s">&#34;{%s}.ts&#34;</span>
+	<span class="nx">pingInterval</span>    <span class="p">=</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span> <span class="o">*</span> <span class="mi">100</span>
+<span class="p">)</span>
+
+<span class="c1">// A TokenLimiter controls how frequently events are allowed to happen with in one second.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">TokenLimiter</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">rate</span>           <span class="kt">int</span>
+	<span class="nx">burst</span>          <span class="kt">int</span>
+	<span class="nx">store</span>          <span class="o">*</span><span class="nx">redis</span><span class="p">.</span><span class="nx">Client</span>
+	<span class="nx">tokenKey</span>       <span class="kt">string</span>
+	<span class="nx">timestampKey</span>   <span class="kt">string</span>
+	<span class="nx">rescueLock</span>     <span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
+	<span class="nx">redisAlive</span>     <span class="kt">uint32</span>
+	<span class="nx">rescueLimiter</span>  <span class="o">*</span><span class="nx">xrate</span><span class="p">.</span><span class="nx">Limiter</span>
+	<span class="nx">monitorStarted</span> <span class="kt">bool</span>
+<span class="p">}</span>
+
+<span class="c1">// NewTokenLimiter returns a new TokenLimiter that allows events up to rate and permits
+</span><span class="c1">// bursts of at most burst tokens.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewTokenLimiter</span><span class="p">(</span><span class="nx">rate</span><span class="p">,</span> <span class="nx">burst</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">store</span> <span class="o">*</span><span class="nx">redis</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="o">*</span><span class="nx">TokenLimiter</span> <span class="p">{</span>
+	<span class="nx">tokenKey</span> <span class="o">:=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="nx">tokenFormat</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
+	<span class="nx">timestampKey</span> <span class="o">:=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="nx">timestampFormat</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
+
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">TokenLimiter</span><span class="p">{</span>
+		<span class="nx">rate</span><span class="p">:</span>          <span class="nx">rate</span><span class="p">,</span>
+		<span class="nx">burst</span><span class="p">:</span>         <span class="nx">burst</span><span class="p">,</span>
+		<span class="nx">store</span><span class="p">:</span>         <span class="nx">store</span><span class="p">,</span>
+		<span class="nx">tokenKey</span><span class="p">:</span>      <span class="nx">tokenKey</span><span class="p">,</span>
+		<span class="nx">timestampKey</span><span class="p">:</span>  <span class="nx">timestampKey</span><span class="p">,</span>
+		<span class="nx">redisAlive</span><span class="p">:</span>    <span class="mi">1</span><span class="p">,</span>
+		<span class="nx">rescueLimiter</span><span class="p">:</span> <span class="nx">xrate</span><span class="p">.</span><span class="nf">NewLimiter</span><span class="p">(</span><span class="nx">xrate</span><span class="p">.</span><span class="nf">Every</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="o">/</span><span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="nx">rate</span><span class="p">)),</span> <span class="nx">burst</span><span class="p">),</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// Allow is shorthand for AllowN(time.Now(), 1).
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">TokenLimiter</span><span class="p">)</span> <span class="nf">Allow</span><span class="p">()</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">lim</span><span class="p">.</span><span class="nf">AllowN</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">(),</span> <span class="mi">1</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">// AllowN reports whether n events may happen at time now.
+</span><span class="c1">// Use this method if you intend to drop / skip events that exceed the rate rate.
+</span><span class="c1">// Otherwise use Reserve or Wait.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">TokenLimiter</span><span class="p">)</span> <span class="nf">AllowN</span><span class="p">(</span><span class="nx">now</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">,</span> <span class="nx">n</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">lim</span><span class="p">.</span><span class="nf">reserveN</span><span class="p">(</span><span class="nx">now</span><span class="p">,</span> <span class="nx">n</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">TokenLimiter</span><span class="p">)</span> <span class="nf">reserveN</span><span class="p">(</span><span class="nx">now</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">,</span> <span class="nx">n</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadUint32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">lim</span><span class="p">.</span><span class="nx">redisAlive</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">lim</span><span class="p">.</span><span class="nx">rescueLimiter</span><span class="p">.</span><span class="nf">AllowN</span><span class="p">(</span><span class="nx">now</span><span class="p">,</span> <span class="nx">n</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">lim</span><span class="p">.</span><span class="nx">store</span><span class="p">.</span><span class="nf">Eval</span><span class="p">(</span>
+		<span class="nx">script</span><span class="p">,</span>
+		<span class="p">[]</span><span class="kt">string</span><span class="p">{</span>
+			<span class="nx">lim</span><span class="p">.</span><span class="nx">tokenKey</span><span class="p">,</span>
+			<span class="nx">lim</span><span class="p">.</span><span class="nx">timestampKey</span><span class="p">,</span>
+		<span class="p">},</span>
+		<span class="p">[]</span><span class="kt">string</span><span class="p">{</span>
+			<span class="nx">strconv</span><span class="p">.</span><span class="nf">Itoa</span><span class="p">(</span><span class="nx">lim</span><span class="p">.</span><span class="nx">rate</span><span class="p">),</span>
+			<span class="nx">strconv</span><span class="p">.</span><span class="nf">Itoa</span><span class="p">(</span><span class="nx">lim</span><span class="p">.</span><span class="nx">burst</span><span class="p">),</span>
+			<span class="nx">strconv</span><span class="p">.</span><span class="nf">FormatInt</span><span class="p">(</span><span class="nx">now</span><span class="p">.</span><span class="nf">Unix</span><span class="p">(),</span> <span class="mi">10</span><span class="p">),</span>
+			<span class="nx">strconv</span><span class="p">.</span><span class="nf">Itoa</span><span class="p">(</span><span class="nx">n</span><span class="p">),</span>
+		<span class="p">}).</span><span class="nf">Result</span><span class="p">()</span>
+	<span class="c1">// redis allowed == false
+</span><span class="c1"></span>	<span class="c1">// Lua boolean false -&gt; r Nil bulk reply
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">err</span> <span class="o">==</span> <span class="nx">redis</span><span class="p">.</span><span class="nx">Nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">false</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;fail to use rate limiter: %s, use in-process limiter for rescue&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+		<span class="nx">lim</span><span class="p">.</span><span class="nf">startMonitor</span><span class="p">()</span>
+		<span class="k">return</span> <span class="nx">lim</span><span class="p">.</span><span class="nx">rescueLimiter</span><span class="p">.</span><span class="nf">AllowN</span><span class="p">(</span><span class="nx">now</span><span class="p">,</span> <span class="nx">n</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="nx">code</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">resp</span><span class="p">.(</span><span class="kt">int64</span><span class="p">)</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;fail to eval redis script: %v, use in-process limiter for rescue&#34;</span><span class="p">,</span> <span class="nx">resp</span><span class="p">)</span>
+		<span class="nx">lim</span><span class="p">.</span><span class="nf">startMonitor</span><span class="p">()</span>
+		<span class="k">return</span> <span class="nx">lim</span><span class="p">.</span><span class="nx">rescueLimiter</span><span class="p">.</span><span class="nf">AllowN</span><span class="p">(</span><span class="nx">now</span><span class="p">,</span> <span class="nx">n</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="c1">// redis allowed == true
+</span><span class="c1"></span>	<span class="c1">// Lua boolean true -&gt; r integer reply with value of 1
+</span><span class="c1"></span>	<span class="k">return</span> <span class="nx">code</span> <span class="o">==</span> <span class="mi">1</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">TokenLimiter</span><span class="p">)</span> <span class="nf">startMonitor</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">lim</span><span class="p">.</span><span class="nx">rescueLock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="k">defer</span> <span class="nx">lim</span><span class="p">.</span><span class="nx">rescueLock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+	<span class="k">if</span> <span class="nx">lim</span><span class="p">.</span><span class="nx">monitorStarted</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+
+	<span class="nx">lim</span><span class="p">.</span><span class="nx">monitorStarted</span> <span class="p">=</span> <span class="kc">true</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreUint32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">lim</span><span class="p">.</span><span class="nx">redisAlive</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+	<span class="k">go</span> <span class="nx">lim</span><span class="p">.</span><span class="nf">waitForRedis</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">lim</span> <span class="o">*</span><span class="nx">TokenLimiter</span><span class="p">)</span> <span class="nf">waitForRedis</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">ticker</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTicker</span><span class="p">(</span><span class="nx">pingInterval</span><span class="p">)</span>
+	<span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">ticker</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+		<span class="nx">lim</span><span class="p">.</span><span class="nx">rescueLock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+		<span class="nx">lim</span><span class="p">.</span><span class="nx">monitorStarted</span> <span class="p">=</span> <span class="kc">false</span>
+		<span class="nx">lim</span><span class="p">.</span><span class="nx">rescueLock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="p">}()</span>
+
+	<span class="k">for</span> <span class="k">range</span> <span class="nx">ticker</span><span class="p">.</span><span class="nx">C</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">lim</span><span class="p">.</span><span class="nx">store</span><span class="p">.</span><span class="nf">Ping</span><span class="p">().</span><span class="nf">Err</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreUint32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">lim</span><span class="p">.</span><span class="nx">redisAlive</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="限流策略">限流策略</h2>
+<p>限流是指在一段时间内，定义某个客户或应用可以接收或处理多少个请求的技术。例如，通过限流，你可以过滤掉产生流量峰值的客户和微服务，或者可以确保你的应用程序在自动扩展(Auto Scaling)失效前都不会出现过载的情况。</p>
+<ul>
+<li>令牌桶、漏桶 针对单个节点，无法分布式限流。</li>
+<li>QPS 限流
+<ul>
+<li>不同的请求可能需要数量迥异的资源来处理。</li>
+<li>某种静态 QPS 限流不是特别准。</li>
+</ul>
+</li>
+<li>给每个用户设置限制
+<ul>
+<li>全局过载发生时候，针对某些“异常”进行控制。</li>
+<li>一定程度的“超卖”配额。</li>
+</ul>
+</li>
+<li>按照优先级丢弃。</li>
+<li>拒绝请求也需要成本。返回5XX也需要网络消耗.</li>
+</ul>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210113215019.png" alt=""></p>
+<h3 id="限流---重要性">限流 - 重要性</h3>
+<p>每个接口配置阈值，运营工作繁重，最简单的我们配置服务级别 quota，更细粒度的，我们可以根据不同重要性设定 quota，我们引入了重要性(criticality):</p>
+<ul>
+<li>最重要 CRITICAL_PLUS，为最终的要求预留的类型，拒绝这些请求会造成非常严重的用户可见的问题。</li>
+<li>重要 CRITICAL，生产任务发出的默认请求类型。拒绝这些请求也会造成用户可见的问题。但是可能没那么严重。</li>
+<li>可丢弃的 SHEDDABLE_PLUS 这些流量可以容忍某种程度的不可用性。这是批量任务发出的请求的默认值。这些请求通常可以过几分钟、几小时后重试。</li>
+<li>可丢弃的 SHEDDABLE 这些流量可能会经常遇到部分不可用情况，偶尔会完全不可用。</li>
+</ul>
+<p>gRPC 系统之间，需要自动传递重要性信息。如果后端接受到请求 A，在处理过程中发出了请求 B 和 C 给其他后端，请求 B 和 C 会使用与 A 相同的重要性属性。</p>
+<ul>
+<li>全局配额不足时，优先拒绝低优先级的。</li>
+<li>全局配额，可以按照重要性分别设置。</li>
+<li>过载保护时，低优先级的请求先被拒绝。</li>
+</ul>
+<h3 id="限流---case-study">限流 - Case Study</h3>
+<ul>
+<li>二层缓存穿透、大量回源导致的核心服务故障。</li>
+<li>异常客户端引起的服务故障(query of death)
+<ul>
+<li>请求放大。</li>
+<li>资源数放大。</li>
+</ul>
+</li>
+<li>用户重试导致的大面积故障。</li>
+</ul>
+<h2 id="参考">参考</h2>
+<p><a href="https://cloud.tencent.com/developer/article/1531112">微服务架构下的分布式限流方案思考</a></p>
+<p><a href="https://www.infoq.cn/article/qg2tx8fyw5vt-f3hh673">分布式服务限流实战，已经为你排好坑了</a></p>
+<p><a href="https://zhuanlan.zhihu.com/p/158948815">限流的概念，算法，分布式限流以及微服务架构下限流的难点</a></p>
+<p><a href="https://segmentfault.com/a/1190000038278417">go-zero 如何扛住流量冲击（二）</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-05-21
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/%E6%9C%8D%E5%8A%A1%E6%B2%BB%E7%90%86/">服务治理</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/%E4%BD%BF%E7%94%A8delve%E5%B7%A5%E5%85%B7%E8%B0%83%E8%AF%95go%E7%A8%8B%E5%BA%8F/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">使用Delve工具调试Go程序</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/channel%E4%BD%BF%E7%94%A8%E5%AE%9E%E8%B7%B5/">
+            <span class="next-text nav-default">Channel使用实践</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021<span class="heart"><i class="iconfont icon-heart"></i></span><span>Forz</span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.js"></script>
+<script>
+docsearch({
+    apiKey: "b4b9da2eba53aa6dabe4b8ac9e8676e1",
+    indexName: "forz.forzvina.com",
+    appId: "IAR2EF5L65",
+    inputSelector: '.docsearch-input',
+    debug: false,
+});
+</script>
+</body>
+</html>
