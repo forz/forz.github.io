@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>分布式事务实现原理 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="事务 把多条语句作为一个整体进行操作的功能，被称为数据库事务。数据库事务可以确保该事务范围内的所有操作都可以全部成功或者全部失败。 事务具有 4 个" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.89.4 with theme even" />
+
+
+<link rel="canonical" href="/post/%E5%88%86%E5%B8%83%E5%BC%8F%E4%BA%8B%E5%8A%A1%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.98f8e47918247c097fa26317cbb567fe9f05503485bf08d8547f5579543303b1.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="分布式事务实现原理" />
+<meta property="og:description" content="事务 把多条语句作为一个整体进行操作的功能，被称为数据库事务。数据库事务可以确保该事务范围内的所有操作都可以全部成功或者全部失败。 事务具有 4 个" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/%E5%88%86%E5%B8%83%E5%BC%8F%E4%BA%8B%E5%8A%A1%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-11-19T10:48:57+00:00" />
+<meta property="article:modified_time" content="2021-11-19T10:48:57+00:00" />
+
+<meta itemprop="name" content="分布式事务实现原理">
+<meta itemprop="description" content="事务 把多条语句作为一个整体进行操作的功能，被称为数据库事务。数据库事务可以确保该事务范围内的所有操作都可以全部成功或者全部失败。 事务具有 4 个"><meta itemprop="datePublished" content="2021-11-19T10:48:57+00:00" />
+<meta itemprop="dateModified" content="2021-11-19T10:48:57+00:00" />
+<meta itemprop="wordCount" content="16876">
+<meta itemprop="keywords" content="分布式事务," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="分布式事务实现原理"/>
+<meta name="twitter:description" content="事务 把多条语句作为一个整体进行操作的功能，被称为数据库事务。数据库事务可以确保该事务范围内的所有操作都可以全部成功或者全部失败。 事务具有 4 个"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">Forz Blog</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+      <a class="menu-item-link" href="/">Home</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/post/">Archives</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/tags/">Tags</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/categories/">Categories</a>
+    </li>
+  </ul>
+</nav><div class="docsearch-input__container">
+  <input type="search" class="docsearch-input" placeholder="Search" />
+</div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">分布式事务实现原理</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-11-19 </span>
+        <div class="post-category">
+            <a href="/categories/%E5%88%86%E5%B8%83%E5%BC%8F%E4%BA%8B%E5%8A%A1/"> 分布式事务 </a>
+            </div>
+          <span class="more-meta"> 约 16876 字 </span>
+          <span class="more-meta"> 预计阅读 34 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#事务">事务</a></li>
+    <li><a href="#分布式事务使用场景">分布式事务使用场景</a>
+      <ul>
+        <li><a href="#转账">转账</a></li>
+        <li><a href="#下单扣库存">下单扣库存</a></li>
+        <li><a href="#同步超时">同步超时</a></li>
+      </ul>
+    </li>
+    <li><a href="#柔性事务">柔性事务</a></li>
+    <li><a href="#分布式事务">分布式事务</a>
+      <ul>
+        <li><a href="#强一致性分布式事务">强一致性分布式事务</a></li>
+        <li><a href="#最终一致性分布式事务方案柔性事务">最终一致性分布式事务方案（柔性事务）</a></li>
+      </ul>
+    </li>
+    <li><a href="#2pcxa">2PC/XA</a>
+      <ul>
+        <li><a href="#2pc">2PC</a></li>
+        <li><a href="#3pc">3PC</a></li>
+        <li><a href="#xa">XA</a></li>
+      </ul>
+    </li>
+    <li><a href="#tcc">TCC</a>
+      <ul>
+        <li><a href="#子事务嵌套">子事务嵌套</a></li>
+      </ul>
+    </li>
+    <li><a href="#saga">Saga</a>
+      <ul>
+        <li><a href="#回滚与重试">回滚与重试</a></li>
+        <li><a href="#并发执行">并发执行</a></li>
+        <li><a href="#saga与ttc">Saga与TTC</a></li>
+      </ul>
+    </li>
+    <li><a href="#atseata-2pc">AT(Seata 2PC)</a></li>
+    <li><a href="#最大努力通知">最大努力通知</a></li>
+    <li><a href="#本地消息表">本地消息表</a>
+      <ul>
+        <li><a href="#本地事务">本地事务</a></li>
+        <li><a href="#轮询推送">轮询推送</a></li>
+        <li><a href="#消息去重">消息去重</a></li>
+      </ul>
+    </li>
+    <li><a href="#事务消息">事务消息</a></li>
+    <li><a href="#子事务屏障">子事务屏障</a>
+      <ul>
+        <li><a href="#异常情况">异常情况</a></li>
+        <li><a href="#子事务屏障技术">子事务屏障技术</a></li>
+        <li><a href="#子事务屏障原理">子事务屏障原理</a></li>
+      </ul>
+    </li>
+    <li><a href="#不允许失败">不允许失败</a>
+      <ul>
+        <li><a href="#不允许失败的情况">不允许失败的情况</a></li>
+        <li><a href="#为什么不允许失败">为什么不允许失败</a></li>
+        <li><a href="#应用如何设计">应用如何设计</a></li>
+      </ul>
+    </li>
+    <li><a href="#如何选择">如何选择</a>
+      <ul>
+        <li><a href="#业务分类">业务分类</a></li>
+      </ul>
+    </li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="事务">事务</h2>
+<p>把多条语句作为一个整体进行操作的功能，被称为数据库事务。数据库事务可以确保该事务范围内的所有操作都可以全部成功或者全部失败。</p>
+<p>事务具有 4 个属性：原子性、一致性、隔离性、持久性。这四个属性通常称为 ACID 特性。</p>
+<ul>
+<li>Atomicity（原子性）：一个事务中的所有操作，要么全部完成，要么全部不完成，不会结束在中间某个环节。事务在执行过程中发生错误，会被恢复到事务开始前的状态，就像这个事务从来没有执行过一样。</li>
+<li>Consistency（一致性）：在事务开始之前和事务结束以后，数据库的完整性没有被破坏。完整性包括外键约束、应用定义的等约束不会被破坏。</li>
+<li>Isolation（隔离性）：数据库允许多个并发事务同时对其数据进行读写和修改的能力，隔离性可以防止多个事务并发执行时由于交叉执行而导致数据的不一致。</li>
+<li>Durability（持久性）：事务处理结束后，对数据的修改就是永久的，即便系统故障也不会丢失。</li>
+</ul>
+<p>假如我们的业务系统不复杂，可以在一个数据库、一个服务内对数据进行修改，完成转账，那么，我们可以利用数据库事务，保证转账业务的正确完成。</p>
+<h2 id="分布式事务使用场景">分布式事务使用场景</h2>
+<h3 id="转账">转账</h3>
+<p>转账是最经典那的分布式事务场景，假设用户 A 使用银行 app 发起一笔跨行转账给用户 B，银行系统首先扣掉用户 A 的钱，然后增加用户 B 账户中的余额。此时就会出现 2 种异常情况：1. 用户 A 的账户扣款成功，用户 B 账户余额增加失败 2. 用户 A 账户扣款失败，用户 B 账户余额增加成功。对于银行系统来说，以上 2 种情况都是不允许发生，此时就需要分布式事务来保证转账操作的成功。</p>
+<h3 id="下单扣库存">下单扣库存</h3>
+<p>在电商系统中，下单是用户最常见操作。在下单接口中必定会涉及生成订单 id, 扣减库存等操作，对于微服务架构系统，订单 id 与库存服务一般都是独立的服务，此时就需要分布式事务来保证整个下单接口的成功。</p>
+<h3 id="同步超时">同步超时</h3>
+<p>继续以电商系统为例，在微服务体系架构下，我们的支付与订单都是作为单独的系统存在。订单的支付状态依赖支付系统的通知，假设一个场景：我们的支付系统收到来自第三方支付的通知，告知某个订单支付成功，接收通知接口需要同步调用订单服务变更订单状态接口，更新订单状态为成功。流程图如下，从图中可以看出有两次调用，第三方支付调用支付服务，以及支付服务调用订单服务，这两步调用都可能出现调用超时的情况，此处如果没有分布式事务的保证，就会出现用户订单实际支付情况与最终用户看到的订单支付情况不一致的情况。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211124213514.png" alt=""></p>
+<h2 id="柔性事务">柔性事务</h2>
+<p>在电商领域等互联网场景下，传统的事务在数据库性能和处理能力上都遇到了瓶颈。因此，柔性事务被提了出来，柔性事务基于分布式 CAP 理论以及延伸出来的 BASE 理论，相较于数据库事务这一类完全遵循 ACID 的刚性事务来说，柔性事务保证的是 “基本可用，最终一致”.</p>
+<p>柔性事务（如分布式事务）为了满足可用性、性能与降级服务的需要，降低一致性（Consistency）与隔离性（Isolation）的要求，遵循 BASE 理论，传统的 ACID 事务对隔离性的要求非常高，在事务执行过程中，必须将所有的资源对象锁定，因此对并发事务的执行极度不友好，柔性事务（比如分布式事务）的理念则是将锁资源对象操作从本地资源对象层面上移至业务逻辑层面，再通过放宽对强一致性要求，以换取系统吞吐量的提升。</p>
+<p>此外，虽然柔性事务遵循的是 BASE 理论，但是还需要遵循部分 ACID 规范：</p>
+<ul>
+<li>原子性：严格遵循。</li>
+<li>一致性：事务完成后的一致性严格遵循；事务中的一致性可适当放宽。</li>
+<li>隔离性：并行事务间不可影响；事务中间结果可见性允许安全放宽。</li>
+<li>持久性：严格遵循。</li>
+</ul>
+<h2 id="分布式事务">分布式事务</h2>
+<p>从广义上来看，分布式事务其实也是事务，只是由于业务上的定义以及微服务架构设计的问题，所以需要在多个服务之间保证业务的事务性，也就是 ACID 四个特性；从单机的数据库事务变成分布式事务时，原有单机中相对可靠的方法调用以及进程间通信方式已经没有办法使用，同时由于网络通信经常是不稳定的，所以服务之间信息的传递会出现障碍。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211120223553.png" alt=""></p>
+<p>模块（或服务）之间通信方式的改变是造成分布式事务复杂的最主要原因，在同一个事务之间的执行多段代码会因为网络的不稳定造成各种奇怪的问题，当我们通过网络请求其他服务的接口时，往往会得到三种结果：正确、失败和超时，无论是成功还是失败，我们都能得到唯一确定的结果，超时代表请求的发起者不能确定接受者是否成功处理了请求，这也是造成诸多问题的诱因。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211120223602.png" alt=""></p>
+<p>系统之间的通信可靠性从单一系统中的可靠变成了微服务架构之间的不可靠，分布式事务其实就是在不可靠的通信下实现事务的特性。无论是事务还是分布式事务实现原子性都无法避免对持久存储的依赖，事务使用磁盘上的日志记录执行的过程以及上下文，这样无论是需要回滚还是补偿都可以通过日志追溯，而分布式事务也会依赖数据库、Zookeeper 或者 ETCD 等服务追踪事务的执行过程，总而言之，各种形式的日志是保证事务几大特性的重要手段。</p>
+<h3 id="强一致性分布式事务">强一致性分布式事务</h3>
+<p>单体架构多数据源，在业务开发中，肯定是先执行对订单库的操作，但是不提交事务，再执行对库存库的操作，也不提交事务，如果两个操作都成功，在一起提交事务，如果有一个操作失败，则两个都进行回滚。</p>
+<p>XA属于强一致性分布式事务.</p>
+<h3 id="最终一致性分布式事务方案柔性事务">最终一致性分布式事务方案（柔性事务）</h3>
+<p>XA适用于单体架构多数据源时实现分布式事务，但对于微服务间的分布式事务就无能为力了，我们需要使用其他的方案实现分布式事务。</p>
+<p>本地消息表,事务消息,TCC,Saga都属于柔性事务</p>
+<h2 id="2pcxa">2PC/XA</h2>
+<h3 id="2pc">2PC</h3>
+<p>二阶段提交（Two-phase Commit），是指，为了使基于分布式系统架构下的所有节点在进行事务提交时保持一致性而设计的一种算法（Algorithm）。通常，二阶段提交也被称为是一种协议（Protocol）。在分布式系统中，每个节点虽然可以知晓自己的操作时成功或者失败，却无法知道其他节点的操作的成功或失败。当一个事务跨越多个节点时，为了保持事务的ACID特性，需要引入一个作为协调者的组件来统一掌控所有节点（称作参与者）的操作结果并最终指示这些节点是否要把操作结果进行真正的提交（比如将更新后的数据写入磁盘等等）。因此，二阶段提交的算法思路可以概括为：参与者将操作成败通知协调者，再由协调者根据所有参与者的反馈情报决定各参与者是否要提交操作还是中止操作。</p>
+<p>二阶段提交算法的成立基于以下假设：</p>
+<ol>
+<li>该分布式系统中，存在一个节点作为协调者（Coordinator），其他节点作为参与者（Cohorts）。且节点之间可以进行网络通信。</li>
+<li>所有节点都采用预写式日志，且日志被写入后即被保持在可靠的存储设备上，即使节点损坏不会导致日志数据的消失。</li>
+<li>所有节点不会永久性损坏，即使损坏后仍然可以恢复。</li>
+</ol>
+<p>二阶段提交分为两阶段：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211124215004.png" alt=""></p>
+<p>准备阶段 Prepares:</p>
+<ol>
+<li>协调者向所有参与者询问是否可以执行提交操作，并开始等待各参与者的响应</li>
+<li>参与者执行事务操作，如果执行成功就返回Yes响应，如果执行失败就返回No响应</li>
+<li>如果协调者接受参与者响应超时，也会认为执行事务操作失败</li>
+</ol>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211125144643.png" alt=""></p>
+<p>提交阶段 Commit:</p>
+<ol>
+<li>如果第一阶段汇中所有参与者都返回Yes响应，协调者向所有参与者发出提交请求，所有参与者提交事务</li>
+<li>如果第一阶段中有一个或者多个参与者返回No响应，协调者向所有参与者发出回滚请求，所有参与者进行回滚操作</li>
+</ol>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211125144700.png" alt=""></p>
+<p>如果第二阶段提交失败的话呢？这里有两种情况。</p>
+<ol>
+<li>
+<p>第二阶段执行的是回滚事务操作，那么答案是不断重试，直到所有参与者都回滚了，不然那些在第一阶段准备成功的参与者会一直阻塞着。</p>
+</li>
+<li>
+<p>第二阶段执行的是提交事务操作，那么答案也是不断重试，因为有可能一些参与者的事务已经提交成功了，这个时候只有一条路，就是头铁往前冲，不断的重试，直到提交成功，到最后真的不行只能人工介入处理。</p>
+</li>
+</ol>
+<p>优点：尽量保证了数据的强一致，但不是100%一致。</p>
+<p>缺点：</p>
+<ul>
+<li>单点故障，由于协调者的重要性，一旦协调者发生故障，参与者会一直阻塞，尤其时在第二阶段，协调者发生故障，那么所有的参与者都处于锁定事务资源的状态中，而无法继续完成事务操作
+<ul>
+<li>假设协调者在发送准备命令之前挂了，还行等于事务还没开始。</li>
+<li>假设协调者在发送准备命令之后挂了，这就不太行了，有些参与者等于都执行了处于事务资源锁定的状态。不仅事务执行不下去，还会因为锁定了一些公共资源而阻塞系统其它操作。</li>
+<li>假设协调者在发送回滚事务命令之前挂了，那么事务也是执行不下去，且在第一阶段那些准备成功参与者都阻塞着。</li>
+<li>假设协调者在发送回滚事务命令之后挂了，这个还行，至少命令发出去了，很大的概率都会回滚成功，资源都会释放。但是如果出现网络分区问题，某些参与者将因为收不到命令而阻塞着。</li>
+<li>假设协调者在发送提交事务命令之前挂了，这个不行，傻了！这下是所有资源都阻塞着。</li>
+<li>假设协调者在发送提交事务命令之后挂了，这个还行，也是至少命令发出去了，很大概率都会提交成功，然后释放资源，但是如果出现网络分区问题某些参与者将因为收不到命令而阻塞着。</li>
+</ul>
+</li>
+<li>同步阻塞，首先 2PC 是一个同步阻塞协议，像第一阶段协调者会等待所有参与者响应才会进行下一步操作，当然第一阶段的协调者有超时机制，假设因为网络原因没有收到某参与者的响应或某参与者挂了，那么超时后就会判断事务失败，向所有参与者发送回滚命令。</li>
+<li>数据不一致，在第二阶段中，当协调者想参与者发送提交事务请求之后，发生了局部网络异常或者在发送提交事务请求过程中协调者发生了故障，这会导致只有一部分参与者接收到了提交事务请求。而在这部分参与者接到提交事务请求之后就会执行提交事务操作。但是其他部分未接收到提交事务请求的参与者则无法提交事务。从而导致分布式系统中的数据不一致</li>
+</ul>
+<p>二阶段提交的问题</p>
+<p>因为协调者单点问题，因此我们可以通过选举等操作选出一个新协调者来顶替。</p>
+<ul>
+<li>如果处于第一阶段，其实影响不大都回滚好了，在第一阶段事务肯定还没提交。</li>
+<li>如果处于第二阶段，假设参与者都没挂，此时新协调者可以向所有参与者确认它们自身情况来推断下一步的操作。</li>
+</ul>
+<p>假设有个别参与者挂了！这就有点僵硬了，比如协调者发送了回滚命令，此时第一个参与者收到了并执行，然后协调者和第一个参与者都挂了。</p>
+<p>此时其他参与者都没收到请求，然后新协调者来了，它询问其他参与者都说OK，但它不知道挂了的那个参与者到底O不OK，所以它傻了。</p>
+<p>问题其实就出在每个参与者自身的状态只有自己和协调者知道，因此新协调者无法通过在场的参与者的状态推断出挂了的参与者是什么情况。</p>
+<p>虽然协议上没说，不过在实现的时候我们可以灵活的让协调者将自己发过的请求在哪个地方记一下，也就是日志记录，这样新协调者来的时候不就知道此时该不该发了？</p>
+<p>但是就算协调者知道自己该发提交请求，那么在参与者也一起挂了的情况下没用，因为你不知道参与者在挂之前有没有提交事务。</p>
+<p>如果参与者在挂之前事务提交成功，新协调者确定存活着的参与者都没问题，那肯定得向其他参与者发送提交事务命令才能保证数据一致。</p>
+<p>如果参与者在挂之前事务还未提交成功，参与者恢复了之后数据是回滚的，此时协调者必须是向其他参与者发送回滚事务命令才能保持事务的一致。</p>
+<p>所以说极端情况下还是无法避免数据不一致问题。</p>
+<p>2PC 是一种尽量保证强一致性的分布式事务，因此它是同步阻塞的，而同步阻塞就导致长久的资源锁定问题，总体而言效率低，并且存在单点故障问题，在极端条件下存在数据不一致的风险。</p>
+<h3 id="3pc">3PC</h3>
+<p>​三阶段提交（Three-phase commit），3PC 的出现是为了解决 2PC 的一些问题，相比于 2PC 它在参与者中也引入了超时机制，并且新增了一个阶段使得参与者可以利用这一个阶段统一各自的状态。</p>
+<p>三阶段提交的三个阶段：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211124215610.png" alt=""></p>
+<p>询问阶段 CanCommit:</p>
+<ol>
+<li>协调者向参与者发送commit请求，参与者如果可以提交就返回Yes响应，否则返回No响应。</li>
+</ol>
+<p>准备阶段 PreCommit:</p>
+<ol>
+<li>协调者根据参与者在询问阶段的响应判断是否执行事务还是中断事务：
+<ul>
+<li>如果所有参与者都返回Yes，则执行事务</li>
+<li>如果参与者有一个或多个参与者返回No或者超时，则中断事务</li>
+</ul>
+</li>
+<li>参与者执行完操作之后返回ACK响应，同时开始等待最终指令</li>
+</ol>
+<p>提交阶段 DoCommit:</p>
+<ol>
+<li>协调者根据参与者在准备阶段的响应判断是否执行事务还是中断事务：
+<ul>
+<li>如果所有参与者都返回正确的ACK响应，则提交事务</li>
+<li>如果参与者有一个或多个参与者收到错误的ACK响应或者超时，则中断事务</li>
+<li>如果参与者无法及时接收到来自协调者的提交或者中断事务请求时，会在等待超时之后，会继续进行事务提交</li>
+</ul>
+</li>
+<li>协调者收到所有参与者的ACK响应，完成事务。</li>
+</ol>
+<p>不管哪一个阶段有参与者返回失败都会宣布事务失败，这和 2PC 是一样的（当然到最后的提交阶段和 2PC 一样只要是提交请求就只能不断重试）。</p>
+<p>我们先来看一下 3PC 的阶段变更有什么影响。</p>
+<p>首先询问阶段的变更成不会直接执行事务，而是会先去询问此时的参与者是否有条件接这个事务，因此不会一来就干活直接锁资源，使得在某些资源不可用的情况下所有参与者都阻塞着。</p>
+<p>而准备阶段起到了一个统一状态的作用，它像一道栅栏，表明在准备阶段前所有参与者其实还未都回应，在准备阶段表明所有参与者都已经回应了。</p>
+<p>假如你是一位参与者，你知道自己进入了准备状态那你就可以推断出来其他参与者也都进入了准备状态。</p>
+<p>但是多引入一个阶段也多一个交互，因此性能会差一些，而且绝大部分的情况下资源应该都是可用的，这样等于每次明知可用执行还得询问一次。</p>
+<p>我们再来看下参与者超时能带来什么样的影响。</p>
+<p>我们知道 2PC 是同步阻塞的，上面我们已经分析了协调者挂在了提交请求还未发出去的时候是最伤的，所有参与者都已经锁定资源并且阻塞等待着。</p>
+<p>那么引入了超时机制，参与者就不会傻等了，如果是等待提交命令超时，那么参与者就会提交事务了，因为都到了这一阶段了大概率是提交的，如果是等待准备命令超时，那该干啥就干啥了，反正本来啥也没干。</p>
+<p>然而超时机制也会带来数据不一致的问题，比如在等待提交命令时候超时了，参与者默认执行的是提交事务操作，但是有可能执行的是回滚操作，这样一来数据就不一致了。</p>
+<p>当然 3PC 协调者超时还是在的，具体不分析了和 2PC 是一样的。</p>
+<p>3PC 的引入是为了解决提交阶段 2PC 协调者和某参与者都挂了之后新选举的协调者不知道当前应该提交还是回滚的问题。</p>
+<p>新协调者来的时候发现有一个参与者处于准备或者提交阶段，那么表明已经经过了所有参与者的确认了，所以此时执行的就是提交命令。</p>
+<p>所以说 3PC 就是通过引入准备阶段来使得参与者之间的状态得到统一，也就是留了一个阶段让大家同步一下。</p>
+<p>但是这也只能让协调者知道该如果做，但不能保证这样做一定对，这其实和上面 2PC 分析一致，因为挂了的参与者到底有没有执行事务无法断定。</p>
+<p>所以说 3PC 通过准备阶段可以减少故障恢复时候的复杂性，但是不能保证数据一致，除非挂了的那个参与者恢复。</p>
+<p>让我们总结一下， 3PC 相对于 2PC 做了一定的改进：引入了参与者超时机制，并且增加了准备阶段使得故障恢复之后协调者的决策复杂度降低，但整体的交互过程更长了，性能有所下降，并且还是会存在数据不一致问题。</p>
+<p>所以 2PC 和 3PC 都不能保证数据100%一致，因此一般都需要有定时扫描补偿机制。</p>
+<p>我再说下 3PC 我没有找到具体的实现，所以我认为 3PC 只是纯的理论上的东西，而且可以看到相比于 2PC 它是做了一些努力但是效果甚微，所以只做了解即可。</p>
+<h3 id="xa">XA</h3>
+<p>2PC 两阶段提交协议本身只是一个通用协议，不提供具体的工程实现的规范和标准，在工程实践中为了统一标准，减少行业内不必要的对接成本，需要制定标准化的处理模型及接口标准，国际开放标准组织 Open Group 定义了分布式事务处理模型 DTP（Distributed Transaction Processing）Model，现在 XA 已经成为 2PC 分布式事务提交的事实标准，很多主流数据库如 Oracle、MySQL 等都已经实现 XA。</p>
+<p>两阶段事务提交采用的是 X/OPEN 组织所定义的 DTP Model 所抽象的 AP（应用程序）, TM（事务管理器）和 RM（资源管理器） 概念来保证分布式事务的强一致性。 其中 TM 与 RM 间采用 XA 的协议进行双向通信。 与传统的本地事务相比，XA 事务增加了准备阶段，数据库除了被动接受提交指令外，还可以反向通知调用方事务是否可以被提交。 TM 可以收集所有分支事务的准备结果，并于最后进行原子提交，以保证事务的强一致性。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211123202557.png" alt=""></p>
+<p>XA一共分为两阶段：</p>
+<p>第一阶段（prepare）：即所有的参与者RM准备执行事务并锁住需要的资源。参与者ready时，向TM报告已准备就绪。</p>
+<p>第二阶段 (commit/rollback)：当事务管理者(TM)确认所有参与者(RM)都ready后，向所有参与者发送commit命令。</p>
+<p>目前主流的数据库基本都支持XA事务，包括mysql、oracle、sqlserver、postgre</p>
+<p>一个成功完成的XA事务时序图如下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211124164208.png" alt=""></p>
+<p>如果有任何一个参与者prepare失败，那么TM会通知所有完成prepare的参与者进行回滚。</p>
+<p>正常架构设计中是否应该出现这种跨库的操作，我觉得是不应该的，如果过按业务拆分将数据源进行分库，我们应该同时将服务也拆分出去才合适，应遵循一个系统只操作一个数据源（主从没关系），避免后续可能会出现的多个系统调用一个数据源的情况。</p>
+<h2 id="tcc">TCC</h2>
+<p>TCC Try-Confirm-Cancel的简称，针对每个操作，都需要有一个其对应的确认和取消操作，当操作成功时调用确认操作，当操作失败时调用取消操作，类似于二阶段提交，只不过是这里的提交和回滚是针对业务上的，所以基于TCC实现的分布式事务也可以看做是对业务的一种补偿机制。</p>
+<p>2PC 和 3PC 都是数据库层面的，而 TCC 是业务层面的分布式事务，就像我前面说的分布式事务不仅仅包括数据库的操作，还包括发送短信等，这时候 TCC 就派上用场了！</p>
+<p>比如说一个事务要执行A、B、C三个操作，那么先对三个操作执行预留动作。如果都预留成功了那么就执行确认操作，如果有一个预留失败那就都执行撤销动作。</p>
+<p>TCC分为3个阶段:</p>
+<ul>
+<li>Try 阶段：尝试执行，完成所有业务检查（一致性）, 预留必须业务资源（准隔离性）</li>
+<li>Confirm 阶段：确认执行真正执行业务，不作任何业务检查，只使用 Try 阶段预留的业务资源，Confirm 操作要求具备幂等设计，Confirm 失败后需要进行重试。</li>
+<li>Cancel 阶段：取消执行，释放 Try 阶段预留的业务资源。Cancel 阶段的异常和 Confirm 阶段异常处理方案基本上一致，要求满足幂等设计。</li>
+</ul>
+<p>TCC的Confirm/Cancel阶段在业务逻辑上是不允许返回失败的，如果因为网络或者其他临时故障，导致不能返回成功，TM会不断的重试，直到Confirm/Cancel返回成功.</p>
+<p>比如下一个订单减一个库存：</p>
+<ol>
+<li>Try阶段：订单系统将当前订单状态设置为支付中，库存系统校验当前剩余库存数量是否大于1，然后将可用库存数量设置为库存剩余数量-1，</li>
+<li>如果Try阶段执行成功，执行Confirm阶段，将订单状态修改为支付成功，库存剩余数量修改为可用库存数量</li>
+<li>如果Try阶段执行失败，执行Cancel阶段，将订单状态修改为支付失败，可用库存数量修改为库存剩余数量</li>
+</ol>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211125143324.png" alt=""></p>
+<p>基于TCC实现分布式事务，代码逻辑想对复杂一些，需要将原来的接口的逻辑拆分为：try，confirm，cancel三个接口的逻辑。</p>
+<p>可以看到流程还是很简单的，难点在于业务上的定义，对于每一个操作你都需要定义三个动作分别对应Try - Confirm - Cancel。因此 TCC 对业务的侵入较大和业务紧耦合，需要根据特定的场景和业务逻辑来设计相应的操作。</p>
+<p>相对于 2PC、3PC ，TCC 适用的范围更大，但是开发量也更大，毕竟都在业务上实现，而且有时候你会发现这三个方法还真不好写。不过也因为是在业务上实现的，所以TCC可以跨数据库、跨不同的业务系统来实现事务。</p>
+<p>TCC 事务机制相比于上面介绍的 XA，解决了其几个缺点：</p>
+<ul>
+<li>解决了协调者单点，由主业务方发起并完成这个业务活动。业务活动管理器也变成多点，引入集群。</li>
+<li>同步阻塞：引入超时，超时后进行补偿，并且不会锁定整个资源，将资源转换为业务逻辑形式，粒度变小。</li>
+<li>数据一致性，有了补偿机制之后，由业务活动管理器控制一致性</li>
+</ul>
+<h3 id="子事务嵌套">子事务嵌套</h3>
+<p>TCC事务模式，支持子事务嵌套，流程图如下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211125203450.png" alt=""></p>
+<h2 id="saga">Saga</h2>
+<p>Saga是30年前一篇数据库伦理提到的一个概念。其核心思想是将长事务拆分为多个本地短事务，由Saga事务协调器协调，如果正常结束那就正常完成，如果某个步骤失败，则根据相反顺序一次调用补偿操作。</p>
+<p>Saga的组成：</p>
+<ul>
+<li>每个Saga由一系列sub-transaction Ti 组成</li>
+<li>每个Ti 都有对应的补偿动作Ci，补偿动作用于撤销Ti造成的结果,这里的每个T，都是一个本地事务。</li>
+</ul>
+<p>可以看到，和TCC相比，Saga没有“预留 try”动作，它的Ti就是直接提交到库。</p>
+<p>Saga的执行顺序有两种：</p>
+<ul>
+<li>T1, T2, T3, &hellip;, Tn</li>
+<li>T1, T2, &hellip;, Tj, Cj,&hellip;, C2, C1，其中0 &lt; j &lt; n</li>
+</ul>
+<p>Saga定义了两种恢复策略：</p>
+<ul>
+<li>向后恢复，即上面提到的第二种执行顺序，其中j是发生错误的sub-transaction，这种做法的效果是撤销掉之前所有成功的sub-transation，使得整个Saga的执行结果撤销。</li>
+<li>向前恢复，适用于必须要成功的场景，执行顺序是类似于这样的：T1, T2, &hellip;, Tj(失败), Tj(重试),&hellip;, Tn，其中j是发生错误的sub-transaction。该情况下不需要Ci。</li>
+</ul>
+<p>这里要注意的是，在saga模式中不能保证隔离性，因为没有锁住资源，其他事务依然可以覆盖或者影响当前事务。</p>
+<p>还是拿100元买一瓶水的例子来说，这里定义</p>
+<ul>
+<li>T1=扣100元 T2=给用户加一瓶水 T3=减库存一瓶水</li>
+<li>C1=加100元 C2=给用户减一瓶水 C3=给库存加一瓶水</li>
+</ul>
+<p>我们一次进行T1,T2，T3如果发生问题，就执行发生问题的C操作的反向。</p>
+<p>上面说到的隔离性的问题会出现在，如果执行到T3这个时候需要执行回滚，但是这个用户已经把水喝了(另外一个事务)，回滚的时候就会发现，无法给用户减一瓶水了。这就是事务之间没有隔离性的问题.</p>
+<h3 id="回滚与重试">回滚与重试</h3>
+<p>对于一个SAGA事务，如果执行过程中遭遇失败，那么接下来有两种选择，一种是进行回滚，另一种是重试继续。</p>
+<p>回滚的机制相对简单一些，只需要在进行下一步之前，把下一步的操作记录到保存点就可以了。一旦出现问题，那么从保存点处开始回滚，反向执行所有的补偿操作即可。</p>
+<p>假如有一个持续了一天的长事务，被服务器重启这类临时失败中断后，此时如果只能进行回滚，那么业务是难以接受的。 此时最好的策略是在保存点处重试并让事务继续，直到事务完成。</p>
+<p>往前重试的支持，需要把全局事务的所有子事务事先编排好并保存，然后在失败时，重新读取未完成的进度，并重试继续执行。</p>
+<h3 id="并发执行">并发执行</h3>
+<p>对于长事务而言，并发执行的特性也是至关重要的，一个串行耗时一天的长事务，在并行的支持下，可能半天就完成了，这对业务的帮助很大。</p>
+<p>某些场景下并发执行子事务，是业务必须的要求，例如订多张及票，而机票确认时间较长时，不应当等前一个票已经确认之后，再去定下一张票，这样会导致订票成功率大幅下降。</p>
+<p>在子事务并发执行的场景下，支持回滚与重试，挑战会更大，涉及了较复杂的保存点。</p>
+<h3 id="saga与ttc">Saga与TTC</h3>
+<p>TCC和saga模式有不同的特点，各自适应不同的业务场景，相互补充。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211125172413.png" alt=""></p>
+<p>上述这张表，很好的比较了TCC和SAGA这两种事务模式。</p>
+<p>TCC的定位是一致性要求较高的短事务。一致性要求较高的事务一般都是短事务（一个事务长时间未完成，在用户看来一致性是比较差的，一般没有必要采用TCC这种高一致性的设计），因此TCC的事务分支编排放在了AP端（即程序代码里），由用户灵活调用。这样用户可以根据每个分支的结果，做灵活的判断与执行。</p>
+<p>SAGA的定位是一致性要求较低的长事务/短事务。对于类似订机票这种这样的场景，持续时间长，可能持续几分钟到一两天，就需要把整个事务的编排保存到服务器，避免发起全局事务的APP因为升级、故障等原因，导致事务编排信息丢失。</p>
+<h2 id="atseata-2pc">AT(Seata 2PC)</h2>
+<p>Seata 实现 2PC 与传统 2PC 的差别</p>
+<ul>
+<li>架构层次方面：传统 2PC 方案的 RM 实际上是在数据库层，RM 本质上就是数据库自身，通过 XA 协议实现，而 Seata 的 RM 是以 jar 包的形式作为中间件层部署在应用程序这一侧的。</li>
+<li>两阶段提交方面：传统 2PC无论第二阶段的决议是 commit 还是 rollback ，事务性资源的锁都要保持到 Phase2 完成才释放。而 Seata 的做法是在 Phase1 就将本地事务提交，这样就可以省去 Phase2 持锁的时间，整体提高效率。</li>
+</ul>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210411205737.png" alt=""></p>
+<h2 id="最大努力通知">最大努力通知</h2>
+<p>最大努力通知即尽最大努力交付，主要用于在这样一种场景：不同的服务平台之间的事务性保证。</p>
+<p>比如我们在电商购物，使用支付宝支付；又比如玩网游的时候，通过 App Store 充值。</p>
+<p>拿购物为例，电商平台与支付平台是相互独立的，隶属于不同的公司，即使是同一个公司也很可能是独立的部门。</p>
+<p>“做过支付宝交易接口的同学都知道，我们一般会在支付宝的回调页面和接口里，解密参数，然后调用系统中更新交易状态相关的服务，将订单更新为付款成功。</p>
+<p>同时，只有当我们回调页面中输出了success 字样或者标识业务处理成功相应状态码时，支付宝才会停止回调请求。否则，支付宝会每间隔一段时间后，再向客户方发起回调请求，直到输出成功标识为止。”</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210411180321.png" alt=""></p>
+<p>执行流程：</p>
+<ol>
+<li>业务系统调用支付平台支付接口，并在本地进行记录，支付状态为支付中</li>
+<li>支付平台进行支付操作之后，无论成功还是失败，都需要给业务系统一个结果通知</li>
+<li>如果通知一直失败则根据重试规则进行重试，达到最大通知次数后，不再通知</li>
+<li>支付平台提供查询订单支付操作结果接口</li>
+<li>业务系统根据一定业务规则去支付平台查询支付结果</li>
+</ol>
+<p>这种方案也是实现了最终一致性。</p>
+<p>前面介绍的的本地消息表和事务消息都属于可靠消息，与这里介绍的最大努力通知有什么不同？</p>
+<p>可靠消息一致性，发起通知方需要保证将消息发出去，并且将消息发到接收通知方，消息的可靠性关键由发起通知方来保证。</p>
+<p>最大努力通知，发起通知方尽最大的努力将业务处理结果通知为接收通知方，但是可能消息接收不到，此时需要接收通知方主动调用发起通知方的接口查询业务处理结果，通知的可靠性关键在接收通知方。</p>
+<p>解决方案上，最大努力通知需要：</p>
+<ul>
+<li>提供接口，让接受通知放能够通过接口查询业务处理结果</li>
+<li>消息队列ACK机制，消息队列按照间隔1min、5min、10min、30min、1h、2h、5h、10h的方式，逐步拉大通知间隔 ，直到达到通知要求的时间窗口上限。之后不再通知</li>
+</ul>
+<p>事务消息也是一样，当半消息被commit了之后确实就是普通消息了，如果订阅者一直不消费或者消费不了则会一直重试，到最后进入死信队列。其实这也算最大努力。</p>
+<p>最大努力通知适用于业务通知类型，例如微信交易的结果，就是通过最大努力通知方式通知各个商户，既有回调通知，也有交易查询接口</p>
+<p>最大努力通知的思想在本地消息表和事务消息都有体现.</p>
+<h2 id="本地消息表">本地消息表</h2>
+<p>本地消息表的核心思想是将分布式事务拆分成本地事务进行处理。适用于可异步执行的业务，且后续操作无需回滚的业务.</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211125114059.png" alt=""></p>
+<p>执行流程：</p>
+<ol>
+<li>订单系统，添加一条订单和一条消息，在一个事务里提交</li>
+<li>订单系统，使用定时任务轮询查询状态为未同步的消息表，发送到MQ，如果发送失败，就重试发送</li>
+<li>库存系统，接收MQ消息，修改库存表，需要保证幂等操作</li>
+<li>如果修改成功，调用rpc接口修改订单系统消息表的状态为已完成或者直接删除这条消息</li>
+<li>如果修改失败，可以不做处理，等待重试</li>
+</ol>
+<p>订单系统中的消息有可能由于业务问题会一直重复发送，所以为了避免这种情况可以记录一下发送次数，当达到次数限制之后报警，人工接入处理；库存系统需要保证幂等，避免同一条消息被多次消费造成数据一致。</p>
+<p>本地消息表这种方案实现了最终一致性，需要在业务系统里增加消息表，业务逻辑中多一次插入的DB操作，所以性能会有损耗，而且最终一致性的间隔主要有定时任务的间隔时间决定。</p>
+<p>本地消息表实现的条件：</p>
+<ul>
+<li>消费者与生成者的接口都要支持幂等</li>
+<li>生产者需要额外的创建消息表</li>
+<li>需要提供补偿逻辑，如果消费者业务失败，需要生产者支持回滚操作</li>
+</ul>
+<h3 id="本地事务">本地事务</h3>
+<p>Transactional outbox，支付宝在完成扣款的同时，同时记录消息数据，这个消息数据与业务数据保存在同一数据库实例里（消息记录表表名为 msg）。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="k">BEGIN</span><span class="w"> </span><span class="k">TRANSACTION</span><span class="w">
+</span><span class="w">    </span><span class="k">UPDATE</span><span class="w"> </span><span class="n">A</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="n">amount</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">amount</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">10000</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">user_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">
+</span><span class="w">    </span><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">msg</span><span class="p">(</span><span class="n">user_id</span><span class="p">,</span><span class="w"> </span><span class="n">amount</span><span class="p">,</span><span class="w"> </span><span class="n">status</span><span class="p">)</span><span class="w"> </span><span class="k">VALUES</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">10000</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w">
+</span><span class="w"></span><span class="k">END</span><span class="w"> </span><span class="k">TRANSACTION</span><span class="w">
+</span><span class="w"></span><span class="k">COMMIT</span><span class="p">;</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>上述事务能保证只要支付宝账户里被扣了钱，消息一定能保存下来。当上述事务提交成功后，我们想办法将此消息通知余额宝，余额宝处理成功后发送回复成功消息，支付宝收到回复后删除该条消息数据。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210411180716.png" alt=""></p>
+<h3 id="轮询推送">轮询推送</h3>
+<p>Polling publisher，我们定时的轮训 msg 表，把 status = 1 的消息统统拿出来消费，可以按照自增 id 排序，保证顺序消费。在这里我们独立了一个  pay_task 服务，把拖出来的消息 publish 给我们消息队列，balance 服务自己来消费队列，或者直接 rpc 发送给 balance 服务。</p>
+<p>实际我们第一个版本的 archive-service 在使用 CQRS 时，就用的这个模型，Pull 的模型，从延迟来说不够好，Pull 太猛对 Database 有一定压力，Pull 频次低了，延迟比较高。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210411180939.png" alt=""></p>
+<p>Transaction log tailing，上述保存消息的方式使得消息数据和业务数据紧耦合在一起，从架构上看不够优雅，而且容易诱发其他问题。</p>
+<p>有一些业务场景，可以直接使用主表被 canal 订阅使用，有一些业务场景自带这类 message 表，比如订单或者交易流水，可以直接使用这类流水表作为 message 表使用。</p>
+<p>使用 canal 订阅以后，是实时流式消费数据，在消费者 balance 或者 balance-job 必须努力送达到。</p>
+<p>我们发现，所有努力送达的模型，必须是先预扣（预占资源）的做法。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210411181206.png" alt=""></p>
+<h3 id="消息去重">消息去重</h3>
+<p>还有一个很严重的问题就是消息重复投递，如果相同的消息被重复投递两次，那么我们余额宝账户将会增加2万而不是1万了。</p>
+<p>为什么相同的消息会被重复投递？比如余额宝处理完消息 msg 后，发送了处理成功的消息给支付宝，正常情况下支付宝应该要删除消息msg，但如果支付宝这时候悲剧的挂了，重启后一看消息 msg 还在，就会继续发送消息 msg。</p>
+<p>全局唯一 ID+ 去重表</p>
+<p>在余额宝这边增加消息应用状态表 msg_apply，通俗来说就是个账本，用于记录消息的消费情况，每次来一个消息，在真正执行之前，先去消息应用状态表中查询一遍，如果找到说明是重复消息，丢弃即可，如果没找到才执行，同时插入到消息应用状态表（同一事务）。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210411204507.png" alt=""></p>
+<h2 id="事务消息">事务消息</h2>
+<p>消息事务的原理是将两个事务通过消息中间件进行异步解耦。适用于可异步执行的业务，且后续操作无需回滚的业务</p>
+<p>在上述的本地消息表方案中，生产者需要额外创建消息表，还需要对本地消息表进行轮询，业务负担较重。阿里开源的RocketMQ 4.3之后的版本正式支持事务消息，实际上其实是对本地消息表的一个封装，将本地消息表移动到了MQ内部.</p>
+<p>事务消息发送及提交：</p>
+<ul>
+<li>发送消息（half消息）</li>
+<li>服务端存储消息，并响应消息的写入结果</li>
+<li>根据发送结果执行本地事务（如果写入失败，此时half消息对业务不可见，本地逻辑不执行）</li>
+<li>根据本地事务状态执行Commit或者Rollback（Commit操作发布消息，消息对消费者可见）</li>
+</ul>
+<p>补偿流程：</p>
+<ul>
+<li>对没有Commit/Rollback的事务消息（pending状态的消息），从服务端发起一次“回查”</li>
+<li>Producer收到回查消息，返回消息对应的本地事务的状态，为Commit或者Rollback</li>
+</ul>
+<p>流程图如下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210411205211.png" alt=""></p>
+<p>事务消息方案与本地消息表机制非常类似，区别主要在于原先相关的本地表操作替换成了一个反查接口.</p>
+<p>事务消息特点如下：</p>
+<ul>
+<li>长事务仅需要分拆成多个任务，并提供一个反查接口，使用简单</li>
+<li>消费者的逻辑如果无法通过重试成功，那么还需要更多的机制，来回滚操作</li>
+</ul>
+<p>如果消费超时，则需要一直重试，消息接收端需要保证幂等。如果消息消费失败，这个就需要人工进行处理，因为这个概率较低，如果为了这种小概率时间而设计这个复杂的流程反而得不偿失.</p>
+<p>这种方案也是实现了最终一致性，对比本地消息表实现方案，不需要再建消息表，不再依赖本地数据库事务了，所以这种方案更适用于高并发的场景。</p>
+<p>事务消息一旦被可靠的持久化，我们整个分布式事务，变为了最终一致性，消息的消费才能保障最终业务数据的完整性，所以我们要尽最大努力，把消息送达到下游的业务消费方，称为：最大努力通知。只有消息被消费，整个交易才能算是完整完结。</p>
+<h2 id="子事务屏障">子事务屏障</h2>
+<p>在分布式事务的各个环节都有可能出现网络以及业务故障等问题，这些问题需要分布式事务的业务方做到防空回滚，幂等，防悬挂三个特性。</p>
+<h3 id="异常情况">异常情况</h3>
+<p>下面以TCC事务说明这些异常情况：</p>
+<p>空回滚：</p>
+<ul>
+<li>在没有调用 TCC 资源 Try 方法的情况下，调用了二阶段的 Cancel 方法，Cancel 方法需要识别出这是一个空回滚，然后直接返回成功。</li>
+<li>出现原因是当一个分支事务所在服务宕机或网络异常，分支事务调用记录为失败，这个时候其实是没有执行Try阶段，当故障恢复后，分布式事务进行回滚则会调用二阶段的Cancel方法，从而形成空回滚。</li>
+</ul>
+<p>幂等：</p>
+<ul>
+<li>由于任何一个请求都可能出现网络异常，出现重复请求，所以所有的分布式事务分支，都需要保证幂等性</li>
+</ul>
+<p>悬挂：</p>
+<ul>
+<li>悬挂就是对于一个分布式事务，其二阶段 Cancel 接口比 Try 接口先执行。</li>
+<li>出现原因是在 RPC 调用分支事务try时，先注册分支事务，再执行RPC调用，如果此时 RPC 调用的网络发生拥堵，RPC 超时以后，TM就会通知RM回滚该分布式事务，可能回滚完成后，Try 的 RPC 请求才到达参与者真正执行。</li>
+</ul>
+<p>下面看一个网络异常的时序图，更好的理解上述几种问题</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211124185631.png" alt=""></p>
+<ul>
+<li>业务处理请求4的时候，Cancel在Try之前执行，需要处理空回滚</li>
+<li>业务处理请求6的时候，Cancel重复执行，需要幂等</li>
+<li>业务处理请求8的时候，Try在Cancel后执行，需要处理悬挂</li>
+</ul>
+<p>面对上述复杂的网络异常情况，目前看到各家建议的方案都是业务方通过唯一键，去查询相关联的操作是否已完成，如果已完成则直接返回成功。相关的判断逻辑较复杂，易出错，业务负担重。</p>
+<h3 id="子事务屏障技术">子事务屏障技术</h3>
+<p>在项目<a href="https://github.com/yedf/dtm">https://github.com/yedf/dtm</a>中，出现了一种子事务屏障技术，使用该技术，能够达到这个效果，看示意图：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20211124185720.png" alt=""></p>
+<p>所有这些请求，到了子事务屏障后：不正常的请求，会被过滤；正常请求，通过屏障。开发者使用子事务屏障之后，前面所说的各种异常全部被妥善处理，业务开发人员只需要关注实际的业务逻辑，负担大大降低。</p>
+<p>子事务屏障提供了方法ThroughBarrierCall，方法的原型为：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">ThroughBarrierCall</span><span class="p">(</span><span class="nx">db</span> <span class="o">*</span><span class="nx">sql</span><span class="p">.</span><span class="nx">DB</span><span class="p">,</span> <span class="nx">transInfo</span><span class="o">*</span><span class="nx">TransInfo</span><span class="p">,</span> <span class="nx">busiCall</span> <span class="nx">BusiFunc</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>业务开发人员，在busiCall里面编写自己的相关逻辑，调用该函数。ThroughBarrierCall保证，在空回滚、悬挂等场景下，busiCall不会被调用；在业务被重复调用时，有幂等控制，保证只被提交一次。</p>
+<p>子事务屏障会管理TCC、SAGA、事务消息等，也可以扩展到其他领域</p>
+<h3 id="子事务屏障原理">子事务屏障原理</h3>
+<p>子事务屏障技术的原理是，在本地数据库，建立分支事务状态表<code>sub_trans_barrier</code>，唯一键为全局事务id-子事务id-子事务分支名称（try|confirm|cancel），建表语句如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="o">`</span><span class="n">barrier</span><span class="o">`</span><span class="w"> </span><span class="p">(</span><span class="w">
+</span><span class="w">  </span><span class="o">`</span><span class="n">id</span><span class="o">`</span><span class="w"> </span><span class="nb">int</span><span class="p">(</span><span class="mi">11</span><span class="p">)</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="n">AUTO_INCREMENT</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="w"> </span><span class="p">,</span><span class="w">
+</span><span class="w">  </span><span class="o">`</span><span class="n">trans_type</span><span class="o">`</span><span class="w"> </span><span class="nb">varchar</span><span class="p">(</span><span class="mi">45</span><span class="p">)</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">,</span><span class="w">
+</span><span class="w">  </span><span class="o">`</span><span class="n">gid</span><span class="o">`</span><span class="w"> </span><span class="nb">varchar</span><span class="p">(</span><span class="mi">128</span><span class="p">)</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">,</span><span class="w">
+</span><span class="w">  </span><span class="o">`</span><span class="n">branch_id</span><span class="o">`</span><span class="w"> </span><span class="nb">varchar</span><span class="p">(</span><span class="mi">128</span><span class="p">)</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">,</span><span class="w">
+</span><span class="w">  </span><span class="o">`</span><span class="n">branch_type</span><span class="o">`</span><span class="w"> </span><span class="nb">varchar</span><span class="p">(</span><span class="mi">45</span><span class="p">)</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">,</span><span class="w">
+</span><span class="w">  </span><span class="o">`</span><span class="n">create_time</span><span class="o">`</span><span class="w"> </span><span class="n">datetime</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="n">now</span><span class="p">(),</span><span class="w">
+</span><span class="w">  </span><span class="o">`</span><span class="n">update_time</span><span class="o">`</span><span class="w"> </span><span class="n">datetime</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="n">now</span><span class="p">(),</span><span class="w">
+</span><span class="w">  </span><span class="k">UNIQUE</span><span class="w"> </span><span class="k">KEY</span><span class="w"> </span><span class="o">`</span><span class="n">gid</span><span class="o">`</span><span class="w"> </span><span class="p">(</span><span class="o">`</span><span class="n">gid</span><span class="o">`</span><span class="p">,</span><span class="o">`</span><span class="n">branch_id</span><span class="o">`</span><span class="p">,</span><span class="o">`</span><span class="n">branch_type</span><span class="o">`</span><span class="p">)</span><span class="w">
+</span><span class="w"></span><span class="p">);</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>ThroughBarrierCall的内部步骤如下:</p>
+<ol>
+<li>开启事务</li>
+<li>如果是Try分支，则那么insert ignore插入gid-branchid-try，如果成功插入，则调用屏障内逻辑</li>
+<li>如果是Confirm分支，那么insert ignore插入gid-branchid-confirm，如果成功插入，则调用屏障内逻辑</li>
+<li>如果是Cancel分支，那么insert ignore插入gid-branchid-try，再插入gid-branchid-cancel，如果try未插入并且cancel插入成功，则调用屏障内逻辑</li>
+<li>屏障内逻辑返回成功，提交事务，返回成功</li>
+<li>屏障内逻辑返回错误，回滚事务，返回错误</li>
+</ol>
+<p>在此机制下，解决了网络异常相关的问题</p>
+<ul>
+<li>空补偿控制&ndash;如果Try没有执行，直接执行了Cancel，那么Cancel插入gid-branchid-try会成功，不走屏障内的逻辑，保证了空补偿控制</li>
+<li>幂等控制&ndash;任何一个分支都无法重复插入唯一键，保证了不会重复执行</li>
+<li>防悬挂控制&ndash;Try在Cancel之后执行，那么插入的gid-branchid-try不成功，就不执行，保证了防悬挂控制</li>
+</ul>
+<p>下面看看dtm中main_tcc_barrier.go中的例子：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">tccBarrierTransInTry</span><span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">gin</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="p">(</span><span class="kd">interface</span><span class="p">{},</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="nx">dtmcli</span><span class="p">.</span><span class="nf">ThroughBarrierCall</span><span class="p">(</span><span class="nx">db</span><span class="p">,</span> <span class="nx">dtmcli</span><span class="p">.</span><span class="nf">TransInfoFromReq</span><span class="p">(</span><span class="nx">c</span><span class="p">),</span> <span class="kd">func</span><span class="p">(</span><span class="nx">sdb</span> <span class="o">*</span><span class="nx">sql</span><span class="p">.</span><span class="nx">DB</span><span class="p">)</span> <span class="p">(</span><span class="kd">interface</span><span class="p">{},</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nf">adjustTrading</span><span class="p">(</span><span class="nx">sdb</span><span class="p">,</span> <span class="nx">transInUid</span><span class="p">,</span> <span class="nf">reqFrom</span><span class="p">(</span><span class="nx">c</span><span class="p">).</span><span class="nx">Amount</span><span class="p">)</span>
+  <span class="p">})</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>TransIn业务中的Try，仅需要一个ThroughBarrierCall调用，就具备防空补偿、防悬挂、幂等三个特性，极大的简化了业务开发人员的工作。</p>
+<p>对于SAGA事务、可靠消息等，也是类似的机制。</p>
+<h2 id="不允许失败">不允许失败</h2>
+<p>多种事务模式中，都出现了操作不允许失败的要求，这是什么含义呢？哪些场景是不允许失败的？为什么不允许失败？应用怎么设计？</p>
+<p>不允许失败并不是说要保证100%的可用性，它允许暂时性失败：包括网络故障，系统宕机，系统bug；但是一旦暂时性的问题解决之后，在业务恢复之后，需要返回成功。</p>
+<p>不允许失败的另一个说法是，该操作能够最终成功，即通过不断重试，最后会返回成功。</p>
+<h3 id="不允许失败的情况">不允许失败的情况</h3>
+<p>不允许失败的情况包括以下方面</p>
+<ul>
+<li>消息中的分支操作</li>
+<li>SAGA中的补偿操作</li>
+<li>TCC的Confirm和Cancel操作</li>
+</ul>
+<p>您的业务需要保证以上的操作，在业务逻辑上不允许失败，是可以最终成功的。</p>
+<h3 id="为什么不允许失败">为什么不允许失败</h3>
+<p>假如您的业务使用了SAGA，然后依次出现下面情况：</p>
+<ul>
+<li>某个操作出现失败需要回滚</li>
+<li>回滚的过程中，遇见回滚失败</li>
+<li>此时SAGA事务既无法往前执行，也无法往后回滚</li>
+</ul>
+<p>这是由于您的业务系统逻辑设计中的问题，分布式事务没有任何办法解决，所以您的业务需要保证回滚是可以最终成功的。</p>
+<h3 id="应用如何设计">应用如何设计</h3>
+<p>消息的分支操作是不允许失败的，因为消息不支持回滚。如果您需要回滚，那么请采用其他事务模式</p>
+<p>SAGA事务如果有些正向操作是无法回滚的，那么您可以用普通非并发的SAGA，将可回滚的分支Ri放在前面，不可回滚的分支Ni放在后面。如果分支Ri正向操作失败，则会回滚Ri，一旦到了Ni，保证Ni的正向操作最终成功，这样也能够保证SAGA事务的正确运行</p>
+<p>TCC事务的Confirm/Cancel不允许失败，一般的设计是在TCC的Try阶段预留资源，检查约束条件，然后在Confirm阶段修改数据，在Cancel阶段释放预留的资源。经过精心的设计，能够在业务逻辑上保证Confirm/Cancel的最终成功</p>
+<h2 id="如何选择">如何选择</h2>
+<p>当我们采用服务/微服务架构，对业务进行分拆解耦后，原先在一个单体内，使用本地数据库保证ACID的数据修改，因为跨了多个服务，就不再适用了，就需要引入分布式事务来保证新的原子性。</p>
+<p>由于分布式事务方案，无法做到ACID的保证，没有一种完美的方案，能够解决掉所有业务问题。因此在实际应用中，会根据业务的不同特性，选择最适合的分布式事务方案。</p>
+<p>特性对比:</p>
+<ul>
+<li>xa事务模式: 用户还可以按照原有的业务逻辑编写，只需要在外层接入即可，缺点是，锁数据的时间很长，并发上不去</li>
+<li>tcc事务模式: 用户需要提供Try/Confirm/Cancel，不锁数据，并发较高；支持子事务嵌套</li>
+<li>saga模式: 用户需要提供action/compensate，不锁数据，并发较高。同时所有的事务状态存储在服务器，程序崩溃不会导致回滚。</li>
+<li>事务消息模式: 用户无需编写补偿操作，但是需要提供反查接口</li>
+</ul>
+<p>应用场景:</p>
+<ul>
+<li>假设您有一个活动页面，领取一个月会员和一张优惠券，这里的领取会员以及优惠券是不会失败的，这种情况会适合采用事务消息的简化版，可以定义好包含领取会员、领取优惠券的消息，然后直接Submit，不走Prepare。</li>
+<li>假设您有一个注册用户赠送一个月会员和一张优惠券的服务，这种情况会适合采用事务消息，在注册用户的事务中，可以定义好包含领取会员、领取优惠券的消息，然后Prepare，事务提交之后，Submit。</li>
+<li>假设您有一个分布式事务，需要调用一个银行转账的接口，该接口会耗时很久，这个场景适合SAGA。因为耗时较久，适合将整个事务的所有步骤存储在服务器，避免应用程序崩溃导致回滚。</li>
+<li>假设您有一个订单业务，会根据商品信息调用不同的子事务，而且可能出现嵌套。那么它适合Tcc，因为应用对Tcc的控制最灵活，而且支持子事务嵌套</li>
+<li>假设您的业务，对并发性要求不高，那么可以选用XA。</li>
+</ul>
+<h3 id="业务分类">业务分类</h3>
+<p>下面是常见的几种业务分类，以及适合的解决方案介绍</p>
+<h4 id="多个微服务组合成原子操作">多个微服务组合成原子操作</h4>
+<p>有一类业务场景是需要把多个微服务组合成原子操作：假设您有一个活动业务，用户点击领取按钮后，会领取一张优惠券，和一个月的会员。优惠券和会员分别属于不同的服务，需要都被调用，不希望出现一个服务调用成功，另一个因为网络或者其他故障导致没有成功。</p>
+<p>这个场景适合可靠消息方案，可以使用rocketmq、rabbitmq等，发送给消息队列的消息，一定要等收到队列接收确认，再返回应用程序。</p>
+<h4 id="本地事务多个微服务组合为原子操作">本地事务+多个微服务组合为原子操作</h4>
+<p>有一类业务与前一种业务情况类似，但有一些差别：假设您有一个新用户注册成功后，领取一张优惠券和一个月会员。如果注册不成功，不希望调用领取；只有注册成功才领取。</p>
+<p>这种情况，适合本地消息方案，或者事务消息方案。这两种方案都能保证本地事务和消息的原子性。</p>
+<h4 id="订单类对一致性要求较高的业务">订单类对一致性要求较高的业务</h4>
+<p>订单交易类业务，涉及资金、库存、优惠券等多个服务，完成一个订单，需要相关的各个服务组合成一个整体可回滚的事务。如果订单进行过程中金额先扣减，后续因为库存不够只能退款，把金额补偿加回来。在这个过程中用户看到了金额减少，又金额变回来，体验很差。一般这类业务都会先冻结资金，如果订单能成功，再扣减资金；不能成功，则解冻资金，这样能够让资金信息对用户更友好。</p>
+<p>这种场景适合TCC方案，可以在TCC的Try中冻结资金，Confirm中扣减资金，Cancel中解冻资金</p>
+<h4 id="一致性要求不高的可回滚业务">一致性要求不高的可回滚业务</h4>
+<p>如果业务对事务中的一致性要求不高，允许用户看到中间状态，例如用户的积分数据等。</p>
+<p>这种模式适用SAGA模式，SAGA对比与TCC，只有正向操作和逆向补偿操作，会更加简单</p>
+<h4 id="耗时较久的全局事务">耗时较久的全局事务</h4>
+<p>耗时较旧的全局事务适合可靠消息和SAGA，不适合TCC和XA，因为大多数的XA和TCC实现，为了方便用户灵活的定义事务，通常把事务的进度保存在应用程序，一旦事务进行中应用程序崩溃，无法往前进行下一步，只能回滚。</p>
+<p>SAGA和可靠消息，把事务进度保存在数据库或消息系统中，任何一个组件临时的失败，如果重试成功，能够让事务继续。</p>
+<p>其中如果整个事务是需要回滚的，那么适合SAGA，不需要回滚的，适合可靠消息</p>
+<h5 id="并发度较低的业务">并发度较低的业务</h5>
+<p>如果业务并发度不高，事务又需要支持回滚，那么适合XA方案。XA方案，除了并发不高，也还需要本地数据库能支持XA接口。这个方案的优点是，使用上较简单，比较接近本地事务</p>
+<h2 id="参考">参考</h2>
+<p><a href="https://strikefreedom.top/distributed-transaction-theorems-uncovering">分布式事务/系统之底层原理揭秘</a></p>
+<p><a href="https://juejin.cn/post/6844903647197806605">再有人问你分布式事务，把这篇扔给他</a></p>
+<p><a href="https://zhuanlan.zhihu.com/p/183753774">面试必问：分布式事务六种解决方案</a></p>
+<p><a href="http://www.dockone.io/article/9804">终于有人把分布式事务说清楚了</a></p>
+<p><a href="https://zhuanlan.zhihu.com/p/400563576">如何选择最适合你的分布式事务方案</a></p>
+<p><a href="https://zhuanlan.zhihu.com/p/388444465">子事务屏障，一个函数调用搞定分布式事务乱序</a></p>
+<p><a href="https://dtm.pub/practice/must-succeed.html#%E4%B8%8D%E5%85%81%E8%AE%B8%E5%A4%B1%E8%B4%A5%E7%9A%84%E6%83%85%E5%86%B5">不允许失败</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-11-19
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/%E5%88%86%E5%B8%83%E5%BC%8F%E4%BA%8B%E5%8A%A1/">分布式事务</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/go%E5%A6%82%E4%BD%95%E4%BD%BF%E7%94%A8mysql%E7%9A%84xa%E4%BA%8B%E5%8A%A1/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Go如何使用MySQL的XA事务</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/%E8%8E%B7%E5%8F%96%E7%B3%BB%E7%BB%9F%E5%92%8C%E7%A1%AC%E4%BB%B6%E4%BF%A1%E6%81%AFgopsutil/">
+            <span class="next-text nav-default">获取系统和硬件信息:gopsutil</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021<span class="heart"><i class="iconfont icon-heart"></i></span><span>Forz</span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.js"></script>
+<script>
+docsearch({
+    apiKey: "b4b9da2eba53aa6dabe4b8ac9e8676e1",
+    indexName: "forz.forzvina.com",
+    appId: "IAR2EF5L65",
+    inputSelector: '.docsearch-input',
+    debug: false,
+});
+</script>
+</body>
+</html>
