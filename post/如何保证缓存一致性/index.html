@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>如何保证缓存一致性 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="缓存模式 - 数据一致性 Storage 和 Cache 同步更新容易出现数据不一致。 模拟 MySQL Slave 做数据复制，再把消息投递到 Kafka，保证至少一次消费： 同步操作DB； 同步操作" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.89.4 with theme even" />
+
+
+<link rel="canonical" href="/post/%E5%A6%82%E4%BD%95%E4%BF%9D%E8%AF%81%E7%BC%93%E5%AD%98%E4%B8%80%E8%87%B4%E6%80%A7/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.98f8e47918247c097fa26317cbb567fe9f05503485bf08d8547f5579543303b1.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="如何保证缓存一致性" />
+<meta property="og:description" content="缓存模式 - 数据一致性 Storage 和 Cache 同步更新容易出现数据不一致。 模拟 MySQL Slave 做数据复制，再把消息投递到 Kafka，保证至少一次消费： 同步操作DB； 同步操作" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/%E5%A6%82%E4%BD%95%E4%BF%9D%E8%AF%81%E7%BC%93%E5%AD%98%E4%B8%80%E8%87%B4%E6%80%A7/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-11-28T22:31:47+00:00" />
+<meta property="article:modified_time" content="2021-11-28T22:31:47+00:00" />
+
+<meta itemprop="name" content="如何保证缓存一致性">
+<meta itemprop="description" content="缓存模式 - 数据一致性 Storage 和 Cache 同步更新容易出现数据不一致。 模拟 MySQL Slave 做数据复制，再把消息投递到 Kafka，保证至少一次消费： 同步操作DB； 同步操作"><meta itemprop="datePublished" content="2021-11-28T22:31:47+00:00" />
+<meta itemprop="dateModified" content="2021-11-28T22:31:47+00:00" />
+<meta itemprop="wordCount" content="2181">
+<meta itemprop="keywords" content="缓存," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="如何保证缓存一致性"/>
+<meta name="twitter:description" content="缓存模式 - 数据一致性 Storage 和 Cache 同步更新容易出现数据不一致。 模拟 MySQL Slave 做数据复制，再把消息投递到 Kafka，保证至少一次消费： 同步操作DB； 同步操作"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">Forz Blog</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+      <a class="menu-item-link" href="/">Home</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/post/">Archives</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/tags/">Tags</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/categories/">Categories</a>
+    </li>
+  </ul>
+</nav><div class="docsearch-input__container">
+  <input type="search" class="docsearch-input" placeholder="Search" />
+</div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">如何保证缓存一致性</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-11-28 </span>
+        <div class="post-category">
+            <a href="/categories/%E7%BC%93%E5%AD%98/"> 缓存 </a>
+            </div>
+          <span class="more-meta"> 约 2181 字 </span>
+          <span class="more-meta"> 预计阅读 5 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#缓存模式---数据一致性">缓存模式 - 数据一致性</a></li>
+        <li><a href="#缓存模式---多级缓存">缓存模式 - 多级缓存</a></li>
+        <li><a href="#缓存模式---热点缓存">缓存模式 - 热点缓存</a></li>
+        <li><a href="#缓存模式---穿透缓存">缓存模式 - 穿透缓存</a></li>
+      </ul>
+    </li>
+    <li><a href="#缓存技巧">缓存技巧</a>
+      <ul>
+        <li><a href="#缓存技巧---incast-congestion">缓存技巧 - Incast Congestion</a></li>
+        <li><a href="#缓存技巧---小技巧">缓存技巧 - 小技巧</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h3 id="缓存模式---数据一致性">缓存模式 - 数据一致性</h3>
+<p>Storage 和 Cache 同步更新容易出现数据不一致。</p>
+<p>模拟 MySQL Slave 做数据复制，再把消息投递到 Kafka，保证至少一次消费：</p>
+<ol>
+<li>同步操作DB；</li>
+<li>同步操作Cache；</li>
+<li>利用Job消费消息，重新补偿一次缓存操作</li>
+</ol>
+<p>保证时效性和一致性。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210405173602.png" alt=""></p>
+<p>Cache Aside 模型中，读缓存 Miss 的回填操作，和修改数据同步更新缓存，包括消息队列的异步补偿缓存，都无法满足 “Happens Before”，会存在相互覆盖的情况。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210405182105.png" alt=""></p>
+<p>读/写同时操作：</p>
+<ol>
+<li>读操作，读缓存，缓存 MISS</li>
+<li>读操作，读 DB，读取到数据</li>
+<li>写操作，更新 DB 数据</li>
+<li>写操作 SET/DELETE Cache（可 Job 异步操作）</li>
+<li>读操作，SET操作数据回写缓存（可 Job 异步操作）</li>
+</ol>
+<p>这种交互下，由于4和5操作步骤都是设置缓存，导致写入的值互相覆盖；并且操作的顺序性不确定，从而导致 cache 存在脏缓存的情况。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210405221719.png" alt=""></p>
+<p>读/写同时操作：</p>
+<ol>
+<li>读操作，读缓存，缓存 MISS</li>
+<li>读操作，读 DB，读取到数据</li>
+<li>写操作，更新 DB 数据</li>
+<li>写操作 SET Cache（可异步 job 操作，Redis 可以使用 SETEX 操作）</li>
+<li>读操作，ADD 操作数据回写缓存（可 Job异步操作，Redis 可以使用 SETNX 操作）</li>
+</ol>
+<p>写操作使用 SET 操作命令，覆盖写缓存；读操作，使用 ADD 操作回写 MISS 数据，从而保证写操作的最新数据不会被读操作的回写数据覆盖。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210405221841.png" alt=""></p>
+<h3 id="缓存模式---多级缓存">缓存模式 - 多级缓存</h3>
+<p>微服务拆分细粒度原子业务下的整合服务（聚合服务），用于提供粗粒度的接口，以及二级缓存加速，减少扇出的 rpc 网络请求，减少延迟。</p>
+<p>最重要是保证多级缓存的一致性：</p>
+<ul>
+<li>清理的优先级是有要求的，先优先清理下游再上游；</li>
+<li>下游的缓存expire要大于上游，里面穿透回源；</li>
+</ul>
+<p>天下大势分久必合，适当的微服务合并也是不错的做法，再使用 DDD 思路以及我们介绍的目录结构组织方式，区分不同的 Usecase。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210405223702.png" alt=""></p>
+<h3 id="缓存模式---热点缓存">缓存模式 - 热点缓存</h3>
+<p>对于热点缓存 Key，按照如下思路解决：</p>
+<ul>
+<li>小表广播，从 RemoteCache 提升为LocalCache，App 定时更新，甚至可以让运营平台支持广播刷新 LocalCache；</li>
+<li>主动监控防御预热，比如直播房间页高在线情况下直接外挂服务主动防御；</li>
+<li>基础库框架支持热点发现，自动短时的 short-live cache；</li>
+<li>多 Cluster 支持；
+<ul>
+<li>多 Key 设计: 使用多副本，减小节点热点的问题</li>
+<li>使用多副本 ms_1,ms_2,ms_3 每个节点保存一份数据，使得请求分散到多个节点，避免单点热点问题。</li>
+</ul>
+</li>
+</ul>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210405225904.png" alt=""></p>
+<p>建立多个 Cluster ，和微服务、存储等一起组成一个 Region。</p>
+<p>这样相当于是用空间换时间：</p>
+<p>同一个 key 在每一个 frontend cluster 都可能有一个 copy，这样会带来 consistency 的问题，但是这样能够降低 latency 和提高 availability。利用 MySQL Binlog 消息 anycast 到不同集群的某个节点清理或者更新缓存；</p>
+<p>当业务频繁更新时候，cache频繁过期，会导致命中率低: stale sets
+如果应用程序层可以忍受稍微过期一点的数据，针对这点可以进一步降低系统负载。当一个key 被删除的时候（delete 请求或者 cache 爆棚清空间了），它被放倒一个临时的数据结构里，会再续上比较短的一段时间。当有请求进来的时候会返回这个数据并标记为“Stale”。对于大部分应用场景而言，Stale Value 是可以忍受的。(需要改 memcache、redis 源码，或者基础库支持）；</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210405230217.png" alt=""></p>
+<h3 id="缓存模式---穿透缓存">缓存模式 - 穿透缓存</h3>
+<ul>
+<li>singlefly
+对关键字进行一致性 hash，使其某一个维度的 key 一定命中某个节点，然后在节点内使用互斥锁，保证归并回源，但是对于批量查询无解；</li>
+<li>分布式锁
+设置一个 lock key，有且只有一个人成功，并且返回，交由这个人来执行回源操作，其他候选者轮训 cache 这个 lock key，如果不存在去读数据缓存，hit 就返回，miss 继续抢锁；</li>
+<li>队列
+如果 cache miss，交由队列聚合一个key，来 load 数据回写缓存，对于 miss 当前请求可以使用 singlefly 保证回源，如评论架构实现。适合回源加载数据重的任务，比如评论 miss 只返回第一页，但是需要构建完成评论数据索引。</li>
+<li>lease
+通过加入 lease 机制，可以很好避免这两个问题，lease 是 64-bit 的 token，与客户端请求的 key 绑定，对于过时设置，在写入时验证 lease，可以解决这个问题；对于 thundering herd，每个key 10s 分配一次，当 client 在没有获取到 lease 时，可以稍微等一下再访问 cache，这时往往cache 中已有数据。（基础库支持 &amp; 修改 cache 源码）；</li>
+</ul>
+<h2 id="缓存技巧">缓存技巧</h2>
+<h3 id="缓存技巧---incast-congestion">缓存技巧 - Incast Congestion</h3>
+<p>如果在网路中的包太多，就会发生 Incast Congestion 的问题（可以理解为，network 有很多switch，router 啥的，一旦一次性发一堆包，这些包同时到达 switch，这些 switch 就会忙不过来）。</p>
+<p>应对这个问题就是不要让大量包在同一时间发送出去，在客户端限制每次发出去的包的数量（具体实现就是客户端弄个队列）。</p>
+<p>每次发送的包的数量称为“Window size”。这个值太小的话，发送太慢，自然延迟会变高；这个值太大，发送的包太多把 network switch 搞崩溃了，就可能发生比如丢包之类的情况，可能被当作 cache miss，这样延迟也会变高。所以这个值需要调，一般会在 proxy 层面实现。</p>
+<h3 id="缓存技巧---小技巧">缓存技巧 - 小技巧</h3>
+<p>易读性的前提下，key 设置尽可能小，减少资源的占用，redis value 可以用 int 就不要用string，对于小于 N 的 value，redis 内部有 shared_object 缓存。</p>
+<p>拆分 key。主要是用在 redis 使用 hashes 情况下。同一个 hashes key 会落到同一个 redis 节点，hashes 过大的情况下会导致内存及请求分布的不均匀。考虑对 hash 进行拆分为小的hash，使得节点内存均匀及避免单节点请求热点。</p>
+<p>空缓存设置。对于部分数据，可能数据库始终为空，这时应该设置空缓存，避免每次请求都缓存 miss 直接打到 DB。</p>
+<p>空缓存保护策略。</p>
+<p>读失败后的写缓存策略（降级后一般读失败不触发回写缓存）。</p>
+<p>序列化使用
+protobuf，尽可能减少 size。</p>
+<p>工具化胶水代码</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210411162736.png" alt=""></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-11-28
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/%E7%BC%93%E5%AD%98/">缓存</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/memchache%E5%92%8Credis%E7%9A%84%E9%80%89%E5%9E%8B%E5%AF%B9%E6%AF%94/">
+            <span class="next-text nav-default">Memchache和redis的选型对比</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2021<span class="heart"><i class="iconfont icon-heart"></i></span><span>Forz</span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.js"></script>
+<script>
+docsearch({
+    apiKey: "b4b9da2eba53aa6dabe4b8ac9e8676e1",
+    indexName: "forz.forzvina.com",
+    appId: "IAR2EF5L65",
+    inputSelector: '.docsearch-input',
+    debug: false,
+});
+</script>
+</body>
+</html>
