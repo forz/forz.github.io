@@ -23,7 +23,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.89.4 with theme even" />
+<meta name="generator" content="Hugo 0.91.1 with theme even" />
 
 
 <link rel="canonical" href="/post/%E5%88%86%E5%B8%83%E5%BC%8F%E9%94%81%E7%9A%84%E5%AE%9E%E7%8E%B0/" />
@@ -49,7 +49,7 @@
 <meta itemprop="name" content="分布式锁的实现">
 <meta itemprop="description" content="为何需要分布式锁 一般我们使用分布式锁有两个场景: 效率:使用分布式锁可以避免不同节点重复相同的工作，这些工作会浪费资源。比如用户付了钱之后有可"><meta itemprop="datePublished" content="2019-09-06T18:02:26+00:00" />
 <meta itemprop="dateModified" content="2019-09-06T18:02:26+00:00" />
-<meta itemprop="wordCount" content="20376">
+<meta itemprop="wordCount" content="24682">
 <meta itemprop="keywords" content="分布式," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="分布式锁的实现"/>
 <meta name="twitter:description" content="为何需要分布式锁 一般我们使用分布式锁有两个场景: 效率:使用分布式锁可以避免不同节点重复相同的工作，这些工作会浪费资源。比如用户付了钱之后有可"/>
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/%E6%9E%B6%E6%9E%84/"> 架构 </a>
             </div>
-          <span class="more-meta"> 约 20376 字 </span>
-          <span class="more-meta"> 预计阅读 41 分钟 </span>
+          <span class="more-meta"> 约 24682 字 </span>
+          <span class="more-meta"> 预计阅读 50 分钟 </span>
         
       </div>
     </header>
@@ -158,6 +158,7 @@
         <li><a href="#优化记录锁的归属">优化:记录锁的归属</a></li>
         <li><a href="#优化timestamp替换为uniqid">优化:Timestamp替换为UniqId</a></li>
         <li><a href="#优化共享资源校验锁">优化:共享资源校验锁</a></li>
+        <li><a href="#使用">使用</a></li>
         <li><a href="#总结-1">总结</a></li>
       </ul>
     </li>
@@ -165,6 +166,18 @@
       <ul>
         <li><a href="#基于-redlock-做分布式锁">基于 Redlock 做分布式锁</a></li>
         <li><a href="#redlock-的质疑">Redlock 的质疑</a></li>
+        <li><a href="#使用-1">使用</a></li>
+      </ul>
+    </li>
+  </ul>
+
+  <ul>
+    <li><a href="#易错点">易错点</a>
+      <ul>
+        <li><a href="#现象">现象</a></li>
+        <li><a href="#排查过程">排查过程</a></li>
+        <li><a href="#etcd源码部分">etcd源码部分</a></li>
+        <li><a href="#总结-2">总结</a></li>
       </ul>
     </li>
   </ul>
@@ -614,7 +627,122 @@ expire 设置过期时间，要注意的是 setnx 命令不能设置 key 的超�
 <p>在这个分布式数据存储服务（共享资源）的例子中，客户端在标记完成之后执行写入操作的时候，存储服务的节点需要判断epoch number是不是最新，然后确定能不能执行写入操作。如果按照上一节我们的分析思路，这里的epoch判断和接下来的写入操作，是不是在一个原子操作里呢？根据Flavio Junqueira的相关描述，我们相信，应该是原子的。那么既然资源本身可以提供原子互斥操作了，那么分布式锁还有存在的意义吗？应该说有。客户端可以利用分布式锁有效地避免冲突，等待写入机会，这对于包含多个节点的分布式资源尤其有用（当然，是出于效率的原因）。</p>
 <p>这个方案是目前最优的分布式锁方案，但是如果在Redis集群环境下依然存在问题：</p>
 <p>由于Redis集群数据同步为异步，假设在Master节点获取到锁后未完成数据同步情况下Master节点crash，此时在新的Master节点依然可以获取锁，所以多个Client同时获取到了锁</p>
-<h3 id="总结-1">总结</h3>
+<h3 id="使用">使用</h3>
+<p>一个Go的实现：<a href="https://github.com/bsm/redislock">https://github.com/bsm/redislock</a> (基于go-redis)</p>
+<p>使用方法:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">import</span> <span class="p">(</span>
+  <span class="s">&#34;fmt&#34;</span>
+  <span class="s">&#34;time&#34;</span>
+
+  <span class="s">&#34;github.com/bsm/redislock&#34;</span>
+  <span class="s">&#34;github.com/go-redis/redis&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="c1">// Connect to redis.
+</span><span class="c1"></span>    <span class="nx">client</span> <span class="o">:=</span> <span class="nx">redis</span><span class="p">.</span><span class="nf">NewClient</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">redis</span><span class="p">.</span><span class="nx">Options</span><span class="p">{</span>
+		<span class="nx">Network</span><span class="p">:</span>	<span class="s">&#34;tcp&#34;</span><span class="p">,</span>
+		<span class="nx">Addr</span><span class="p">:</span>		<span class="s">&#34;127.0.0.1:6379&#34;</span><span class="p">,</span>
+	<span class="p">})</span>
+	<span class="k">defer</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+
+	<span class="c1">// Create a new lock client.
+</span><span class="c1"></span>	<span class="nx">locker</span> <span class="o">:=</span> <span class="nx">redislock</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nx">client</span><span class="p">)</span>
+
+	<span class="c1">// Try to obtain lock.
+</span><span class="c1"></span>	<span class="nx">lock</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">locker</span><span class="p">.</span><span class="nf">Obtain</span><span class="p">(</span><span class="s">&#34;my-key&#34;</span><span class="p">,</span> <span class="mi">100</span><span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">==</span> <span class="nx">redislock</span><span class="p">.</span><span class="nx">ErrNotObtained</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;Could not obtain lock!&#34;</span><span class="p">)</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Fatalln</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Don&#39;t forget to defer Release.
+</span><span class="c1"></span>	<span class="k">defer</span> <span class="nx">lock</span><span class="p">.</span><span class="nf">Release</span><span class="p">()</span>
+	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;I have a lock!&#34;</span><span class="p">)</span>
+
+	<span class="c1">// Sleep and check the remaining TTL.
+</span><span class="c1"></span>	<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="mi">50</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">ttl</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">lock</span><span class="p">.</span><span class="nf">TTL</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Fatalln</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">ttl</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;Yay, I still have my lock!&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Extend my lock.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">lock</span><span class="p">.</span><span class="nf">Refresh</span><span class="p">(</span><span class="mi">100</span><span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span><span class="p">,</span> <span class="kc">nil</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Fatalln</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Sleep a little longer, then check.
+</span><span class="c1"></span>	<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="mi">100</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">ttl</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">lock</span><span class="p">.</span><span class="nf">TTL</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Fatalln</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">ttl</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;Now, my lock has expired!&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="总结-1">总结</h3>
 <p>至此，基于单Redis节点的分布式锁的算法就描述完了。这里面有好几个问题需要重点分析一下。</p>
 <p>首先第一个问题，这个锁必须要设置一个过期时间。否则的话，当一个客户端获取锁成功之后，假如它崩溃了，或者由于发生了网络分割（network partition）导致它再也无法和Redis节点通信了，那么它就会一直持有这个锁，而其它客户端永远无法获得锁了。antirez在后面的分析中也特别强调了这一点，而且把这个过期时间称为锁的有效时间(lock validity time)。获得锁的客户端必须在这个时间之内完成对共享资源的访问。</p>
 <p>第二个问题，第一步获取锁的操作，网上不少文章把它实现成了两个Redis命令：</p>
@@ -744,14 +872,8 @@ expire 设置过期时间，要注意的是 setnx 命令不能设置 key 的超�
 <p>antirez是同意大的系统时钟跳跃会造成Redlock失效的。在这一点上，他与Martin的观点的不同在于，他认为在实际系统中是可以避免大的时钟跳跃的。当然，这取决于基础设施和运维方式。</p>
 <p>antirez在设计Redlock的时候，是充分考虑了网络延迟和程序停顿所带来的影响的。但是，对于客户端和资源服务器之间的延迟（即发生在算法第3步之后的延迟），antirez是承认所有的分布式锁的实现，包括Redlock，是没有什么好办法来应对的。</p>
 <p>讨论进行到这，Martin和antirez之间谁对谁错其实并不是那么重要了。只要我们能够对Redlock（或者其它分布式锁）所能提供的安全性的程度有充分的了解，那么我们就能做出自己的选择了。</p>
-<h1 id="etcd实现分布式锁">ETCD实现分布式锁</h1>
-<p>很多人（也包括Martin在内）都认为，如果你想构建一个更安全的分布式锁，那么应该使用ETCD，而不是Redis:</p>
-<ol>
-<li>客户端尝试创建一个节点node，比如/lock。那么第一个客户端就创建成功了，相当于拿到了锁；而其它的客户端会创建失败（节点node已存在），获取锁失败。</li>
-<li>持有锁的客户端访问共享资源完成后，将znode删掉，这样其它客户端接下来就能来获取锁了。</li>
-<li>node与session的lease绑定。它保证如果创建node的那个客户端崩溃了，那么相应的node会被自动删除。这保证了锁一定会被释放。</li>
-</ol>
-<p>这是ETCD客户端的分布式锁实现。</p>
+<h3 id="使用-1">使用</h3>
+<p>一个Go的实现：<a href="https://github.com/go-redsync/redsync">https://github.com/go-redsync/redsync</a> (基于redigo))</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -790,65 +912,279 @@ expire 设置过期时间，要注意的是 setnx 命令不能设置 key 的超�
 </span><span class="lnt">34
 </span><span class="lnt">35
 </span><span class="lnt">36
-</span><span class="lnt">37
-</span><span class="lnt">38
-</span><span class="lnt">39
-</span><span class="lnt">40
-</span><span class="lnt">41
-</span><span class="lnt">42
-</span><span class="lnt">43
-</span><span class="lnt">44
-</span><span class="lnt">45
-</span><span class="lnt">46
-</span><span class="lnt">47
-</span><span class="lnt">48
-</span><span class="lnt">49
-</span><span class="lnt">50
-</span><span class="lnt">51
-</span><span class="lnt">52
-</span><span class="lnt">53
-</span><span class="lnt">54
-</span><span class="lnt">55
-</span><span class="lnt">56
-</span><span class="lnt">57
-</span><span class="lnt">58
-</span><span class="lnt">59
-</span><span class="lnt">60
-</span><span class="lnt">61
-</span><span class="lnt">62
-</span><span class="lnt">63
-</span><span class="lnt">64
-</span><span class="lnt">65
-</span><span class="lnt">66
-</span><span class="lnt">67
-</span><span class="lnt">68
-</span><span class="lnt">69
-</span><span class="lnt">70
-</span><span class="lnt">71
-</span><span class="lnt">72
-</span><span class="lnt">73
-</span><span class="lnt">74
-</span><span class="lnt">75
-</span><span class="lnt">76
-</span><span class="lnt">77
-</span><span class="lnt">78
-</span><span class="lnt">79
-</span><span class="lnt">80
-</span><span class="lnt">81
-</span><span class="lnt">82
-</span><span class="lnt">83
-</span><span class="lnt">84
-</span><span class="lnt">85
-</span><span class="lnt">86
-</span><span class="lnt">87
-</span><span class="lnt">88
-</span><span class="lnt">89
-</span><span class="lnt">90
-</span><span class="lnt">91
-</span><span class="lnt">92
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Mutex</span> <span class="kd">struct</span> <span class="p">{</span>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="nx">goredislib</span> <span class="s">&#34;github.com/go-redis/redis&#34;</span>
+	<span class="s">&#34;github.com/go-redsync/redsync/v3&#34;</span>
+	<span class="s">&#34;github.com/go-redsync/redsync/v3/redis&#34;</span>
+	<span class="s">&#34;github.com/go-redsync/redsync/v3/redis/goredis&#34;</span>
+	<span class="s">&#34;github.com/stvp/tempredis&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+
+	<span class="nx">server</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">tempredis</span><span class="p">.</span><span class="nf">Start</span><span class="p">(</span><span class="nx">tempredis</span><span class="p">.</span><span class="nx">Config</span><span class="p">{})</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">defer</span> <span class="nx">server</span><span class="p">.</span><span class="nf">Term</span><span class="p">()</span>
+
+	<span class="nx">client</span> <span class="o">:=</span> <span class="nx">goredislib</span><span class="p">.</span><span class="nf">NewClient</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">goredislib</span><span class="p">.</span><span class="nx">Options</span><span class="p">{</span>
+		<span class="nx">Network</span><span class="p">:</span> <span class="s">&#34;unix&#34;</span><span class="p">,</span>
+		<span class="nx">Addr</span><span class="p">:</span>    <span class="nx">server</span><span class="p">.</span><span class="nf">Socket</span><span class="p">(),</span>
+	<span class="p">})</span>
+
+	<span class="nx">pool</span> <span class="o">:=</span> <span class="nx">goredis</span><span class="p">.</span><span class="nf">NewGoredisPool</span><span class="p">(</span><span class="nx">client</span><span class="p">)</span>
+
+	<span class="nx">rs</span> <span class="o">:=</span> <span class="nx">redsync</span><span class="p">.</span><span class="nf">New</span><span class="p">([]</span><span class="nx">redis</span><span class="p">.</span><span class="nx">Pool</span><span class="p">{</span><span class="nx">pool</span><span class="p">})</span>
+
+	<span class="nx">mutex</span> <span class="o">:=</span> <span class="nx">rs</span><span class="p">.</span><span class="nf">NewMutex</span><span class="p">(</span><span class="s">&#34;test-redsync&#34;</span><span class="p">)</span>
+	<span class="nx">err</span> <span class="p">=</span> <span class="nx">mutex</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="nx">mutex</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h1 id="etcd实现分布式锁">ETCD实现分布式锁</h1>
+<p>很多人（也包括Martin在内）都认为，如果你想构建一个更安全的分布式锁，那么应该使用ETCD，而不是Redis:</p>
+<ol>
+<li>客户端尝试创建一个节点node，比如/lock。那么第一个客户端就创建成功了，相当于拿到了锁；而其它的客户端会创建失败（节点node已存在），获取锁失败。</li>
+<li>持有锁的客户端访问共享资源完成后，将znode删掉，这样其它客户端接下来就能来获取锁了。</li>
+<li>node与session的lease绑定。它保证如果创建node的那个客户端崩溃了，那么相应的node会被自动删除。这保证了锁一定会被释放。</li>
+</ol>
+<p>这是ETCD客户端的分布式锁实现。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span><span class="lnt">103
+</span><span class="lnt">104
+</span><span class="lnt">105
+</span><span class="lnt">106
+</span><span class="lnt">107
+</span><span class="lnt">108
+</span><span class="lnt">109
+</span><span class="lnt">110
+</span><span class="lnt">111
+</span><span class="lnt">112
+</span><span class="lnt">113
+</span><span class="lnt">114
+</span><span class="lnt">115
+</span><span class="lnt">116
+</span><span class="lnt">117
+</span><span class="lnt">118
+</span><span class="lnt">119
+</span><span class="lnt">120
+</span><span class="lnt">121
+</span><span class="lnt">122
+</span><span class="lnt">123
+</span><span class="lnt">124
+</span><span class="lnt">125
+</span><span class="lnt">126
+</span><span class="lnt">127
+</span><span class="lnt">128
+</span><span class="lnt">129
+</span><span class="lnt">130
+</span><span class="lnt">131
+</span><span class="lnt">132
+</span><span class="lnt">133
+</span><span class="lnt">134
+</span><span class="lnt">135
+</span><span class="lnt">136
+</span><span class="lnt">137
+</span><span class="lnt">138
+</span><span class="lnt">139
+</span><span class="lnt">140
+</span><span class="lnt">141
+</span><span class="lnt">142
+</span><span class="lnt">143
+</span><span class="lnt">144
+</span><span class="lnt">145
+</span><span class="lnt">146
+</span><span class="lnt">147
+</span><span class="lnt">148
+</span><span class="lnt">149
+</span><span class="lnt">150
+</span><span class="lnt">151
+</span><span class="lnt">152
+</span><span class="lnt">153
+</span><span class="lnt">154
+</span><span class="lnt">155
+</span><span class="lnt">156
+</span><span class="lnt">157
+</span><span class="lnt">158
+</span><span class="lnt">159
+</span><span class="lnt">160
+</span><span class="lnt">161
+</span><span class="lnt">162
+</span><span class="lnt">163
+</span><span class="lnt">164
+</span><span class="lnt">165
+</span><span class="lnt">166
+</span><span class="lnt">167
+</span><span class="lnt">168
+</span><span class="lnt">169
+</span><span class="lnt">170
+</span><span class="lnt">171
+</span><span class="lnt">172
+</span><span class="lnt">173
+</span><span class="lnt">174
+</span><span class="lnt">175
+</span><span class="lnt">176
+</span><span class="lnt">177
+</span><span class="lnt">178
+</span><span class="lnt">179
+</span><span class="lnt">180
+</span><span class="lnt">181
+</span><span class="lnt">182
+</span><span class="lnt">183
+</span><span class="lnt">184
+</span><span class="lnt">185
+</span><span class="lnt">186
+</span><span class="lnt">187
+</span><span class="lnt">188
+</span><span class="lnt">189
+</span><span class="lnt">190
+</span><span class="lnt">191
+</span><span class="lnt">192
+</span><span class="lnt">193
+</span><span class="lnt">194
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Copyright 2016 The etcd Authors
+</span><span class="c1">//
+</span><span class="c1">// Licensed under the Apache License, Version 2.0 (the &#34;License&#34;);
+</span><span class="c1">// you may not use this file except in compliance with the License.
+</span><span class="c1">// You may obtain a copy of the License at
+</span><span class="c1">//
+</span><span class="c1">//     http://www.apache.org/licenses/LICENSE-2.0
+</span><span class="c1">//
+</span><span class="c1">// Unless required by applicable law or agreed to in writing, software
+</span><span class="c1">// distributed under the License is distributed on an &#34;AS IS&#34; BASIS,
+</span><span class="c1">// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+</span><span class="c1">// See the License for the specific language governing permissions and
+</span><span class="c1">// limitations under the License.
+</span><span class="c1"></span>
+<span class="kn">package</span> <span class="nx">concurrency</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;context&#34;</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;sync&#34;</span>
+
+	<span class="nx">v3</span> <span class="s">&#34;github.com/coreos/etcd/clientv3&#34;</span>
+	<span class="nx">pb</span> <span class="s">&#34;github.com/coreos/etcd/etcdserver/etcdserverpb&#34;</span>
+<span class="p">)</span>
+
+<span class="c1">// Mutex implements the sync Locker interface with etcd
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Mutex</span> <span class="kd">struct</span> <span class="p">{</span>
 	<span class="nx">s</span> <span class="o">*</span><span class="nx">Session</span>
 
 	<span class="nx">pfx</span>   <span class="kt">string</span>
@@ -940,6 +1276,248 @@ expire 设置过期时间，要注意的是 setnx 命令不能设置 key 的超�
 	<span class="k">return</span> <span class="kc">nil</span>
 <span class="p">}</span>
 
+<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Mutex</span><span class="p">)</span> <span class="nf">IsOwner</span><span class="p">()</span> <span class="nx">v3</span><span class="p">.</span><span class="nx">Cmp</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">Compare</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">CreateRevision</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">myKey</span><span class="p">),</span> <span class="s">&#34;=&#34;</span><span class="p">,</span> <span class="nx">m</span><span class="p">.</span><span class="nx">myRev</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Mutex</span><span class="p">)</span> <span class="nf">Key</span><span class="p">()</span> <span class="kt">string</span> <span class="p">{</span> <span class="k">return</span> <span class="nx">m</span><span class="p">.</span><span class="nx">myKey</span> <span class="p">}</span>
+
+<span class="c1">// Header is the response header received from etcd on acquiring the lock.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Mutex</span><span class="p">)</span> <span class="nf">Header</span><span class="p">()</span> <span class="o">*</span><span class="nx">pb</span><span class="p">.</span><span class="nx">ResponseHeader</span> <span class="p">{</span> <span class="k">return</span> <span class="nx">m</span><span class="p">.</span><span class="nx">hdr</span> <span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">lockerMutex</span> <span class="kd">struct</span><span class="p">{</span> <span class="o">*</span><span class="nx">Mutex</span> <span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">lm</span> <span class="o">*</span><span class="nx">lockerMutex</span><span class="p">)</span> <span class="nf">Lock</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">client</span> <span class="o">:=</span> <span class="nx">lm</span><span class="p">.</span><span class="nx">s</span><span class="p">.</span><span class="nf">Client</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">lm</span><span class="p">.</span><span class="nx">Mutex</span><span class="p">.</span><span class="nf">Lock</span><span class="p">(</span><span class="nx">client</span><span class="p">.</span><span class="nf">Ctx</span><span class="p">());</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">lm</span> <span class="o">*</span><span class="nx">lockerMutex</span><span class="p">)</span> <span class="nf">Unlock</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">client</span> <span class="o">:=</span> <span class="nx">lm</span><span class="p">.</span><span class="nx">s</span><span class="p">.</span><span class="nf">Client</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">lm</span><span class="p">.</span><span class="nx">Mutex</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">(</span><span class="nx">client</span><span class="p">.</span><span class="nf">Ctx</span><span class="p">());</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// NewLocker creates a sync.Locker backed by an etcd mutex.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewLocker</span><span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Session</span><span class="p">,</span> <span class="nx">pfx</span> <span class="kt">string</span><span class="p">)</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Locker</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">lockerMutex</span><span class="p">{</span><span class="nf">NewMutex</span><span class="p">(</span><span class="nx">s</span><span class="p">,</span> <span class="nx">pfx</span><span class="p">)}</span>
+<span class="p">}</span>
+
+<span class="c1">// 等待持有锁的key删除
+</span><span class="c1">// 内部实现为等其他所有比当前createRevision小的key,监听删除事件
+</span><span class="c1">// waitDeletes efficiently waits until all keys matching the prefix and no greater
+</span><span class="c1">// than the create revision.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">waitDeletes</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">client</span> <span class="o">*</span><span class="nx">v3</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">pfx</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">maxCreateRev</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">pb</span><span class="p">.</span><span class="nx">ResponseHeader</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">//WithLastCreate 按照CreateRevision排序,降序 例如 5 4 3 2 1
+</span><span class="c1"></span>    <span class="c1">//WithMaxCreateRev 获取比maxCreateRev小的key
+</span><span class="c1"></span>	<span class="nx">getOpts</span> <span class="o">:=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">WithLastCreate</span><span class="p">(),</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithMaxCreateRev</span><span class="p">(</span><span class="nx">maxCreateRev</span><span class="p">))</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">pfx</span><span class="p">,</span> <span class="nx">getOpts</span><span class="o">...</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span><span class="p">,</span> <span class="kc">nil</span>
+		<span class="p">}</span>
+		<span class="nx">lastKey</span> <span class="o">:=</span> <span class="nb">string</span><span class="p">(</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nx">Key</span><span class="p">)</span>
+        <span class="c1">//监听删除事件
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">err</span> <span class="p">=</span> <span class="nf">waitDelete</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">client</span><span class="p">,</span> <span class="nx">lastKey</span><span class="p">,</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span><span class="p">.</span><span class="nx">Revision</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+<span class="c1">//从revision开始监听删除事件,因为revision存在,所以也避免了ABA问题
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">waitDelete</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">client</span> <span class="o">*</span><span class="nx">v3</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">rev</span> <span class="kt">int64</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">cctx</span><span class="p">,</span> <span class="nx">cancel</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">WithCancel</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+	<span class="k">defer</span> <span class="nf">cancel</span><span class="p">()</span>
+
+	<span class="kd">var</span> <span class="nx">wr</span> <span class="nx">v3</span><span class="p">.</span><span class="nx">WatchResponse</span>
+	<span class="nx">wch</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Watch</span><span class="p">(</span><span class="nx">cctx</span><span class="p">,</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithRev</span><span class="p">(</span><span class="nx">rev</span><span class="p">))</span>
+	<span class="k">for</span> <span class="nx">wr</span> <span class="p">=</span> <span class="k">range</span> <span class="nx">wch</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ev</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">wr</span><span class="p">.</span><span class="nx">Events</span> <span class="p">{</span>
+            <span class="c1">//遇到删除事件才返回
+</span><span class="c1"></span>			<span class="k">if</span> <span class="nx">ev</span><span class="p">.</span><span class="nx">Type</span> <span class="o">==</span> <span class="nx">mvccpb</span><span class="p">.</span><span class="nx">DELETE</span> <span class="p">{</span>
+				<span class="k">return</span> <span class="kc">nil</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">wr</span><span class="p">.</span><span class="nf">Err</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">ctx</span><span class="p">.</span><span class="nf">Err</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;lost watcher waiting for delete&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><p>总结一下，上面的锁的实现，所有的客户端都在service/lock下创建一个自己的key，createrevision最小的那个客户端获得锁，也就是最早建立key的客户端获得锁，之后按照创建的时间先后依次获得锁。</p>
+<p>CreateRevision: 创建时的revision</p>
+<p>Header.Revision: etcd server现在的revision</p>
+<p>刚才说了那么多revision,这里我们需要详细的了解一下etcd中的mvcc多版本机制</p>
+<p>那么我们先来明确几个概念:</p>
+<p>main ID:在etcd中每个事务的唯一id,全局递增不重复.</p>
+<p>sub ID: 在事务中的连续多个修改操作会从0开始编号,这个编号就是sub ID</p>
+<p>revision: 由(mainID,subID)组成的唯一标识</p>
+<p>所以现在我们的revision就是这么来的啦…</p>
+<p>使用方式:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Copyright 2017 The etcd Authors
+</span><span class="c1">//
+</span><span class="c1">// Licensed under the Apache License, Version 2.0 (the &#34;License&#34;);
+</span><span class="c1">// you may not use this file except in compliance with the License.
+</span><span class="c1">// You may obtain a copy of the License at
+</span><span class="c1">//
+</span><span class="c1">//     http://www.apache.org/licenses/LICENSE-2.0
+</span><span class="c1">//
+</span><span class="c1">// Unless required by applicable law or agreed to in writing, software
+</span><span class="c1">// distributed under the License is distributed on an &#34;AS IS&#34; BASIS,
+</span><span class="c1">// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+</span><span class="c1">// See the License for the specific language governing permissions and
+</span><span class="c1">// limitations under the License.
+</span><span class="c1"></span>
+<span class="kn">package</span> <span class="nx">concurrency_test</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;context&#34;</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;log&#34;</span>
+
+	<span class="s">&#34;github.com/coreos/etcd/clientv3&#34;</span>
+	<span class="s">&#34;github.com/coreos/etcd/clientv3/concurrency&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">ExampleMutex_Lock</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">cli</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">clientv3</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nx">clientv3</span><span class="p">.</span><span class="nx">Config</span><span class="p">{</span><span class="nx">Endpoints</span><span class="p">:</span> <span class="nx">endpoints</span><span class="p">})</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">defer</span> <span class="nx">cli</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+
+	<span class="c1">// create two separate sessions for lock competition
+</span><span class="c1"></span>	<span class="nx">s1</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">concurrency</span><span class="p">.</span><span class="nf">NewSession</span><span class="p">(</span><span class="nx">cli</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">defer</span> <span class="nx">s1</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+	<span class="nx">m1</span> <span class="o">:=</span> <span class="nx">concurrency</span><span class="p">.</span><span class="nf">NewMutex</span><span class="p">(</span><span class="nx">s1</span><span class="p">,</span> <span class="s">&#34;/my-lock/&#34;</span><span class="p">)</span>
+
+	<span class="nx">s2</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">concurrency</span><span class="p">.</span><span class="nf">NewSession</span><span class="p">(</span><span class="nx">cli</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">defer</span> <span class="nx">s2</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+	<span class="nx">m2</span> <span class="o">:=</span> <span class="nx">concurrency</span><span class="p">.</span><span class="nf">NewMutex</span><span class="p">(</span><span class="nx">s2</span><span class="p">,</span> <span class="s">&#34;/my-lock/&#34;</span><span class="p">)</span>
+
+	<span class="c1">// acquire lock for s1
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">m1</span><span class="p">.</span><span class="nf">Lock</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">());</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;acquired lock for s1&#34;</span><span class="p">)</span>
+
+	<span class="nx">m2Locked</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">m2Locked</span><span class="p">)</span>
+		<span class="c1">// wait until s1 is locks /my-lock/
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">m2</span><span class="p">.</span><span class="nf">Lock</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">());</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">log</span><span class="p">.</span><span class="nf">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">m1</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">());</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;released lock for s1&#34;</span><span class="p">)</span>
+
+	<span class="o">&lt;-</span><span class="nx">m2Locked</span>
+	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;acquired lock for s2&#34;</span><span class="p">)</span>
+
+	<span class="c1">// Output:
+</span><span class="c1"></span>	<span class="c1">// acquired lock for s1
+</span><span class="c1"></span>	<span class="c1">// released lock for s1
+</span><span class="c1"></span>	<span class="c1">// acquired lock for s2
+</span><span class="c1"></span><span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
 </div><p>ETCD版本的分布式锁问题相对比较来说少。</p>
@@ -963,6 +1541,302 @@ expire 设置过期时间，要注意的是 setnx 命令不能设置 key 的超�
 <p>看起来，用ETCD实现的分布式锁也不一定就是安全的。该有的问题它还是有。但是，ETCD作为一个专门为分布式应用提供方案的框架，它提供了一些非常好的特性，是Redis之类的方案所没有的。</p>
 <p>ETCD 实现的分布式锁其实存在一个缺点，那就是性能上可能并没有缓存服务那么高。因为每次在创建锁和释放锁的过程中，都要动态创建、销毁瞬时节点来实现锁功能。ETCD 中创建和删除节点只能通过 Leader 服务器来执行，然后将数据同不到所有的 Follower 机器上。</p>
 <p>对锁数据的可靠性要求极高的话，那只能使用 etcd 或者 zk 这种通过一致性协议保证数据可靠性的锁方案。但可靠的背面往往都是较低的吞吐量和较高的延迟。需要根据业务的量级对其进行压力测试，以确保分布式锁所使用的 etcd/zk 集群可以承受得住实际的业务请求压力。需要注意的是，etcd 集群是没有办法通过增加节点来提高其性能的。要对其进行横向扩展，只能增加搭建多个集群来支持更多的请求。这会进一步提高对运维和监控的要求。多个集群可能需要引入 proxy，没有 proxy 那就需要业务去根据某个业务 id 来做 sharding。如果业务已经上线的情况下做扩展，还要考虑数据的动态迁移。这些都不是容易的事情。</p>
+<h2 id="易错点">易错点</h2>
+<h3 id="现象">现象</h3>
+<p>线上程序一直报错，错误信息：lock failed: context deadline exceeded, retry</p>
+<h3 id="排查过程">排查过程</h3>
+<p>异常对应代码位置</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190907163640.png" alt=""></p>
+<p>很明显的是获取锁超时了，由于用的etcd的分布式锁，就怀疑是etcd出问题了，此时看到大量etcd日志，rejected connection from “ip:port” (error “tls: first record does not look like a TLS handshake”, ServerName “”)，怀疑是不是这个问题导致的，经过查询报错的IP，均为线上容器IP，登陆容器内看发现都是管理员平台的代码，里面也用到了py03的etcd，但是不是导致超时的原因。在排除各种可能之后，最后去etcd查看锁对应的key的情况，发现有两个key</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback">/notifier/locker/{leaseid}
+
+/notifier/locker/rwl/{leaseid}
+</code></pre></td></tr></table>
+</div>
+</div><p>其中第一个key是notifier自己添加的，第二个key在代码中搜不到，但是看起来像是redis whitelist的简写，先把第一个key删了，然后看notifier日志，仍然获取不到锁，所以怀疑是第二个key已经获得了锁，虽然key不一样。于是删除了第二个key，再看notifier日志，终于获得了锁，开始正常工作，于是得出猜想，etcd的分布式锁，在子目录下加了锁之后，父目录会加锁失败。然后用etcdctl lock来验证了下，确实如此，/a/b下加了锁，/a再加锁就会失败，但是/a下加了锁，/a/b再加锁会成功。基本上可以验证上面的猜想，剩下的就是从etcd源码中找到对应处理的代码了。</p>
+<h3 id="etcd源码部分">etcd源码部分</h3>
+<p>在查询源码之前，第一反应就是这肯定是在服务端实现的，于是开始了从etcd服务端找相关源码的过程，从etcdctl命令开始追溯到所涉及的服务端，一直没有发现问题。又在网上搜了相关etcd服务端源码实现的文章，结合本地代码均没有想找的代码，于是反过来从client找起。</p>
+<p>首先从etcdctl lock命令开始，挑主要函数展示</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 代码位置go.etcd.io/etcd/etcdctl/ctlv3/command/lock_command.go
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">lockUntilSignal</span><span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">clientv3</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">lockname</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">cmdArgs</span> <span class="p">[]</span><span class="kt">string</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+   <span class="o">...</span>
+
+   <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">Lock</span><span class="p">(</span><span class="nx">ctx</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="k">return</span> <span class="nx">err</span>
+   <span class="p">}</span>
+
+   <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>接下来进入到Lock函数，这是个关键函数，etcd的分布式锁就是在这里实现的</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
+</span><span class="lnt">83
+</span><span class="lnt">84
+</span><span class="lnt">85
+</span><span class="lnt">86
+</span><span class="lnt">87
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Mutex</span><span class="p">)</span> <span class="nf">Lock</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+   <span class="nx">s</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">s</span>
+   <span class="nx">client</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">s</span><span class="p">.</span><span class="nf">Client</span><span class="p">()</span>
+
+   <span class="c1">// 这里的pfx就是prefix，就是传进来的前缀，后面的s.Lease()会返回一个租约，是一个int64的整数，和session有关
+</span><span class="c1"></span>   <span class="nx">m</span><span class="p">.</span><span class="nx">myKey</span> <span class="p">=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%s%x&#34;</span><span class="p">,</span> <span class="nx">m</span><span class="p">.</span><span class="nx">pfx</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nf">Lease</span><span class="p">())</span>
+   <span class="c1">// 这里比较上面prefix/lease的createrevision是否为0，为0表示目前不存在该key，需要执行Put操作，下面可以看到
+</span><span class="c1"></span>   <span class="c1">// 部位0表示已经有对应的key了，只需要执行Get就行
+</span><span class="c1"></span>   <span class="c1">// createrevision是自增的
+</span><span class="c1"></span>   <span class="nx">cmp</span> <span class="o">:=</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">Compare</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">CreateRevision</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">myKey</span><span class="p">),</span> <span class="s">&#34;=&#34;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+   <span class="c1">// put self in lock waiters via myKey; oldest waiter holds lock
+</span><span class="c1"></span>   <span class="nx">put</span> <span class="o">:=</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">OpPut</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">myKey</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithLease</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">Lease</span><span class="p">()))</span>
+   <span class="c1">// reuse key in case this session already holds the lock
+</span><span class="c1"></span>   <span class="nx">get</span> <span class="o">:=</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">OpGet</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">myKey</span><span class="p">)</span>
+   <span class="c1">// 获取所得持有者
+</span><span class="c1"></span>   <span class="nx">getOwner</span> <span class="o">:=</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">OpGet</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">pfx</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithFirstCreate</span><span class="p">()</span><span class="o">...</span><span class="p">)</span>
+   <span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Txn</span><span class="p">(</span><span class="nx">ctx</span><span class="p">).</span><span class="nf">If</span><span class="p">(</span><span class="nx">cmp</span><span class="p">).</span><span class="nf">Then</span><span class="p">(</span><span class="nx">put</span><span class="p">,</span> <span class="nx">getOwner</span><span class="p">).</span><span class="nf">Else</span><span class="p">(</span><span class="nx">get</span><span class="p">,</span> <span class="nx">getOwner</span><span class="p">).</span><span class="nf">Commit</span><span class="p">()</span>
+   <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="k">return</span> <span class="nx">err</span>
+   <span class="p">}</span>
+   <span class="nx">m</span><span class="p">.</span><span class="nx">myRev</span> <span class="p">=</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span><span class="p">.</span><span class="nx">Revision</span>
+   <span class="k">if</span> <span class="p">!</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Succeeded</span> <span class="p">{</span>
+      <span class="nx">m</span><span class="p">.</span><span class="nx">myRev</span> <span class="p">=</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Responses</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nf">GetResponseRange</span><span class="p">().</span><span class="nx">Kvs</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nx">CreateRevision</span>
+   <span class="p">}</span>
+   <span class="c1">// if no key on prefix / the minimum rev is key, already hold the lock
+</span><span class="c1"></span>   <span class="nx">ownerKey</span> <span class="o">:=</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Responses</span><span class="p">[</span><span class="mi">1</span><span class="p">].</span><span class="nf">GetResponseRange</span><span class="p">().</span><span class="nx">Kvs</span>
+   <span class="c1">// 比较如果当前没有人获得锁或者锁的owner的createrevision等于当前的kv的revision，则表示已获得锁，就可以退出了
+</span><span class="c1"></span>   <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">ownerKey</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">ownerKey</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nx">CreateRevision</span> <span class="o">==</span> <span class="nx">m</span><span class="p">.</span><span class="nx">myRev</span> <span class="p">{</span>
+      <span class="nx">m</span><span class="p">.</span><span class="nx">hdr</span> <span class="p">=</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span>
+      <span class="k">return</span> <span class="kc">nil</span>
+   <span class="p">}</span>
+
+   <span class="c1">// 为了验证自己加的打印信息
+</span><span class="c1"></span>   <span class="c1">//fmt.Printf(&#34;ownerKey: %s\n&#34;, ownerKey)
+</span><span class="c1"></span>   <span class="c1">// 走到这里代表没有获得锁，需要等待之前的锁被释放，即revision小于当前revision的kv被删除
+</span><span class="c1"></span>   <span class="nx">hdr</span><span class="p">,</span> <span class="nx">werr</span> <span class="o">:=</span> <span class="nf">waitDeletes</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">client</span><span class="p">,</span> <span class="nx">m</span><span class="p">.</span><span class="nx">pfx</span><span class="p">,</span> <span class="nx">m</span><span class="p">.</span><span class="nx">myRev</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+   <span class="c1">// release lock key if wait failed
+</span><span class="c1"></span>   <span class="k">if</span> <span class="nx">werr</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nx">m</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">(</span><span class="nx">client</span><span class="p">.</span><span class="nf">Ctx</span><span class="p">())</span>
+   <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+      <span class="nx">m</span><span class="p">.</span><span class="nx">hdr</span> <span class="p">=</span> <span class="nx">hdr</span>
+   <span class="p">}</span>
+   <span class="k">return</span> <span class="nx">werr</span>
+<span class="p">}</span>
+
+<span class="c1">// waitDeletes 等待所有当前比当前key的revision小的key被删除后，锁释放后才返回
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">waitDeletes</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">client</span> <span class="o">*</span><span class="nx">v3</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">pfx</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">maxCreateRev</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">pb</span><span class="p">.</span><span class="nx">ResponseHeader</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+   <span class="nx">getOpts</span> <span class="o">:=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">WithLastCreate</span><span class="p">(),</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithMaxCreateRev</span><span class="p">(</span><span class="nx">maxCreateRev</span><span class="p">))</span>
+   <span class="k">for</span> <span class="p">{</span>
+      <span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">pfx</span><span class="p">,</span> <span class="nx">getOpts</span><span class="o">...</span><span class="p">)</span>
+      <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+         <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+      <span class="p">}</span>
+      <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+         <span class="k">return</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span><span class="p">,</span> <span class="kc">nil</span>
+      <span class="p">}</span>
+      <span class="nx">lastKey</span> <span class="o">:=</span> <span class="nb">string</span><span class="p">(</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nx">Key</span><span class="p">)</span>
+      <span class="c1">// 为了调试自己加的这句
+</span><span class="c1"></span>      <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;wait for %s to delete\n&#34;</span><span class="p">,</span> <span class="nx">lastKey</span><span class="p">)</span>
+      <span class="k">if</span> <span class="nx">err</span> <span class="p">=</span> <span class="nf">waitDelete</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">client</span><span class="p">,</span> <span class="nx">lastKey</span><span class="p">,</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span><span class="p">.</span><span class="nx">Revision</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+         <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+      <span class="p">}</span>
+   <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">waitDelete</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">client</span> <span class="o">*</span><span class="nx">v3</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">rev</span> <span class="kt">int64</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+   <span class="nx">cctx</span><span class="p">,</span> <span class="nx">cancel</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">WithCancel</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+   <span class="k">defer</span> <span class="nf">cancel</span><span class="p">()</span>
+
+   <span class="kd">var</span> <span class="nx">wr</span> <span class="nx">v3</span><span class="p">.</span><span class="nx">WatchResponse</span>
+   <span class="c1">// wch是个channel，key被删除后会往这个chan发数据
+</span><span class="c1"></span>   <span class="nx">wch</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Watch</span><span class="p">(</span><span class="nx">cctx</span><span class="p">,</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithRev</span><span class="p">(</span><span class="nx">rev</span><span class="p">))</span>
+   <span class="k">for</span> <span class="nx">wr</span> <span class="p">=</span> <span class="k">range</span> <span class="nx">wch</span> <span class="p">{</span>
+      <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ev</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">wr</span><span class="p">.</span><span class="nx">Events</span> <span class="p">{</span>
+         <span class="k">if</span> <span class="nx">ev</span><span class="p">.</span><span class="nx">Type</span> <span class="o">==</span> <span class="nx">mvccpb</span><span class="p">.</span><span class="nx">DELETE</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="kc">nil</span>
+         <span class="p">}</span>
+      <span class="p">}</span>
+   <span class="p">}</span>
+   <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">wr</span><span class="p">.</span><span class="nf">Err</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="k">return</span> <span class="nx">err</span>
+   <span class="p">}</span>
+   <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">ctx</span><span class="p">.</span><span class="nf">Err</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="k">return</span> <span class="nx">err</span>
+   <span class="p">}</span>
+   <span class="k">return</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;lost watcher waiting for delete&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>看完上面的代码基本知道了etcd分布式锁的实现机制了，但是还没看到哪里和前缀Prefix相关了。其实答案就藏在getOwner里，看上述代码，不管是执行Put还是Get，最终都有个getOwner的过程，看一下这个getOwner，options模式里有个v3.WithFirstCreate函数调用，看下这个函数</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// WithFirstCreate gets the key with the oldest creation revision in the request range.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">WithFirstCreate</span><span class="p">()</span> <span class="p">[]</span><span class="nx">OpOption</span> <span class="p">{</span> <span class="k">return</span> <span class="nf">withTop</span><span class="p">(</span><span class="nx">SortByCreateRevision</span><span class="p">,</span> <span class="nx">SortAscend</span><span class="p">)</span> <span class="p">}</span>
+
+<span class="c1">// withTop gets the first key over the get&#39;s prefix given a sort order
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">withTop</span><span class="p">(</span><span class="nx">target</span> <span class="nx">SortTarget</span><span class="p">,</span> <span class="nx">order</span> <span class="nx">SortOrder</span><span class="p">)</span> <span class="p">[]</span><span class="nx">OpOption</span> <span class="p">{</span>
+   <span class="k">return</span> <span class="p">[]</span><span class="nx">OpOption</span><span class="p">{</span><span class="nf">WithPrefix</span><span class="p">(),</span> <span class="nf">WithSort</span><span class="p">(</span><span class="nx">target</span><span class="p">,</span> <span class="nx">order</span><span class="p">),</span> <span class="nf">WithLimit</span><span class="p">(</span><span class="mi">1</span><span class="p">)}</span>
+<span class="p">}</span>
+
+<span class="c1">// WithPrefix enables &#39;Get&#39;, &#39;Delete&#39;, or &#39;Watch&#39; requests to operate
+</span><span class="c1">// on the keys with matching prefix. For example, &#39;Get(foo, WithPrefix())&#39;
+</span><span class="c1">// can return &#39;foo1&#39;, &#39;foo2&#39;, and so on.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">WithPrefix</span><span class="p">()</span> <span class="nx">OpOption</span> <span class="p">{</span>
+   <span class="k">return</span> <span class="kd">func</span><span class="p">(</span><span class="nx">op</span> <span class="o">*</span><span class="nx">Op</span><span class="p">)</span> <span class="p">{</span>
+      <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">op</span><span class="p">.</span><span class="nx">key</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+         <span class="nx">op</span><span class="p">.</span><span class="nx">key</span><span class="p">,</span> <span class="nx">op</span><span class="p">.</span><span class="nx">end</span> <span class="p">=</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">{</span><span class="mi">0</span><span class="p">},</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">{</span><span class="mi">0</span><span class="p">}</span>
+         <span class="k">return</span>
+      <span class="p">}</span>
+      <span class="nx">op</span><span class="p">.</span><span class="nx">end</span> <span class="p">=</span> <span class="nf">getPrefix</span><span class="p">(</span><span class="nx">op</span><span class="p">.</span><span class="nx">key</span><span class="p">)</span>
+   <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>看到上面的是三个函数后，大致就找到了对应的源码的感觉，因为看到了WithPrefix函数，和上面的猜测正好匹配。所以getOwner的具体执行效果是会把虽有以lockkey开头的kv都拿到，且按照createrevision升序排列，取第一个值，这个意思就很明白了，就是要拿到当前以lockkey为prefix的且createrevision最小的那个key，就是目前已经拿到锁的key。</p>
+<p>看了上面的源码就可以明白为什么/a/b加了锁之后，/a加锁会超时了，因为在getOwner时，拿到了/a/b，且createrevision小于/a的revision，于是/a就会等待/a/b被删除后，watch chanel有数据后才能获得锁。</p>
+<p>看到这里还有个需要确认的问题，那就是如果/ab加锁了，那么再对/a加锁会怎么样？/a肯定是/ab的prefix啊，是不是也会加锁失败呢？</p>
+<p>结论是会加锁成功，看下源码</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"> <span class="kd">func</span> <span class="nf">NewMutex</span><span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Session</span><span class="p">,</span> <span class="nx">pfx</span> <span class="kt">string</span><span class="p">)</span> <span class="o">*</span><span class="nx">Mutex</span> <span class="p">{</span>
+   <span class="k">return</span> <span class="o">&amp;</span><span class="nx">Mutex</span><span class="p">{</span><span class="nx">s</span><span class="p">,</span> <span class="nx">pfx</span> <span class="o">+</span> <span class="s">&#34;/&#34;</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="kc">nil</span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>可以看到在NewMutex时并不是直接拿传进来的pfx作为prefix的，而且在后面加了个”/“，所以上线的/ab加了锁，/a加锁还是可以成功的。一般查找prefix或suffix时都会加上固定的分隔符，要不然就会出现误判。</p>
+<h3 id="总结-2">总结</h3>
+<p>通过分析问题，看源码，可以了解到etcd锁的实现原理，以及可能存在的小坑。etcd居然把锁的实现放在了client端，也是出乎我的意料，这样的话，可以直接修改client端代码来修改其锁的实现，就可能出现虽然共用一个服务端，但是etcd行为却不一致的问题，不知道为何要这么设计，个人感觉还是要放到服务端更好些。</p>
 <h1 id="chubby与fencing">Chubby与fencing</h1>
 <p>提到分布式锁，就不能不提Google的Chubby。</p>
 <p>Chubby是Google内部使用的分布式锁服务，有点类似于ZooKeeper，但也存在很多差异。</p>
@@ -983,7 +1857,7 @@ expire 设置过期时间，要注意的是 setnx 命令不能设置 key 的超�
 <p>当然，如果由于兼容的原因，资源服务本身不容易修改，那么Chubby还提供了一种机制：</p>
 <p>lock-delay。Chubby允许客户端为持有的锁指定一个lock-delay的时间值（默认是1分钟）。当Chubby发现客户端被动失去联系的时候，并不会立即释放锁，而是会在lock-delay指定的时间内阻止其它客户端获得这个锁。这是为了在把锁分配给新的客户端之前，让之前持有锁的客户端有充分的时间把请求队列排空(draining the queue)，尽量防止出现延迟到达的未处理请求。</p>
 <p>可见，为了应对锁失效问题，Chubby提供的三种处理方式：CheckSequencer()检查、与上次最新的sequencer对比、lock-delay，它们对于安全性的保证是从强到弱的。而且，这些处理方式本身都没有保证提供绝对的正确性(correctness)。但是，Chubby确实提供了单调递增的lock generation number，这就允许资源服务器在需要的时候，利用它提供更强的安全性保障。</p>
-<h1 id="总结-2">总结</h1>
+<h1 id="总结-3">总结</h1>
 <p>在Martin的这篇文章中，还有一个很有见地的观点，就是对锁的用途的区分。他把锁的用途分为两种：</p>
 <ul>
 <li>为了效率(efficiency)，协调各个客户端避免做重复的工作。即使锁偶尔失效了，只是可能把某些操作多做一遍而已，不会产生其它的不良后果。比如重复发送了一封同样的email。</li>
@@ -994,12 +1868,13 @@ expire 设置过期时间，要注意的是 setnx 命令不能设置 key 的超�
 <li>如果是为了效率(efficiency)而使用分布式锁，允许锁的偶尔失效，那么使用单Redis节点的锁方案就足够了，简单而且效率高。Redlock则是个过重的实现(heavyweight)。</li>
 <li>如果是为了正确性(correctness)在很严肃的场合使用分布式锁，那么不要使用Redlock。它不是建立在异步模型上的一个足够强的算法，它对于系统模型的假设中包含很多危险的成分(对于timing)。而且，它没有一个机制能够提供fencing token。那应该使用什么技术呢？Martin认为，应该考虑类似etcd的方案，或者支持事务的数据库。</li>
 </ul>
-<p>参考:
-<a href="https://segmentfault.com/a/1190000017241446">https://segmentfault.com/a/1190000017241446</a>
+<h1 id="参考">参考</h1>
+<p><a href="https://segmentfault.com/a/1190000017241446">https://segmentfault.com/a/1190000017241446</a>
 <a href="https://juejin.im/post/5bbb0d8df265da0abd3533a5">https://juejin.im/post/5bbb0d8df265da0abd3533a5</a>
 <a href="https://cloud.tencent.com/developer/article/1116306">https://cloud.tencent.com/developer/article/1116306</a>
 <a href="http://zhangtielei.com/posts/blog-redlock-reasoning.html">http://zhangtielei.com/posts/blog-redlock-reasoning.html</a>
 <a href="http://zhangtielei.com/posts/blog-redlock-reasoning-part2.html">http://zhangtielei.com/posts/blog-redlock-reasoning-part2.html</a></p>
+<p><a href="http://likakuli.com/post/2019/01/31/etcd_lock/">http://likakuli.com/post/2019/01/31/etcd_lock/</a></p>
 
     </div>
 
@@ -1023,9 +1898,9 @@ expire 设置过期时间，要注意的是 setnx 命令不能设置 key 的超�
           <a href="/tags/%E5%88%86%E5%B8%83%E5%BC%8F/">分布式</a>
           </div>
       <nav class="post-nav">
-        <a class="prev" href="/post/%E7%94%A8etcd%E5%AE%9E%E7%8E%B0%E5%88%86%E5%B8%83%E5%BC%8F%E9%94%81/">
+        <a class="prev" href="/post/etcd2%E5%92%8C3%E7%9A%84%E5%8C%BA%E5%88%AB/">
             <i class="iconfont icon-left"></i>
-            <span class="prev-text nav-default">用Etcd实现分布式锁</span>
+            <span class="prev-text nav-default">etcd2和3的区别</span>
             <span class="prev-text nav-mobile">上一篇</span>
           </a>
         <a class="next" href="/post/golang%E8%AF%BB%E5%86%99excel/">
