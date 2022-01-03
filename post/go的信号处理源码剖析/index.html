@@ -16,7 +16,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
 
 
-<meta name="author" content="Forz" /><meta name="description" content="前言 我们已经知道了 Go 运行时调度以 Goroutine 的方式调度了所有用户态代码。 每个 Goroutine 都有可能在不同的线程上重新被执行。 那么如果用户态的某个 Goroutine 需要接收系统信号" /><meta name="keywords" content="Hugo, theme, even" />
+<meta name="author" content="Forz" /><meta name="description" content="信号与软中断 信号机制是 UNIX、类 UNIX 甚至其他 POSIX 兼容系统上规定的一种进程异步通信的限制形式。 用于提醒某个事件的发生状态。 信号被定义为整数，产生" /><meta name="keywords" content="Hugo, theme, even" />
 
 
 
@@ -40,19 +40,19 @@
 
 
 <meta property="og:title" content="Go的信号处理源码剖析" />
-<meta property="og:description" content="前言 我们已经知道了 Go 运行时调度以 Goroutine 的方式调度了所有用户态代码。 每个 Goroutine 都有可能在不同的线程上重新被执行。 那么如果用户态的某个 Goroutine 需要接收系统信号" />
+<meta property="og:description" content="信号与软中断 信号机制是 UNIX、类 UNIX 甚至其他 POSIX 兼容系统上规定的一种进程异步通信的限制形式。 用于提醒某个事件的发生状态。 信号被定义为整数，产生" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/go%E7%9A%84%E4%BF%A1%E5%8F%B7%E5%A4%84%E7%90%86%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
 <meta property="article:published_time" content="2020-11-26T22:58:57+00:00" />
 <meta property="article:modified_time" content="2020-11-26T22:58:57+00:00" />
 
 <meta itemprop="name" content="Go的信号处理源码剖析">
-<meta itemprop="description" content="前言 我们已经知道了 Go 运行时调度以 Goroutine 的方式调度了所有用户态代码。 每个 Goroutine 都有可能在不同的线程上重新被执行。 那么如果用户态的某个 Goroutine 需要接收系统信号"><meta itemprop="datePublished" content="2020-11-26T22:58:57+00:00" />
+<meta itemprop="description" content="信号与软中断 信号机制是 UNIX、类 UNIX 甚至其他 POSIX 兼容系统上规定的一种进程异步通信的限制形式。 用于提醒某个事件的发生状态。 信号被定义为整数，产生"><meta itemprop="datePublished" content="2020-11-26T22:58:57+00:00" />
 <meta itemprop="dateModified" content="2020-11-26T22:58:57+00:00" />
-<meta itemprop="wordCount" content="7125">
+<meta itemprop="wordCount" content="8682">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的信号处理源码剖析"/>
-<meta name="twitter:description" content="前言 我们已经知道了 Go 运行时调度以 Goroutine 的方式调度了所有用户态代码。 每个 Goroutine 都有可能在不同的线程上重新被执行。 那么如果用户态的某个 Goroutine 需要接收系统信号"/>
+<meta name="twitter:description" content="信号与软中断 信号机制是 UNIX、类 UNIX 甚至其他 POSIX 兼容系统上规定的一种进程异步通信的限制形式。 用于提醒某个事件的发生状态。 信号被定义为整数，产生"/>
 
 <!--[if lte IE 9]>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 7125 字 </span>
-          <span class="more-meta"> 预计阅读 15 分钟 </span>
+          <span class="more-meta"> 约 8682 字 </span>
+          <span class="more-meta"> 预计阅读 18 分钟 </span>
         
       </div>
     </header>
@@ -143,8 +143,11 @@
   <div class="post-toc-content always-active">
     <nav id="TableOfContents">
   <ul>
-    <li><a href="#前言">前言</a></li>
     <li><a href="#信号与软中断">信号与软中断</a></li>
+    <li><a href="#go-程序对信号的默认行为">Go 程序对信号的默认行为</a></li>
+    <li><a href="#改变信号的默认行为">改变信号的默认行为</a></li>
+    <li><a href="#sigpipe">SIGPIPE</a></li>
+    <li><a href="#cgo-注意事项">cgo 注意事项</a></li>
     <li><a href="#处理函数的初始化">处理函数的初始化</a>
       <ul>
         <li><a href="#获取原始信号屏蔽字">获取原始信号屏蔽字</a></li>
@@ -160,16 +163,22 @@
         <li><a href="#源码">源码</a></li>
       </ul>
     </li>
+    <li><a href="#signal-api">signal API</a>
+      <ul>
+        <li><a href="#ignore-函数">Ignore 函数</a></li>
+        <li><a href="#notify-函数">Notify 函数</a></li>
+        <li><a href="#stop-函数">Stop 函数</a></li>
+        <li><a href="#reset-函数">Reset 函数</a></li>
+      </ul>
+    </li>
+    <li><a href="#使用示例">使用示例</a></li>
     <li><a href="#小结">小结</a></li>
   </ul>
 </nav>
   </div>
 </div>
     <div class="post-content">
-      <h2 id="前言">前言</h2>
-<p>我们已经知道了 Go 运行时调度以 Goroutine 的方式调度了所有用户态代码。 每个 Goroutine 都有可能在不同的线程上重新被执行。 那么如果用户态的某个 Goroutine 需要接收系统信号， 如何才能确保某个线程的信号能够正确的发送到可能在其他线程上执行的监听信号的 Goroutine 呢？</p>
-<p>本节我们讨论调度器里涉及的 signal 信号处理机制。</p>
-<h2 id="信号与软中断">信号与软中断</h2>
+      <h2 id="信号与软中断">信号与软中断</h2>
 <p>信号机制是 UNIX、类 UNIX 甚至其他 POSIX 兼容系统上规定的一种进程异步通信的限制形式。 用于提醒某个事件的发生状态。 信号被定义为整数，产生信号的条件包括用户使用某些按键组合（比如 Control + C）、 硬件异常、kill 信号等等。</p>
 <p>这些信号通常有三种不同的处理方式：忽略、捕获或者执行系统的默认行为。 忽略与捕获处理无法处理 SIGKILL 和 SIGSTOP，默认处理通常为停止进程。 而对于捕获处理而言，当信号发生时，操作系统将中断用户代码，并保存其执行的上下文，切换到内核空间 并重新切换到用户空间来执行预先设置好的信号处理回调。当回调执行完毕之后，会重新切换回内核 空间，并从中断的位置进行恢复，如图所示。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201126230856.png" alt=""></p>
@@ -188,6 +197,27 @@
 <p>如果是外部使用kill命令产生的信号，通常是SIGINT、SIGHUP等job control信号，则会遍历所有线程，直到找到一个不阻塞该信号的线程，然后调用它来处理。(一般从主线程找起)，注意只有一个线程能收到。</p>
 </li>
 </ol>
+<h2 id="go-程序对信号的默认行为">Go 程序对信号的默认行为</h2>
+<p>Go 语言实现了自己的运行时，因此，对信号的默认处理方式和普通的 C 程序不太一样。</p>
+<ul>
+<li>SIGBUS（总线错误）, SIGFPE（算术错误）和 SIGSEGV（段错误）称为同步信号，它们在程序执行错误时触发，而不是通过 os.Process.Kill 之类的触发。通常，Go 程序会将这类信号转为 run-time panic。</li>
+<li>SIGHUP（挂起）, SIGINT（中断）或 SIGTERM（终止）默认会使得程序退出。</li>
+<li>SIGQUIT, SIGILL, SIGTRAP, SIGABRT, SIGSTKFLT, SIGEMT 或 SIGSYS 默认会使得程序退出，同时生成 stack dump。</li>
+<li>SIGTSTP, SIGTTIN 或 SIGTTOU，这是 shell 使用的，作业控制的信号，执行系统默认的行为。</li>
+<li>SIGPROF（性能分析定时器，记录 CPU 时间，包括用户态和内核态）， Go 运行时使用该信号实现 runtime.CPUProfile。</li>
+<li>其他信号，Go 捕获了，但没有做任何处理。</li>
+</ul>
+<p>信号可以被忽略或通过掩码阻塞（屏蔽字 mask）。忽略信号通过 signal.Ignore，没有导出 API 可以直接修改阻塞掩码，虽然 Go 内部有实现 sigprocmask 等。Go 中的信号被 runtime 控制，在使用时和 C 是不太一样的。</p>
+<h2 id="改变信号的默认行为">改变信号的默认行为</h2>
+<p>这就是 os/signal 包的功能。</p>
+<p>Notify 改变信号处理，可以改变信号的默认行为；Ignore 可以忽略信号；Reset 重置信号为默认行为；Stop 则停止接收信号，但并没有重置为默认行为。</p>
+<h2 id="sigpipe">SIGPIPE</h2>
+<p>文档中对这个信号单独进行了说明。如果 Go 程序往一个 broken pipe 写数据，内核会产生一个 SIGPIPE 信号。</p>
+<p>如果 Go 程序没有为 SIGPIPE 信号调用 Notify，对于标准输出或标准错误（文件描述符 1 或 2），该信号会使得程序退出；但其他文件描述符对该信号是啥也不做，当然 write 会返回错误 EPIPE。</p>
+<p>如果 Go 程序为 SIGPIPE 调用了 Notify，不论什么文件描述符，SIGPIPE 信号都会传递给 Notify channel，当然 write 依然会返回 EPIPE。</p>
+<p>也就是说，默认情况下，Go 的命令行程序跟传统的 Unix 命令行程序行为一致；但当往一个关闭的网络连接写数据时，传统 Unix 程序会 crash，但 Go 程序不会。</p>
+<h2 id="cgo-注意事项">cgo 注意事项</h2>
+<p>如果非 Go 代码使用信号相关功能，需要仔细阅读掌握 os/signal 包中相关文档：Go programs that use cgo or SWIG 和 Non-Go programs that call Go code</p>
 <h2 id="处理函数的初始化">处理函数的初始化</h2>
 <p>调度循环中讨论过了 M 的生命周期，M 可以在两种情况下被创建：</p>
 <ol>
@@ -1875,7 +1905,186 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h2 id="小结">小结</h2>
+</div><h2 id="signal-api">signal API</h2>
+<h3 id="ignore-函数">Ignore 函数</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Ignore</span><span class="p">(</span><span class="nx">sig</span> <span class="o">...</span><span class="nx">os</span><span class="p">.</span><span class="nx">Signal</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>忽略一个、多个或全部（不提供任何信号）信号。如果程序接收到了被忽略的信号，则什么也不做。对一个信号，如果先调用 Notify，再调用 Ignore，Notify 的效果会被取消；如果先调用 Ignore，在调用 Notify，接着调用 Reset/Stop 的话，会回到 Ingore 的效果。注意，如果 Notify 作用于多个 chan，则 Stop 需要对每个 chan 都调用才能起到该作用。</p>
+<h3 id="notify-函数">Notify 函数</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Notify</span><span class="p">(</span><span class="nx">c</span> <span class="kd">chan</span><span class="o">&lt;-</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Signal</span><span class="p">,</span> <span class="nx">sig</span> <span class="o">...</span><span class="nx">os</span><span class="p">.</span><span class="nx">Signal</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>类似于绑定信号处理程序。将输入信号转发到 chan c。如果没有列出要传递的信号，会将所有输入信号传递到 c；否则只传递列出的输入信号。</p>
+<p>channel c 缓存如何决定？因为 signal 包不会为了向 c 发送信息而阻塞（就是说如果发送时 c 阻塞了，signal 包会直接放弃）：调用者应该保证 c 有足够的缓存空间可以跟上期望的信号频率。对使用单一信号用于通知的 channel，缓存为 1 就足够了。</p>
+<p>相关源码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// src/os/signal/signal.go process 函数
+</span><span class="c1"></span><span class="k">for</span> <span class="nx">c</span><span class="p">,</span> <span class="nx">h</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">handlers</span><span class="p">.</span><span class="nx">m</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">h</span><span class="p">.</span><span class="nf">want</span><span class="p">(</span><span class="nx">n</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c1">// send but do not block for it
+</span><span class="c1"></span>        <span class="k">select</span> <span class="p">{</span>
+        <span class="k">case</span> <span class="nx">c</span> <span class="o">&lt;-</span> <span class="nx">sig</span><span class="p">:</span>
+        <span class="k">default</span><span class="p">:</span>    <span class="c1">// 保证不会阻塞，直接丢弃
+</span><span class="c1"></span>        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>可以使用同一 channel 多次调用 Notify：每一次都会扩展该 channel 接收的信号集。唯一从信号集去除信号的方法是调用 Stop。可以使用同一信号和不同 channel 多次调用 Notify：每一个 channel 都会独立接收到该信号的一个拷贝。</p>
+<h3 id="stop-函数">Stop 函数</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Stop</span><span class="p">(</span><span class="nx">c</span> <span class="kd">chan</span><span class="o">&lt;-</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Signal</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>让 signal 包停止向 c 转发信号。它会取消之前使用 c 调用的所有 Notify 的效果。当 Stop 返回后，会保证 c 不再接收到任何信号。</p>
+<h3 id="reset-函数">Reset 函数</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Reset</span><span class="p">(</span><span class="nx">sig</span> <span class="o">...</span><span class="nx">os</span><span class="p">.</span><span class="nx">Signal</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>取消之前使用 Notify 对信号产生的效果；如果没有参数，则所有信号处理都被重置。</p>
+<h2 id="使用示例">使用示例</h2>
+<p>注：syscall 包中定义了所有的信号常量</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;fmt&#34;</span>
+    <span class="s">&#34;os&#34;</span>
+    <span class="s">&#34;os/signal&#34;</span>
+    <span class="s">&#34;syscall&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">var</span> <span class="nx">firstSigusr1</span> <span class="p">=</span> <span class="kc">true</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="c1">// 忽略 Control-C (SIGINT)
+</span><span class="c1"></span>    <span class="c1">// os.Interrupt 和 syscall.SIGINT 是同义词
+</span><span class="c1"></span>    <span class="nx">signal</span><span class="p">.</span><span class="nf">Ignore</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Interrupt</span><span class="p">)</span>
+
+    <span class="nx">c1</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Signal</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="c1">// Notify SIGHUP
+</span><span class="c1"></span>    <span class="nx">signal</span><span class="p">.</span><span class="nf">Notify</span><span class="p">(</span><span class="nx">c1</span><span class="p">,</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SIGHUP</span><span class="p">)</span>
+    <span class="c1">// Notify SIGUSR1
+</span><span class="c1"></span>    <span class="nx">signal</span><span class="p">.</span><span class="nf">Notify</span><span class="p">(</span><span class="nx">c1</span><span class="p">,</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SIGUSR1</span><span class="p">)</span>
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="p">{</span>
+            <span class="k">switch</span> <span class="o">&lt;-</span><span class="nx">c1</span> <span class="p">{</span>
+            <span class="k">case</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SIGHUP</span><span class="p">:</span>
+                <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;sighup, reset sighup&#34;</span><span class="p">)</span>
+                <span class="nx">signal</span><span class="p">.</span><span class="nf">Reset</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nx">SIGHUP</span><span class="p">)</span>
+            <span class="k">case</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SIGUSR1</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nx">firstSigusr1</span> <span class="p">{</span>
+                    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;first usr1, notify interrupt which had ignore!&#34;</span><span class="p">)</span>
+                    <span class="nx">c2</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Signal</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+                    <span class="c1">// Notify Interrupt
+</span><span class="c1"></span>                    <span class="nx">signal</span><span class="p">.</span><span class="nf">Notify</span><span class="p">(</span><span class="nx">c2</span><span class="p">,</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Interrupt</span><span class="p">)</span>
+                    <span class="k">go</span> <span class="nf">handlerInterrupt</span><span class="p">(</span><span class="nx">c2</span><span class="p">)</span>
+                <span class="p">}</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+
+    <span class="k">select</span> <span class="p">{}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">handlerInterrupt</span><span class="p">(</span><span class="nx">c</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Signal</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="k">switch</span> <span class="o">&lt;-</span><span class="nx">c</span> <span class="p">{</span>
+        <span class="k">case</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Interrupt</span><span class="p">:</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;signal interrupt&#34;</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>编译后运行，先后给该进程发送如下信号：SIGINT、SIGUSR1、SIGINT、SIGHUP、SIGHUP，看输出是不是和你预期的一样。</p>
+<h2 id="小结">小结</h2>
 <p>由于调度器在 Go 程序运行时的特殊地位，以及在进行跨语言调用时需要 cgo 的支持， 运行时信号处理相对而言还是较为复杂的，需要一套完整的机制来对各种情况进行处理， 甚至对用户态代码的 os/signal 进行支持。</p>
 <p>转载: <a href="https://golang.design/under-the-hood/zh-cn/part2runtime/ch06sched/signal/">6.6 信号处理机制</a></p>
 
@@ -1952,7 +2161,7 @@
   <span class="copyright-year">
     &copy; 
     2017 - 
-    2021<span class="heart"><i class="iconfont icon-heart"></i></span><span>Forz</span>
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span>Forz</span>
   </span>
 </div>
 
