@@ -49,7 +49,7 @@
 <meta itemprop="name" content="短链接方案设计">
 <meta itemprop="description" content="短链优点 那么为啥要用短链表示，直接用长链不行吗，用短链的话有如下好外 1、链接变短，在对内容长度有限制的平台发文，可编辑的文字就变多了 最典型的"><meta itemprop="datePublished" content="2022-01-10T16:15:25+00:00" />
 <meta itemprop="dateModified" content="2022-01-10T16:15:25+00:00" />
-<meta itemprop="wordCount" content="4747">
+<meta itemprop="wordCount" content="4738">
 <meta itemprop="keywords" content="架构," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="短链接方案设计"/>
 <meta name="twitter:description" content="短链优点 那么为啥要用短链表示，直接用长链不行吗，用短链的话有如下好外 1、链接变短，在对内容长度有限制的平台发文，可编辑的文字就变多了 最典型的"/>
@@ -132,7 +132,7 @@
         <div class="post-category">
             <a href="/categories/%E6%9E%B6%E6%9E%84/"> 架构 </a>
             </div>
-          <span class="more-meta"> 约 4747 字 </span>
+          <span class="more-meta"> 约 4738 字 </span>
           <span class="more-meta"> 预计阅读 10 分钟 </span>
         
       </div>
@@ -237,6 +237,9 @@
 <p>如果要杜绝哈希冲突,可以使用下面的自增序列算法.</p>
 <h3 id="自增序列算法">自增序列算法</h3>
 <p>我们可以维护一个 ID 自增生成器，比如 1，2，3 这样的整数递增 ID，当收到一个长链转短链的请求时，ID 生成器为其分配一个 ID，再将其转化为 62 进制，拼接到短链域名后面就得到了最终的短网址.</p>
+<p>如果使用自增id算法，会有一个问题就是不法分子是可以穷举你的短链地址的。原理就是将10进制数字转为62进制，那么别人也可以使用相同的方式遍历你的短链获取对应的原始链接。打个比方说：<a href="http://tinyurl.com/a3300">http://tinyurl.com/a3300</a>和 <a href="http://bit.ly/a3300%EF%BC%8C%E8%BF%99%E4%B8%A4%E4%B8%AA%E7%9F%AD%E9%93%BE%E7%BD%91%E7%AB%99%EF%BC%8C%E5%88%86%E5%88%AB%E4%BB%8Ea3300">http://bit.ly/a3300，这两个短链网站，分别从a3300</a> - a3399，能够试出来多次返回正确的url。所以这种方式生成的短链对于使用者来说其实是不安全的。</p>
+<p>可以在 62 进制的转换过程中把排序好的 62 个字母数字随机打乱，比如 ABCD1234 打乱成 1BC43A2D, 转换的 62 进制也就更难 hack 了；</p>
+<p>最后如果仍不放心，还可以在某些位置（比如 1，3，5）插入随机数，让人无法看出规律来也可以达到良好的效果。</p>
 <p>解决了发号器问题，接下来就简单了，从发号器拿过来的 id ，即为短链 id，接下来我们再创建一个长短链的映射表即可， 短链 id 即为主键，不过这里有个需要注意的地方，我们可能需要防止多次相同的长链生成不同的短链 id 这种情况，这就需要每次先根据长链来查找 db 看是否存在相关记录，一般的做法是根据长链做索引，但这样的话索引的空间会很大，所以我们可以对长链适当的压缩，比如 hash，再对长链的 hash 字段做索引，这样索引就会小很多。这样只要根据长链的 hash 去表里查是否存在相同的记录即可。所以我们设计的表如下</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -258,8 +261,7 @@
 </span><span class="w"></span><span class="p">)</span><span class="w"> </span><span class="n">ENGINE</span><span class="o">=</span><span class="n">InnoDB</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="n">CHARSET</span><span class="o">=</span><span class="n">utf8</span><span class="p">;</span><span class="w">
 </span></code></pre></td></tr></table>
 </div>
-</div><p>当然了，数据量如果很大的话，后期就需要分区或分库分表了。</p>
-<p>发号策略中,如果不判断长地址是否已转过,所以造成结果就是一长对多短,有人说浪费空间,建立一个长对短的map存储即可,但是用map存储本身就是浪费大量空间,甚至是用大空间换小空间,这就要考虑是否真有必要做一一对应,不能一对多;</p>
+</div><p>但是上述方式仍要进行一次长链的hash,性能不佳,如果不判断长地址是否已转过,所以造成结果就是一长对多短,有人说浪费空间,建立一个长对短的map存储即可,但是用map存储本身就是浪费大量空间,甚至是用大空间换小空间,这就要考虑是否真有必要做一一对应,不能一对多;</p>
 <p>最简单方案:建一个长对短的map,空间换空间,</p>
 <p>更好的方案:用map存储&quot;最近&quot;生成的长对短关系,一小时过期机制实现LRU淘汰</p>
 <p>长对短流程:</p>
@@ -270,9 +272,6 @@
 </ol>
 <p>当一个地址被频繁使用，那么它会一直在这个key-value表中，总能返回当初生成那个短地址，不会出现重复的问题。如果它使用并不频繁，那么长对短的key会过期，LRU机制自动就会淘汰掉它。</p>
 <p>这样在空间和发号数量之间取得了一个平衡，此处也应该看具体的业务需求来，是否会存在一对多的情况。比如下单未支付，给用户发短信召回，短信内的短url里面存在用户昵称，订单号等个性化信息，即不需要增加这一逻辑环节了。</p>
-<p>如果使用自增id算法，会有一个问题就是不法分子是可以穷举你的短链地址的。原理就是将10进制数字转为62进制，那么别人也可以使用相同的方式遍历你的短链获取对应的原始链接。打个比方说：<a href="http://tinyurl.com/a3300">http://tinyurl.com/a3300</a>和 <a href="http://bit.ly/a3300%EF%BC%8C%E8%BF%99%E4%B8%A4%E4%B8%AA%E7%9F%AD%E9%93%BE%E7%BD%91%E7%AB%99%EF%BC%8C%E5%88%86%E5%88%AB%E4%BB%8Ea3300">http://bit.ly/a3300，这两个短链网站，分别从a3300</a> - a3399，能够试出来多次返回正确的url。所以这种方式生成的短链对于使用者来说其实是不安全的。</p>
-<p>可以在 62 进制的转换过程中把排序好的 62 个字母数字随机打乱，比如 ABCD1234 打乱成 1BC43A2D, 转换的 62 进制也就更难 hack 了；</p>
-<p>最后如果仍不放心，还可以在某些位置（比如 1，3，5）插入随机数，让人无法看出规律来也可以达到良好的效果。</p>
 <h2 id="缓存">缓存</h2>
 <p>查询需求</p>
 <p>个人认为对于几百个G的数据量都放在缓存肯定是不合适的，所以有个折中的方案：将最近3个月内有查询或者有新增的url放入缓存，使用LRU算法进行热更新。这样最近有使用的发概率会命中缓存，就不用走库。查不到的时候再走库更新缓存。</p>
