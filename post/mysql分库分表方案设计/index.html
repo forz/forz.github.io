@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>MySQL分库分表方案设计 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="为什么分库分表 并非所有表都需要水平拆分，要看增长的类型和速度，水平拆分是大招，拆分后会增加开发的复杂度，不到万不得已不使用。 分库分表之前的一" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.1 with theme even" />
+
+
+<link rel="canonical" href="/post/mysql%E5%88%86%E5%BA%93%E5%88%86%E8%A1%A8%E6%96%B9%E6%A1%88%E8%AE%BE%E8%AE%A1/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.98f8e47918247c097fa26317cbb567fe9f05503485bf08d8547f5579543303b1.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="MySQL分库分表方案设计" />
+<meta property="og:description" content="为什么分库分表 并非所有表都需要水平拆分，要看增长的类型和速度，水平拆分是大招，拆分后会增加开发的复杂度，不到万不得已不使用。 分库分表之前的一" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/mysql%E5%88%86%E5%BA%93%E5%88%86%E8%A1%A8%E6%96%B9%E6%A1%88%E8%AE%BE%E8%AE%A1/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-30T18:51:12+00:00" />
+<meta property="article:modified_time" content="2022-01-30T18:51:12+00:00" />
+
+<meta itemprop="name" content="MySQL分库分表方案设计">
+<meta itemprop="description" content="为什么分库分表 并非所有表都需要水平拆分，要看增长的类型和速度，水平拆分是大招，拆分后会增加开发的复杂度，不到万不得已不使用。 分库分表之前的一"><meta itemprop="datePublished" content="2022-01-30T18:51:12+00:00" />
+<meta itemprop="dateModified" content="2022-01-30T18:51:12+00:00" />
+<meta itemprop="wordCount" content="15073">
+<meta itemprop="keywords" content="MySQL," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="MySQL分库分表方案设计"/>
+<meta name="twitter:description" content="为什么分库分表 并非所有表都需要水平拆分，要看增长的类型和速度，水平拆分是大招，拆分后会增加开发的复杂度，不到万不得已不使用。 分库分表之前的一"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">Forz Blog</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+      <a class="menu-item-link" href="/">Home</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/post/">Archives</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/tags/">Tags</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/categories/">Categories</a>
+    </li>
+  </ul>
+</nav><div class="docsearch-input__container">
+  <input type="search" class="docsearch-input" placeholder="Search" />
+</div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">MySQL分库分表方案设计</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-30 </span>
+        <div class="post-category">
+            <a href="/categories/mysql/"> MySQL </a>
+            </div>
+          <span class="more-meta"> 约 15073 字 </span>
+          <span class="more-meta"> 预计阅读 31 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#为什么分库分表">为什么分库分表</a></li>
+    <li><a href="#数据偏斜问题">数据偏斜问题</a></li>
+    <li><a href="#方案可持续性">方案可持续性</a></li>
+    <li><a href="#分库分表的方法">分库分表的方法</a>
+      <ul>
+        <li><a href="#垂直拆分">垂直拆分</a></li>
+        <li><a href="#水平拆分">水平拆分</a></li>
+      </ul>
+    </li>
+    <li><a href="#扩容方案">扩容方案</a>
+      <ul>
+        <li><a href="#翻倍扩容法">翻倍扩容法</a></li>
+        <li><a href="#一致性hash扩容">一致性Hash扩容</a></li>
+        <li><a href="#双写扩容">双写扩容</a></li>
+      </ul>
+    </li>
+    <li><a href="#分库分表后面临的问题">分库分表后面临的问题</a>
+      <ul>
+        <li><a href="#分布式事务支持">分布式事务支持</a></li>
+        <li><a href="#排序分页函数计算问题">排序、分页、函数计算问题</a></li>
+        <li><a href="#跨库关联查询">跨库关联查询</a></li>
+        <li><a href="#主键重复">主键重复</a></li>
+        <li><a href="#多数据源">多数据源</a></li>
+        <li><a href="#二次扩容问题">二次扩容问题</a></li>
+      </ul>
+    </li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="为什么分库分表">为什么分库分表</h2>
+<p>并非所有表都需要水平拆分，要看增长的类型和速度，水平拆分是大招，拆分后会增加开发的复杂度，不到万不得已不使用。</p>
+<p>分库分表之前的一些努力:</p>
+<ol>
+<li>结合explain和慢查询，优化你的sql和索引；</li>
+<li>应用级别可以加缓存, redis，memcached，aerospike都可以；</li>
+<li>数据库硬件性能升级，比如切换为SSD。</li>
+<li>如果查询的量级过大，就要做主从复制或主主复制，读写分离，可以在应用层或者mysql中间层实现;</li>
+<li>垂直拆分，根据你的业务情况把热点的表拆出分库分表;</li>
+<li>终极绝招，水平切分 ! 选定一个sharding key, 进行分库分表.</li>
+</ol>
+<p>刚开始我们只用单机数据库就够了，随后面对越来越多的请求，我们将数据库的写操作和读操作进行分离， 使用多个从库副本（Slaver Replication）负责读，使用主库（Master）负责写， 从库从主库同步更新数据，保持数据一致。架构上就是数据库主从同步。 从库可以水平扩展，而且能结合缓存和索引优化，所以更多的读请求不成问题。</p>
+<p>但是当用户量级上来后，写请求越来越多，该怎么办？加一个Master是不能解决问题的， 因为数据要保存一致性，写操作需要2个master之间同步，相当于是重复了，而且更加复杂。</p>
+<p>用户请求量太大</p>
+<p>因为单服务器TPS，内存，IO都是有限的。 解决方法：分散请求到多个服务器上； 其实用户请求和执行一个sql查询是本质是一样的，都是请求一个资源，只是用户请求还会经过网关，路由，http服务器等。</p>
+<p>单库太大</p>
+<p>单个数据库处理能力有限；单库所在服务器上磁盘空间不足；单库上操作的IO瓶颈 解决方法：切分成更多更小的库</p>
+<p>单表太大</p>
+<p>CRUD都成问题；索引膨胀，查询超时 解决方法：切分成多个数据集更小的表。</p>
+<p>这时就需要用到分库分表（sharding），对写操作进行切分。</p>
+<h2 id="数据偏斜问题">数据偏斜问题</h2>
+<p>一个良好的分库分表方案，它的数据应该是需要比较均匀的分散在各个库表中的。如果我们进行一个拍脑袋式的分库分表设计，很容易会遇到以下类似问题：</p>
+<ul>
+<li>某个数据库实例中，部分表的数据很多，而其他表中的数据却寥寥无几，业务上的表现经常是延迟忽高忽低，飘忽不定。</li>
+<li>数据库集群中，部分集群的磁盘使用增长特别块，而部分集群的磁盘增长却很缓慢。每个库的增长步调不一致，这种情况会给后续的扩容带来步调不一致，无法统一操作的问题。</li>
+</ul>
+<p>这边我们定义分库分表最大数据偏斜率为 ：（数据量最大样本 - 数据量最小样本）/ 数据量最小样本。一般来说，如果我们的最大数据偏斜率在5%以内是可以接受的。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202031759858.png" alt=""></p>
+<h2 id="方案可持续性">方案可持续性</h2>
+<p>前期业务数据量级不大，流量较低的时候，我们无需分库分表，也不建议分库分表。但是一旦我们要对业务进行分库分表设计时，就一定要考虑到分库分表方案的可持续性。</p>
+<p>那何为可持续性？其实就是：业务数据量级和业务流量未来进一步升高达到新的量级的时候，我们的分库分表方案可以持续使用。</p>
+<p>一个通俗的案例，假定当前我们分库分表的方案为10库100表，那么未来某个时间点，若10个库仍然无法应对用户的流量压力，或者10个库的磁盘使用即将达到物理上限时，我们的方案能够进行平滑扩容。</p>
+<p>在后文中我们将介绍下目前业界常用的翻倍扩容法和一致性Hash扩容法。</p>
+<h2 id="分库分表的方法">分库分表的方法</h2>
+<p>一般就是垂直切分和水平切分，这是一种结果集描述的切分方式，是物理空间上的切分。 我们从面临的问题，开始解决，阐述： 首先是用户请求量太大，我们就堆机器搞定（这不是本文重点）。</p>
+<p>然后是单个库太大，这时我们要看是因为表多而导致数据多，还是因为单张表里面的数据多。 如果是因为表多而数据多，使用垂直切分，根据业务切分成不同的库。</p>
+<p>如果是因为单张表的数据量太大，这时要用水平切分，即把表的数据按某种规则切分成多张表，甚至多个库上的多张表。分库分表的顺序应该是先垂直分，后水平分。因为垂直分更简单，更符合我们处理现实世界问题的方式。</p>
+<h3 id="垂直拆分">垂直拆分</h3>
+<p>垂直切分可以同时作用于库和表，即垂直分库和垂直分表。</p>
+<h4 id="垂直分表">垂直分表</h4>
+<p>对于垂直分表来说，拆分的对象是数据表列，需要这样做的原因主要有两个：第一，数据表中字段数过多；第二，数据表中存在很多大数据列。此时，可以把一张表拆分成两张或者多张表，每张表中存储行记录的子集。同时，数据库以行为单位将数据加载到内存中，表中行记录较短，内存能加载更多的数据，命中率更高，减少了磁盘IO，从而提升了数据库性能。</p>
+<h4 id="垂直分库">垂直分库</h4>
+<p>垂直分库针对的是一个系统中的不同业务进行拆分，比如用户User一个库，商品Producet一个库，订单Order一个库。 切分后，要放在多个服务器上，而不是一个服务器上。为什么？ 我们想象一下，一个购物网站对外提供服务，会有用户，商品，订单等的CRUD。没拆分之前， 全部都是落到单一的库上的，这会让数据库的单库处理能力成为瓶颈。按垂直分库后，如果还是放在一个数据库服务器上， 随着用户量增大，这会让单个数据库的处理能力成为瓶颈，还有单个服务器的磁盘空间，内存，tps等非常吃紧。</p>
+<p>所以我们要拆分到多个服务器上，这样上面的问题都解决了，以后也不会面对单机资源问题。</p>
+<p>数据库业务层面的拆分，和服务的“治理”，“降级”机制类似，也能对不同业务的数据分别的进行管理，维护，监控，扩展等。 数据库往往最容易成为应用系统的瓶颈，而数据库本身属于“有状态”的，相对于Web和应用服务器来讲，是比较难实现“横向扩展”的。 数据库的连接资源比较宝贵且单机处理能力也有限，在高并发场景下，垂直分库一定程度上能够突破IO、连接数及单机硬件资源的瓶颈。</p>
+<h3 id="水平拆分">水平拆分</h3>
+<p>水平切分也被称作是 “横切”，它虽然是针对于数据表的。当一张数据表的数据量非常庞大，且即使是做了垂直拆分依然是存在瓶颈，这时候就需要对表进行水平切分了。即将一张表的数据记录按照一定的规则分散到多张表或多个库（多个库存储拆分出的多张表）中。最终使得每张拆分的表记录只是原表的子集，大大降低了单表的数据量。</p>
+<h4 id="水平分表">水平分表</h4>
+<p>针对数据量巨大的单张表（比如订单表），按照某种规则（RANGE,HASH取模等），切分到多张表里面去。 但是这些表还是在同一个库中，所以库级别的数据库操作还是有IO瓶颈。不建议采用。</p>
+<h4 id="水平分库">水平分库</h4>
+<p>将单张表的数据切分到多个服务器上去，每个服务器具有相应的库与表，只是表中数据集合不同。 水平分库分表能够有效的缓解单机和单库的性能瓶颈和压力，突破IO、连接数、硬件资源等的瓶颈。</p>
+<h4 id="切分规则">切分规则</h4>
+<h5 id="range">Range</h5>
+<p>顾名思义，该方案根据数据范围划分数据的存放位置。</p>
+<p>举个最简单例子，我们可以把订单表按照年份为单位，每年的数据存放在单独的库（或者表）中。如下图所示：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="cm">/**
+</span><span class="cm">
+</span><span class="cm">* 通过年份分表
+</span><span class="cm">*
+</span><span class="cm">* @param orderId
+</span><span class="cm">* @return
+</span><span class="cm"> */</span>
+<span class="kd">public</span> <span class="kd">static</span> <span class="n">String</span> <span class="nf">rangeShardByYear</span><span class="o">(</span><span class="n">String</span> <span class="n">orderId</span><span class="o">)</span> <span class="o">{</span>
+    <span class="kt">int</span> <span class="n">year</span> <span class="o">=</span> <span class="n">Integer</span><span class="o">.</span><span class="na">parseInt</span><span class="o">(</span><span class="n">orderId</span><span class="o">.</span><span class="na">substring</span><span class="o">(</span><span class="n">0</span><span class="o">,</span> <span class="n">4</span><span class="o">));</span>
+    <span class="k">return</span> <span class="s">&#34;t_order_&#34;</span> <span class="o">+</span> <span class="n">year</span><span class="o">;</span>
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>通过数据的范围进行分库分表，该方案是最朴实的一种分库方案，它也可以和其他分库分表方案灵活结合使用。时下非常流行的分布式数据库：TiDB数据库，针对TiKV中数据的打散，也是基于Range的方式进行，将不同范围内的[StartKey,EndKey)分配到不同的Region上。</p>
+<p>下面我们看看该方案的缺点：</p>
+<ul>
+<li>最明显的就是数据热点问题，例如上面案例中的订单表，很明显当前年度所在的库表属于热点数据，需要承载大部分的IO和计算资源。</li>
+<li>新库和新表的追加问题。一般我们线上运行的应用程序是没有数据库的建库建表权限的，故我们需要提前将新的库表提前建立，防止线上故障。</li>
+<li>业务上的交叉范围内数据的处理。举个例子，订单模块无法避免一些中间状态的数据补偿逻辑，即需要通过定时任务到订单表中扫描那些长时间处于待支付确认等状态的订单。这里就需要注意了，因为是通过年份进行分库分表，那么元旦的那一天，你的定时任务很有可能会漏掉上一年的最后一天的数据扫描。</li>
+</ul>
+<h5 id="hash">HASH</h5>
+<p>虽然分库分表的方案众多，但是Hash分库分表是最大众最普遍的方案，也是本文花最大篇幅描述的部分。</p>
+<p>针对Hash分库分表的细节部分，相关的资料并不多。大部分都是阐述一下概念举几个示例，而细节部分并没有特别多的深入，如果未结合自身业务贸然参考引用，后期非常容易出现各种问题。</p>
+<p>在正式介绍这种分库分表方式之前，我们先看几个常见的错误案例。</p>
+<p>常见错误案例一：非互质关系导致的数据偏斜问题</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="kd">public</span> <span class="kd">static</span> <span class="n">ShardCfg</span> <span class="nf">shard</span><span class="o">(</span><span class="n">String</span> <span class="n">userId</span><span class="o">)</span> <span class="o">{</span>
+    <span class="kt">int</span> <span class="n">hash</span> <span class="o">=</span> <span class="n">userId</span><span class="o">.</span><span class="na">hashCode</span><span class="o">();</span>
+    <span class="c1">// 对库数量取余结果为库序号
+</span><span class="c1"></span>    <span class="kt">int</span> <span class="n">dbIdx</span> <span class="o">=</span> <span class="n">Math</span><span class="o">.</span><span class="na">abs</span><span class="o">(</span><span class="n">hash</span> <span class="o">%</span> <span class="n">DB_CNT</span><span class="o">);</span>
+    <span class="c1">// 对表数量取余结果为表序号
+</span><span class="c1"></span>    <span class="kt">int</span> <span class="n">tblIdx</span> <span class="o">=</span> <span class="n">Math</span><span class="o">.</span><span class="na">abs</span><span class="o">(</span><span class="n">hash</span> <span class="o">%</span> <span class="n">TBL_CNT</span><span class="o">);</span>
+
+    <span class="k">return</span> <span class="k">new</span> <span class="n">ShardCfg</span><span class="o">(</span><span class="n">dbIdx</span><span class="o">,</span> <span class="n">tblIdx</span><span class="o">);</span>
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>上述方案是初次使用者特别容易进入的误区，用Hash值分别对分库数和分表数取余，得到库序号和表序号。其实稍微思索一下，我们就会发现，以10库100表为例，如果一个Hash值对100取余为0，那么它对10取余也必然为0。</p>
+<p>这就意味着只有0库里面的0表才可能有数据，而其他库中的0表永远为空！</p>
+<p>类似的我们还能推导到，0库里面的共100张表，只有10张表中(个位数为0的表序号)才可能有数据。这就带来了非常严重的数据偏斜问题，因为某些表中永远不可能有数据，最大数据偏斜率达到了无穷大。</p>
+<p>那么很明显，该方案是一个未达到预期效果的错误方案。数据的散落情况大致示意图如下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202031819062.png" alt=""></p>
+<p>事实上，只要库数量和表数量非互质关系，都会出现某些表中无数据的问题。</p>
+<p>那么是不是只要库数量和表数量互质就可用用这种分库分表方案呢？比如我用11库100表的方案，是不是就合理了呢？</p>
+<p>答案是否定的，我们除了要考虑数据偏斜的问题，还需要考虑可持续性扩容的问题，一般这种Hash分库分表的方案后期的扩容方式都是通过翻倍扩容法，那11库翻倍后，和100又不再互质。</p>
+<p>当然，如果分库数和分表数不仅互质，而且分表数为奇数(例如10库101表)，则理论上可以使用该方案，但是我想大部分人可能都会觉得使用奇数的分表数比较奇怪吧。</p>
+<p>常见错误案例二：扩容难以持续</p>
+<p>如果避开了上述案例一的陷阱，那么我们又很容易一头扎进另一个陷阱，大概思路如下；</p>
+<p>我们把10库100表看成总共1000个逻辑表，将求得的Hash值对1000取余，得到一个介于[0，999)中的数，然后再将这个数二次均分到每个库和每个表中，大概逻辑代码如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="kd">public</span> <span class="kd">static</span> <span class="n">ShardCfg</span> <span class="nf">shard</span><span class="o">(</span><span class="n">String</span> <span class="n">userId</span><span class="o">)</span> <span class="o">{</span>
+        <span class="c1">// ① 算Hash
+</span><span class="c1"></span>        <span class="kt">int</span> <span class="n">hash</span> <span class="o">=</span> <span class="n">userId</span><span class="o">.</span><span class="na">hashCode</span><span class="o">();</span>
+        <span class="c1">// ② 总分片数
+</span><span class="c1"></span>        <span class="kt">int</span> <span class="n">sumSlot</span> <span class="o">=</span> <span class="n">DB_CNT</span> <span class="o">*</span> <span class="n">TBL_CNT</span><span class="o">;</span>
+        <span class="c1">// ③ 分片序号
+</span><span class="c1"></span>        <span class="kt">int</span> <span class="n">slot</span> <span class="o">=</span> <span class="n">Math</span><span class="o">.</span><span class="na">abs</span><span class="o">(</span><span class="n">hash</span> <span class="o">%</span> <span class="n">sumSlot</span><span class="o">);</span>
+        <span class="c1">// ④ 计算库序号和表序号的错误案例
+</span><span class="c1"></span>        <span class="kt">int</span> <span class="n">dbIdx</span> <span class="o">=</span> <span class="n">slot</span> <span class="o">%</span> <span class="n">DB_CNT</span> <span class="o">;</span>
+        <span class="kt">int</span> <span class="n">tblIdx</span> <span class="o">=</span> <span class="n">slot</span> <span class="o">/</span> <span class="n">DB_CNT</span> <span class="o">;</span>
+
+        <span class="k">return</span> <span class="k">new</span> <span class="n">ShardCfg</span><span class="o">(</span><span class="n">dbIdx</span><span class="o">,</span> <span class="n">tblIdx</span><span class="o">);</span>
+    <span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>该方案确实很巧妙的解决了数据偏斜的问题，只要Hash值足够均匀，那么理论上分配序号也会足够平均，于是每个库和表中的数据量也能保持较均衡的状态。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202031853049.png" alt=""></p>
+<p>但是该方案有个比较大的问题，那就是在计算表序号的时候，依赖了总库的数量，那么后续翻倍扩容法进行扩容时，会出现扩容前后数据不在同一个表中，从而无法实施。</p>
+<p>如上图中，例如扩容前Hash为1986的数据应该存放在6库98表，但是翻倍扩容成20库100表后，它分配到了6库99表，表序号发生了偏移。这样的话，我们在后续在扩容的时候，不仅要基于库迁移数据，还要基于表迁移数据，非常麻烦且易错。</p>
+<p>看完了上面的几种典型的错误案例，那么我们有哪些比较正确的方案呢？下面将结合一些实际场景案例介绍几种Hash分库分表的方案。</p>
+<p>常用姿势一：标准的二次分片法</p>
+<p>上述错误案例二中，整体思路完全正确，只是最后计算库序号和表序号的时候，使用了库数量作为影响表序号的因子，导致扩容时表序号偏移而无法进行。</p>
+<p>事实上，我们只需要换种写法，就能得出一个比较大众化的分库分表方案。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="kd">public</span> <span class="kd">static</span> <span class="n">ShardCfg</span> <span class="nf">shard2</span><span class="o">(</span><span class="n">String</span> <span class="n">userId</span><span class="o">)</span> <span class="o">{</span>
+        <span class="c1">// ① 算Hash
+</span><span class="c1"></span>        <span class="kt">int</span> <span class="n">hash</span> <span class="o">=</span> <span class="n">userId</span><span class="o">.</span><span class="na">hashCode</span><span class="o">();</span>
+        <span class="c1">// ② 总分片数
+</span><span class="c1"></span>        <span class="kt">int</span> <span class="n">sumSlot</span> <span class="o">=</span> <span class="n">DB_CNT</span> <span class="o">*</span> <span class="n">TBL_CNT</span><span class="o">;</span>
+        <span class="c1">// ③ 分片序号
+</span><span class="c1"></span>        <span class="kt">int</span> <span class="n">slot</span> <span class="o">=</span> <span class="n">Math</span><span class="o">.</span><span class="na">abs</span><span class="o">(</span><span class="n">hash</span> <span class="o">%</span> <span class="n">sumSlot</span><span class="o">);</span>
+        <span class="c1">// ④ 重新修改二次求值方案
+</span><span class="c1"></span>        <span class="kt">int</span> <span class="n">dbIdx</span> <span class="o">=</span> <span class="n">slot</span> <span class="o">/</span> <span class="n">TBL_CNT</span> <span class="o">;</span>
+        <span class="kt">int</span> <span class="n">tblIdx</span> <span class="o">=</span> <span class="n">slot</span> <span class="o">%</span> <span class="n">TBL_CNT</span> <span class="o">;</span>
+
+        <span class="k">return</span> <span class="k">new</span> <span class="n">ShardCfg</span><span class="o">(</span><span class="n">dbIdx</span><span class="o">,</span> <span class="n">tblIdx</span><span class="o">);</span>
+    <span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>大家可以注意到，和错误案例二中的区别就是通过分配序号重新计算库序号和表序号的逻辑发生了变化。它的分配情况如下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202031853051.png" alt=""></p>
+<p>通过翻倍扩容后，我们的表序号一定维持不变，库序号可能还是在原来库，也可能平移到了新库中(原库序号加上原分库数)，完全符合我们需要的扩容持久性方案。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202031854985.png" alt=""></p>
+<p>【方案缺点】</p>
+<p>1、翻倍扩容法前期操作性高，但是后续如果分库数已经是大几十的时候，每次扩容都非常耗费资源。</p>
+<p>2、连续的分片键Hash值大概率会散落在相同的库中，某些业务可能容易存在库热点（例如新生成的用户Hash相邻且递增，且新增用户又是高概率的活跃用户，那么一段时间内生成的新用户都会集中在相邻的几个库中）。</p>
+<p>常用姿势二：关系表冗余</p>
+<p>我们可以将分片键对应库的关系通过关系表记录下来，我们把这张关系表称为&quot;路由关系表&quot;。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202032219271.png" alt=""></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="kd">public</span> <span class="kd">static</span> <span class="n">ShardCfg</span> <span class="nf">shard</span><span class="o">(</span><span class="n">String</span> <span class="n">userId</span><span class="o">)</span> <span class="o">{</span>
+        <span class="kt">int</span> <span class="n">tblIdx</span> <span class="o">=</span> <span class="n">Math</span><span class="o">.</span><span class="na">abs</span><span class="o">(</span><span class="n">userId</span><span class="o">.</span><span class="na">hashCode</span><span class="o">()</span> <span class="o">%</span> <span class="n">TBL_CNT</span><span class="o">);</span>
+        <span class="c1">// 从缓存获取
+</span><span class="c1"></span>        <span class="n">Integer</span> <span class="n">dbIdx</span> <span class="o">=</span> <span class="n">loadFromCache</span><span class="o">(</span><span class="n">userId</span><span class="o">);</span>
+        <span class="k">if</span> <span class="o">(</span><span class="kc">null</span> <span class="o">==</span> <span class="n">dbIdx</span><span class="o">)</span> <span class="o">{</span>
+            <span class="c1">// 从路由表获取
+</span><span class="c1"></span>            <span class="n">dbIdx</span> <span class="o">=</span> <span class="n">loadFromRouteTable</span><span class="o">(</span><span class="n">userId</span><span class="o">);</span>
+            <span class="k">if</span> <span class="o">(</span><span class="kc">null</span> <span class="o">!=</span> <span class="n">dbIdx</span><span class="o">)</span> <span class="o">{</span>
+                <span class="c1">// 保存到缓存
+</span><span class="c1"></span>                <span class="n">saveRouteCache</span><span class="o">(</span><span class="n">userId</span><span class="o">,</span> <span class="n">dbIdx</span><span class="o">);</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+        <span class="k">if</span> <span class="o">(</span><span class="kc">null</span> <span class="o">==</span> <span class="n">dbIdx</span><span class="o">)</span> <span class="o">{</span>
+            <span class="c1">// 此处可以自由实现计算库的逻辑
+</span><span class="c1"></span>            <span class="n">dbIdx</span> <span class="o">=</span> <span class="n">selectRandomDbIdx</span><span class="o">();</span>
+            <span class="n">saveToRouteTable</span><span class="o">(</span><span class="n">userId</span><span class="o">,</span> <span class="n">dbIdx</span><span class="o">);</span>
+            <span class="n">saveRouteCache</span><span class="o">(</span><span class="n">userId</span><span class="o">,</span> <span class="n">dbIdx</span><span class="o">);</span>
+        <span class="o">}</span>
+
+        <span class="k">return</span> <span class="k">new</span> <span class="n">ShardCfg</span><span class="o">(</span><span class="n">dbIdx</span><span class="o">,</span> <span class="n">tblIdx</span><span class="o">);</span>
+    <span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>该方案还是通过常规的Hash算法计算表序号，而计算库序号时，则从路由表读取数据。因为在每次数据查询时，都需要读取路由表，故我们需要将分片键和库序号的对应关系记录同时维护在缓存中以提升性能。</p>
+<p>上述实例中selectRandomDbIdx方法作用为生成该分片键对应的存储库序号，这边可以非常灵活的动态配置。例如可以为每个库指定一个权重，权重大的被选中的概率更高，权重配置成0则可以将关闭某些库的分配。当发现数据存在偏斜时，也可以调整权重使得各个库的使用量调整趋向接近。</p>
+<p>该方案还有个优点，就是理论上后续进行扩容的时候，仅需要挂载上新的数据库节点，将权重配置成较大值即可，无需进行任何的数据迁移即可完成。</p>
+<p>该方案似乎解决了很多问题，那么它有没有什么不适合的场景呢？当然有，该方案在很多场景下其实并不太适合，以下举例说明。</p>
+<p>a、每次读取数据需要访问路由表，虽然使用了缓存，但是还是有一定的性能损耗。</p>
+<p>b、路由关系表的存储方面，有些场景并不合适。例如上述案例中用户id的规模大概是在10亿以内，我们用单库百表存储该关系表即可。但如果例如要用文件MD5摘要值作为分片键，因为样本集过大，无法为每个md5值都去指定关系（当然我们也可以使用md5前N位来存储关系）。</p>
+<p>c、饥饿占位问题，如下详叙：</p>
+<p>我们知道，该方案的特点是后续无需扩容，可以随时修改权重调整每个库的存储增长速度。但是这个愿景是比较缥缈，并且很难实施的，我们选取一个简单的业务场景考虑以下几个问题。</p>
+<p>【业务场景】：以用户存放文件到云端的云盘业务为例，需要对用户的文件信息进行分库分表设计，有以下假定场景：</p>
+<ol>
+<li>假定有2亿理论用户，假设当前有3000W有效用户。</li>
+<li>平均每个用户文件量级在2000个以内</li>
+<li>用户id为随机16位字符串</li>
+<li>初期为10库，每个库100张表。</li>
+</ol>
+<p>我们使用路由表记录每个用户所在的库序号信息。那么该方案会有以下问题：</p>
+<p>第一：我们总共有2亿个用户，只有3000W个产生过事务的用户。若程序不加处理，用户发起任何请求则创建路由表数据，会导致为大量实际没有事务数据的用户提前创建路由表。</p>
+<p>笔者最初存储云盘用户数据的时候便遇到了这个问题，客户端app会在首页查询用户空间使用情况，这样导致几乎一开始就为每个使用者分配好了路由。随着时间的推移，这部分没有数据的&quot;静默&quot;的用户，随时可能开始他的云盘使用之旅而“复苏”，从而导致它所在的库迅速增长并超过单个库的空间容量极限，从而被迫拆分扩容。</p>
+<p>解决这个问题的方案，其实就是只针对事务操作(例如购买空间，上传数据，创建文件夹等等)才进行路由的分配，这样对代码层面便有了一些倾入。</p>
+<p>第二、按照前面描述的业务场景，一个用户最终平均有2000条数据，假定每行大小为1K，为了保证B+数的层级在3层，我们限制每张表的数据量在2000W，分表数为100的话，可以得到理论上每个库的用户数不能超过100W个用户。</p>
+<p>也就是如果是3000W个产生过事务的用户，我们需要为其分配30个库，这样会在业务前期，用户平均数据量相对较少的时候，存在非常大的数据库资源的浪费。</p>
+<p>解决第二个问题，我们一般可以将很多数据库放在一个实例上，后续随着增长情况进行拆分。也可以后续针对将满的库，使用常规手段进行拆分和迁移。</p>
+<p>常用姿势三：基因法</p>
+<p>还是由错误案例一启发，我们发现案例一不合理的主要原因，就是因为库序号和表序号的计算逻辑中，有公约数这个因子在影响库表的独立性。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202032219897.png" alt=""></p>
+<p>那么我们是否可以换一种思路呢？我们使用相对独立的Hash值来计算库序号和表序号。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="kd">public</span> <span class="kd">static</span> <span class="n">ShardCfg</span> <span class="nf">shard</span><span class="o">(</span><span class="n">String</span> <span class="n">userId</span><span class="o">)</span> <span class="o">{</span>
+    <span class="kt">int</span> <span class="n">dbIdx</span> <span class="o">=</span> <span class="n">Math</span><span class="o">.</span><span class="na">abs</span><span class="o">(</span><span class="n">userId</span><span class="o">.</span><span class="na">substring</span><span class="o">(</span><span class="n">0</span><span class="o">,</span> <span class="n">4</span><span class="o">).</span><span class="na">hashCode</span><span class="o">()</span> <span class="o">%</span> <span class="n">DB_CNT</span> <span class="o">);</span>
+    <span class="kt">int</span> <span class="n">tblIdx</span> <span class="o">=</span> <span class="n">Math</span><span class="o">.</span><span class="na">abs</span><span class="o">(</span><span class="n">userId</span><span class="o">.</span><span class="na">hashCode</span><span class="o">()</span> <span class="o">%</span> <span class="n">TBL_CNT</span><span class="o">);</span>
+    <span class="k">return</span> <span class="k">new</span> <span class="n">ShardCfg</span><span class="o">(</span><span class="n">dbIdx</span><span class="o">,</span> <span class="n">tblIdx</span><span class="o">);</span>
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>如上所示，我们计算库序号的时候做了部分改动，我们使用分片键的前四位作为Hash值来计算库序号。</p>
+<p>这也是一种常用的方案，我们称为基因法，即使用原分片键中的某些基因（例如前四位）作为库的计算因子，而使用另外一些基因作为表的计算因子。该方案也是网上不少的实践方案或者是其变种，看起来非常巧妙的解决了问题，然而在实际生成过程中还是需要慎重。</p>
+<p>笔者曾在云盘的空间模块的分库分表实践中采用了该方案，使用16库100表拆分数据，上线初期数据正常。然而当数据量级增长起来后，发现每个库的用户数量严重不均等，故猜测该方案存在一定的数据偏斜。</p>
+<p>为了验证观点，进行如下测试，随机2亿个用户id（16位的随机字符串），针对不同的M库N表方案，重复若干次后求平均值得到结论如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="m">8</span>库<span class="m">100</span>表
+<span class="n">min</span><span class="o">=</span><span class="m">248305</span><span class="p">(</span><span class="n">dbIdx</span><span class="o">=</span><span class="m">2</span><span class="p">,</span> <span class="n">tblIdx</span><span class="o">=</span><span class="m">64</span><span class="p">),</span> <span class="n">max</span><span class="o">=</span><span class="m">251419</span><span class="p">(</span><span class="n">dbIdx</span><span class="o">=</span><span class="m">7</span><span class="p">,</span> <span class="n">tblIdx</span><span class="o">=</span><span class="m">8</span><span class="p">),</span> <span class="n">rate</span><span class="o">=</span> <span class="m">1.25</span><span class="o">%            √
+</span><span class="o">16库100表
+</span><span class="o">min=95560(dbIdx=8, tblIdx=42), max=154476(dbIdx=0, tblIdx=87), rate= 61.65%</span>           ×
+<span class="m">20</span>库<span class="m">100</span>表
+<span class="n">min</span><span class="o">=</span><span class="m">98351</span><span class="p">(</span><span class="n">dbIdx</span><span class="o">=</span><span class="m">14</span><span class="p">,</span> <span class="n">tblIdx</span><span class="o">=</span><span class="m">78</span><span class="p">),</span> <span class="n">max</span><span class="o">=</span><span class="m">101228</span><span class="p">(</span><span class="n">dbIdx</span><span class="o">=</span><span class="m">6</span><span class="p">,</span> <span class="n">tblIdx</span><span class="o">=</span><span class="m">71</span><span class="p">),</span> <span class="n">rate</span><span class="o">=</span> <span class="m">2.93</span>%
+</code></pre></td></tr></table>
+</div>
+</div><p>我们发现该方案中，分库数为16，分表数为100，数量最小行数仅为10W不到，但是最多的已经达到了15W+，最大数据偏斜率高达61%。按这个趋势发展下去，后期很可能出现一台数据库容量已经使用满，而另一台还剩下30%+的容量。</p>
+<p>该方案并不是一定不行，而是我们在采用的时候，要综合分片键的样本规则，选取的分片键前缀位数，库数量，表数量，四个变量对最终的偏斜率都有影响。</p>
+<p>例如上述例子中，如果不是16库100表，而是8库100表，或者20库100表，数据偏斜率都能降低到了5%以下的可接受范围。所以该方案的隐藏的&quot;坑&quot;较多，我们不仅要估算上线初期的偏斜率，还需要测算若干次翻倍扩容后的数据偏斜率。</p>
+<p>例如你用着初期比较完美的8库100表的方案，后期扩容成16库100表的时候，麻烦就接踵而至。</p>
+<p>常用姿势四：剔除公因数法</p>
+<p>还是基于错误案例一启发，在很多场景下我们还是希望相邻的Hash能分到不同的库中。就像N库单表的时候，我们计算库序号一般直接用Hash值对库数量取余。</p>
+<p>那么我们是不是可以有办法去除掉公因数的影响呢？下面为一个可以考虑的实现案例：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="kd">public</span> <span class="kd">static</span> <span class="n">ShardCfg</span> <span class="nf">shard</span><span class="o">(</span><span class="n">String</span> <span class="n">userId</span><span class="o">)</span> <span class="o">{</span>
+        <span class="kt">int</span> <span class="n">dbIdx</span> <span class="o">=</span> <span class="n">Math</span><span class="o">.</span><span class="na">abs</span><span class="o">(</span><span class="n">userId</span><span class="o">.</span><span class="na">hashCode</span><span class="o">()</span> <span class="o">%</span> <span class="n">DB_CNT</span><span class="o">);</span>
+        <span class="c1">// 计算表序号时先剔除掉公约数的影响
+</span><span class="c1"></span>        <span class="kt">int</span> <span class="n">tblIdx</span> <span class="o">=</span> <span class="n">Math</span><span class="o">.</span><span class="na">abs</span><span class="o">((</span><span class="n">userId</span><span class="o">.</span><span class="na">hashCode</span><span class="o">()</span> <span class="o">/</span> <span class="n">TBL_CNT</span><span class="o">)</span> <span class="o">%</span> <span class="n">TBL_CNT</span><span class="o">);</span>
+        <span class="k">return</span> <span class="k">new</span> <span class="n">ShardCfg</span><span class="o">(</span><span class="n">dbIdx</span><span class="o">,</span> <span class="n">tblIdx</span><span class="o">);</span>
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>经过测算，该方案的最大数据偏斜度也比较小，针对不少业务从N库1表升级到N库M表下，需要维护库序号不变的场景下可以考虑。</p>
+<p>常用姿势五：一致性Hash法</p>
+<p>一致性Hash算法也是一种比较流行的集群数据分区算法，比如RedisCluster即是通过一致性Hash算法，使用16384个虚拟槽节点进行每个分片数据的管理。关于一致性Hash的具体原理这边不再重复描述，读者可以自行翻阅资料。</p>
+<p>这边详细介绍如何使用一致性Hash进行分库分表的设计。</p>
+<p>我们通常会将每个实际节点的配置持久化在一个配置项或者是数据库中，应用启动时或者是进行切换操作的时候会去加载配置。配置一般包括一个[StartKey,Endkey)的左闭右开区间和一个数据库节点信息，例如：</p>
+<p>示例代码：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="kd">private</span> <span class="n">TreeMap</span><span class="o">&lt;</span><span class="n">Long</span><span class="o">,</span> <span class="n">Integer</span><span class="o">&gt;</span> <span class="n">nodeTreeMap</span> <span class="o">=</span> <span class="k">new</span> <span class="n">TreeMap</span><span class="o">&lt;&gt;();</span>
+
+<span class="nd">@Override</span>
+<span class="kd">public</span> <span class="kt">void</span> <span class="nf">afterPropertiesSet</span><span class="o">()</span> <span class="o">{</span>
+    <span class="c1">// 启动时加载分区配置
+</span><span class="c1"></span>    <span class="n">List</span><span class="o">&lt;</span><span class="n">HashCfg</span><span class="o">&gt;</span> <span class="n">cfgList</span> <span class="o">=</span> <span class="n">fetchCfgFromDb</span><span class="o">();</span>
+    <span class="k">for</span> <span class="o">(</span><span class="n">HashCfg</span> <span class="n">cfg</span> <span class="o">:</span> <span class="n">cfgList</span><span class="o">)</span> <span class="o">{</span>
+        <span class="n">nodeTreeMap</span><span class="o">.</span><span class="na">put</span><span class="o">(</span><span class="n">cfg</span><span class="o">.</span><span class="na">endKey</span><span class="o">,</span> <span class="n">cfg</span><span class="o">.</span><span class="na">nodeIdx</span><span class="o">);</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+
+<span class="kd">public</span> <span class="n">ShardCfg</span> <span class="nf">shard</span><span class="o">(</span><span class="n">String</span> <span class="n">userId</span><span class="o">)</span> <span class="o">{</span>
+    <span class="kt">int</span> <span class="n">hash</span> <span class="o">=</span> <span class="n">userId</span><span class="o">.</span><span class="na">hashCode</span><span class="o">();</span>
+    <span class="kt">int</span> <span class="n">dbIdx</span> <span class="o">=</span> <span class="n">nodeTreeMap</span><span class="o">.</span><span class="na">tailMap</span><span class="o">((</span><span class="kt">long</span><span class="o">)</span> <span class="n">hash</span><span class="o">,</span> <span class="kc">false</span><span class="o">).</span><span class="na">firstEntry</span><span class="o">().</span><span class="na">getValue</span><span class="o">();</span>
+    <span class="kt">int</span> <span class="n">tblIdx</span> <span class="o">=</span> <span class="n">Math</span><span class="o">.</span><span class="na">abs</span><span class="o">(</span><span class="n">hash</span> <span class="o">%</span> <span class="n">100</span><span class="o">);</span>
+    <span class="k">return</span> <span class="k">new</span> <span class="n">ShardCfg</span><span class="o">(</span><span class="n">dbIdx</span><span class="o">,</span> <span class="n">tblIdx</span><span class="o">);</span>
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们可以看到，这种形式和上文描述的Range分表非常相似，Range分库分表方式针对分片键本身划分范围，而一致性Hash是针对分片键的Hash值进行范围配置。</p>
+<p>正规的一致性Hash算法会引入虚拟节点，每个虚拟节点会指向一个真实的物理节点。这样设计方案主要是能够在加入新节点后的时候，可以有方案保证每个节点迁移的数据量级和迁移后每个节点的压力保持几乎均等。</p>
+<p>但是用在分库分表上，一般大部分都只用实际节点，引入虚拟节点的案例不多，主要有以下原因：</p>
+<ul>
+<li>应用程序需要花费额外的耗时和内存来加载虚拟节点的配置信息。如果虚拟节点较多，内存的占用也会有些不太乐观。</li>
+<li>由于mysql有非常完善的主从复制方案，与其通过从各个虚拟节点中筛选需要迁移的范围数据进行迁移，不如通过从库升级方式处理后再删除冗余数据简单可控。</li>
+<li>虚拟节点主要解决的痛点是节点数据搬迁过程中各个节点的负载不均衡问题，通过虚拟节点打散到各个节点中均摊压力进行处理。</li>
+</ul>
+<p>而作为OLTP数据库，我们很少需要突然将某个数据库下线，新增节点后一般也不会从0开始从其他节点搬迁数据，而是前置准备好大部分数据的方式，故一般来说没有必要引入虚拟节点来增加复杂度。</p>
+<h5 id="rangehash">Range+HASH</h5>
+<p>当然还有一种思路，Range 和 Hash 可以混用。</p>
+<p>比如我们一开始采用的是 Hash 分表，但是数据增长巨大，导致每张分表数据很快达到瓶颈，这样就不得不再做扩容，比如由 64 张表扩容到 256 张。
+但扩容时想要做到不停机迁移数据非常困难，即便是停机，那停多久呢？也不好说。</p>
+<p>所以我们是否可以在 Mod 分表的基础上再分为月表，借助于 Range 自身的扩展性就不用考虑后续数据迁移的事情了。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202032357046.png" alt=""></p>
+<h4 id="shardingkey选择">ShardingKey选择</h4>
+<p>分库分表第一步也是最重要的一步，即sharding column的选取，sharding column选择的好坏将直接决定整个分库分表方案最终是否成功。而sharding column的选取跟业务强相关，笔者认为选择sharding column的方法最主要分析你的API流量，优先考虑流量大的API，将流量比较大的API对应的SQL提取出来，将这些SQL共同的条件作为sharding column。例如一般的OLTP系统都是对用户提供服务，这些API对应的SQL都有条件用户ID，那么，用户ID就是非常好的sharding column。</p>
+<p>这里列举分库分表的几种主要处理思路：</p>
+<ol>
+<li>只选取一个sharding column进行分库分表 ；</li>
+<li>多个sharding column多个分库分表；</li>
+<li>sharding column分库分表 + es；</li>
+</ol>
+<p>第一种:</p>
+<p>比如我们拿着用户登陆为例，1 %的需求是通过 where username = xxx and password = xxx ，99 %的请求是通过id 查询账户的相关信息…</p>
+<p>这时候如何分表呢 ?  可以按照 id 的方式分表，那么1 %的请求咋办？ 跨表查询呗….  另外加个硬缓存… 当触发用户信息更新时再刷新缓存 。</p>
+<p>第二种:</p>
+<p>文章帖子 , 他的表结构是这样  article_id , uid , topic , created_on , content, title ,updated_on …  我们的查询主要分两类，一个是根据article_id查询文章， 一个是查询uid下的article_id .</p>
+<p>他们之间的比率是 80% vs 20% , 对于这类的场景那么我们需要怎么做？  我们可以从文章id下手， 当数据入库的时候我们根据uid信息来创建article_id ,   那么解决了查询用户的所有文章的问题.    那么我怎么定位article_id ？   解决方法是，你创建的文章article_id时，要携带uid信息…   这样你查询article_id时，可以捞出uid所在的库表，然后把article_id相关的其他字段拿出来.</p>
+<p>举个很简单的例子，原本41位的时间戳你觉得用不完，用户ID是10位的，订单号的生成规则带上用户ID，落具体表的时候根据订单号中10位用户ID hash取模，这样无论根据订单号还是用户ID查询效果都是一样的。</p>
+<p>当然，这种方式只是举例，具体的订单号生成的规则，多少位，包含哪些因素根据自己的业务和实现机制来决定。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202201301922429.png" alt=""></p>
+<p>第三种:</p>
+<p>好友表， 业务需求是我想知道我的好友?   别人也想知道他的好友?   表设计师这样的, 如 friend(uid, friend_uid, nick )</p>
+<p>这样的查询量是 50% 分半的。对于分半查询量的需求，处理起来就容易多了.    可以按照uid和friend_id分别分表，也就是冗余入两份数据，只是索引的范围不一样。  这是典型的空间换时间的处理方法。</p>
+<p>第四种:</p>
+<p>这次需求是扩展版第二种的需求，不仅仅给是通过文章 id 和 用户uid 查询数据，而且会通过topic类别来查询.   那么现在文章表 article_id , uid , topic , created_on , content, title ,updated_on  产生了三个查询需求。</p>
+<p>article_id 和 uid 可以使用第二种方法来实现 ，那么topic话题查询怎么办？  可以使用第三种方法 再建一批topic维度的索引表 !!!</p>
+<p>再以几张实际表为例，说明如何分库分表。</p>
+<h5 id="订单表">订单表</h5>
+<p>订单表几个核心字段一般如下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202032308200.png" alt=""></p>
+<p>以阿里订单系统为例，它选择了三个column作为三个独立的sharding column，即：order_id，user_id，merchant_code。user_id和merchant_code就是买家ID和卖家ID，因为阿里的订单系统中买家和卖家的查询流量都比较大，并且查询对实时性要求都很高。而根据order_id进行分库分表，应该是根据order_id的查询也比较多。</p>
+<p>这里还有一点需要提及，多个sharding-column的分库分表是冗余全量还是只冗余关系索引表，需要我们自己权衡。</p>
+<p>冗余全量的情况如下&ndash;每个sharding列对应的表的数据都是全量的，这样做的优点是不需要二次查询，性能更好，缺点是比较浪费存储空间（浅绿色字段就是sharding-column）：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202032322655.png" alt=""></p>
+<p>冗余关系索引表的情况如下&ndash;只有一个sharding column的分库分表的数据是全量的，其他分库分表只是与这个sharding column的关系表，这样做的优点是节省空间，缺点是除了第一个sharding column的查询，其他sharding column的查询都需要二次查询，这三张表的关系如下图所示（浅绿色字段就是sharding column）：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202032322405.png" alt=""></p>
+<p>冗余全量表PK冗余关系表</p>
+<ul>
+<li>速度对比：冗余全量表速度更快，冗余关系表需要二次查询，即使有引入缓存，还是多一次网络开销；</li>
+<li>存储成本：冗余全量表需要几倍于冗余关系表的存储成本；</li>
+<li>维护代价：冗余全量表维护代价更大，涉及到数据变更时，多张表都要进行修改。</li>
+</ul>
+<p>总结：选择冗余全量表还是索引关系表，这是一种架构上的trade off，两者的优缺点明显，阿里的订单表是冗余全量表。</p>
+<h5 id="用户表">用户表</h5>
+<p>用户表几个核心字段一般如下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202032323321.png" alt=""></p>
+<p>一般用户登录场景既可以通过mobile_no，又可以通过email，还可以通过username进行登录。但是一些用户相关的API，又都包含user_id，那么可能需要根据这4个column都进行分库分表，即4个列都是sharding-column。</p>
+<h5 id="账户表">账户表</h5>
+<p>账户表几个核心字段一般如下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202032324110.png" alt=""></p>
+<p>与账户表相关的API，一般条件都有account_no，所以以account_no作为sharding-column即可。</p>
+<h5 id="复杂查询">复杂查询</h5>
+<p>针对非shardingkey的查询有两个办法解决。</p>
+<p>双写，双写就是下单的数据落两份，C端和B端的各自保存一份，C端用你可以用单号、用户ID做shardingkey都行，B端就用商家卖家的ID作为shardingkey就好了。有些同学会说了，你双写不影响性能吗？因为对于B端来说轻微的延迟是可以接受的，所以可以采取异步的方式去落B端订单。你想想你去淘宝买个东西下单了，卖家稍微延迟个一两秒收到这个订单的消息有什么关系吗？你点个外卖商户晚一两秒收到这个订单有什么太大影响吗？</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202201301922533.png" alt=""></p>
+<p>这是一个解决方案，另外一个方案就是走离线数仓或者ES查询，订单数据落库之后，不管你通过binlog还是MQ消息的都形式，把数据同步到数仓或者ES，他们支持的数量级对于这种查询条件来说就很简单了。同样这种方式肯定是稍微有延迟的，但是这种可控范围的延迟是可以接受的。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202201301922837.png" alt=""></p>
+<p>而针对管理后台的查询，比如运营、业务、产品需要看数据，他们天然需要复杂的查询条件，同样走ES或者数仓都可以做得到。如果不用这个方案，又要不带shardingkey的分页查询，兄弟，这就只能扫全表查询聚合数据，然后手动做分页了，但是这样查出来的结果是有限制的。
+比如你256个片，查询的时候循环扫描所有的分片，每个片取20条数据，最后聚合数据手工分页，那必然是不可能查到全量的数据的。</p>
+<h2 id="扩容方案">扩容方案</h2>
+<p>一般新表和旧表直接可以采用 数据同步 或者 双写的方式进行处理，两种方式有各自的优缺点。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202041638458.png" alt=""></p>
+<h3 id="翻倍扩容法">翻倍扩容法</h3>
+<p>翻倍扩容法的主要思维是每次扩容，库的数量均翻倍处理，而翻倍的数据源通常是由原数据源通过主从复制方式得到的从库升级成主库提供服务的方式。故有些文档将其称作&quot;从库升级法&quot;。</p>
+<p>理论上，经过翻倍扩容法后，我们会多一倍的数据库用来存储数据和应对流量，原先数据库的磁盘使用量也将得到一半空间的释放。</p>
+<p>具体的流程大致如下：</p>
+<ol>
+<li>时间点t1：为每个节点都新增从库，开启主从同步进行数据同步。</li>
+<li>时间点t2：主从同步完成后，对主库进行禁写。
+此处禁写主要是为了保证数据的正确性。若不进行禁写操作，在以下两个时间窗口期内将出现数据不一致的问题：a、断开主从后，若主库不禁写，主库若还有数据写入，这部分数据将无法同步到从库中。b、应用集群识别到分库数翻倍的时间点无法严格一致，在某个时间点可能两台应用使用不同的分库数，运算到不同的库序号，导致错误写入。</li>
+<li>时间点t3：同步完全完成后，断开主从关系，理论上此时从库和主库有着完全一样的数据集。</li>
+<li>时间点t4：从库升级为集群节点，业务应用识别到新的分库数后，将应用新的路由算法。
+一般情况下，我们将分库数的配置放到配置中心中，当上述三个步骤完成后，我们修改分库数进行翻倍，应用生效后，应用服务将使用新的配置。这里需要注意的是，业务应用接收到新的配置的时间点不一定一致，所以必定存在一个时间窗口期，该期间部分机器使用原分库数，部分节点使用新分库数。这也正是我们的禁写操作一定要在此步完成后才能放开的原因。</li>
+<li>时间点t5：确定所有的应用均接受到库总数的配置后，放开原主库的禁写操作，此时应用完全恢复服务。</li>
+<li>启动离线的定时任务，清除各库中的约一半冗余数据。</li>
+</ol>
+<p>为了节省磁盘的使用率，我们可以选择离线定时任务清除冗余的数据。也可以在业务初期表结构设计的时候，将索引键的Hash值存为一个字段。那么以上述常用姿势四为例，我们离线的清除任务可以简单的通过sql即可实现（需要防止锁住全表，可以拆分成若干个id范围的子sql执行）：<code>delete from db0.tbl0 where hash_val mod 4 &lt;&gt; 0;delete from db1.tbl0 where hash_val mod 4 &lt;&gt; 1;delete from db2.tbl0 where hash_val mod 4 &lt;&gt; 2;delete from db3.tbl0 where hash_val mod 4 &lt;&gt; 3;</code></p>
+<p>总结：通过上述迁移方案可以看出，从时间点t2到t5时间窗口呢内，需要对数据库禁写，相当于是该时间范围内服务器是部分有损的，该阶段整体耗时差不多是在分钟级范围内。若业务可以接受，可以在业务低峰期进行该操作。</p>
+<p>当然也会有不少应用无法容忍分钟级写入不可用，例如写操作远远大于读操作的应用，此时可以结合canel开源框架进行窗口期内数据双写操作以保证数据的一致性。</p>
+<p>该方案主要借助于mysql强大完善的主从同步机制，能在事前提前准备好新的节点中大部分需要的数据，节省大量的人为数据迁移操作。</p>
+<p>但是缺点也很明显，一是过程中整个服务可能需要以有损为代价，二是每次扩容均需要对库数量进行翻倍，会提前浪费不少的数据库资源。</p>
+<h3 id="一致性hash扩容">一致性Hash扩容</h3>
+<p>我们主要还是看下不带虚拟槽的一致性Hash扩容方法，假如当前数据库节点DB0负载或磁盘使用过大需要扩容，我们通过扩容可以达到例如下图的效果。</p>
+<p>下图中，扩容前配置了三个Hash分段，发现[-Inf，-10000）范围内的的数据量过大或者压力过高时，需要对其进行扩容。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202032215112.png" alt=""></p>
+<p>主要步骤如下：</p>
+<ol>
+<li>时间点t1：针对需要扩容的数据库节点增加从节点，开启主从同步进行数据同步。</li>
+<li>时间点t2：完成主从同步后，对原主库进行禁写。
+此处原因和翻倍扩容法类似，需要保证新的从库和原来主库中数据的一致性。</li>
+<li>时间点t3：同步完全完成后，断开主从关系，理论上此时从库和主库有着完全一样的数据集。</li>
+<li>时间点t4：修改一致性Hash范围的配置，并使应用服务重新读取并生效。</li>
+<li>时间点t5：确定所有的应用均接受到新的一致性Hash范围配置后，放开原主库的禁写操作，此时应用完全恢复服务。</li>
+<li>启动离线的定时任务，清除冗余数据。</li>
+</ol>
+<p>可以看到，该方案和翻倍扩容法的方案比较类似，但是它更加灵活，可以根据当前集群每个节点的压力情况选择性扩容，而无需整个集群同时翻倍进行扩容。</p>
+<h3 id="双写扩容">双写扩容</h3>
+<p>上面的两种方法都对线上环境有一定影响，我们可以采用双写扩容方案来规避这一问题。</p>
+<p>为此，我们经历了以下几个阶段。</p>
+<p>第一阶段</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202041714010.png" alt=""></p>
+<ul>
+<li>数据库双写（事务成功以老模型为准），查询走老模型。</li>
+<li>每日job数据对账（通过DW），并将差异补平。</li>
+<li>通过job导历史数据。</li>
+</ul>
+<p>第二阶段</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202041714292.png" alt=""></p>
+<ul>
+<li>历史数据导入完毕并且数据对账无误。</li>
+<li>依然是数据库双写，但是事务成功与否以新模型为准，在线查询切新模型。</li>
+<li>每日job数据对账，将差异补平。</li>
+</ul>
+<p>第三阶段</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202041714141.png" alt=""></p>
+<ul>
+<li>老模型不再同步写入，仅当订单有终态时才会异步补上。</li>
+<li>此阶段只有离线数据依然依赖老的模型，并且下游的依赖非常多，待DW改造完就可以完全废除老模型了。</li>
+</ul>
+<h2 id="分库分表后面临的问题">分库分表后面临的问题</h2>
+<h3 id="分布式事务支持">分布式事务支持</h3>
+<p>当更新内容同时分布在不同库中，不可避免会带来跨库事务问题。</p>
+<p>分布式事务，没有简单的方案，一般可使用&quot;XA协议&quot;和&quot;两阶段提交&quot;处理。</p>
+<p>分布式事务能最大限度保证了数据库操作的原子性。但在提交事务时需要协调多个节点，推后了提交事务的时间点，延长了事务的执行时间。导致事务在访问共享资源时发生冲突或死锁的概率增高。随着数据库节点的增多，这种趋势会越来越严重，从而成为系统在数据库层面上水平扩展的枷锁。</p>
+<p>最终一致性</p>
+<p>对于那些性能要求很高，但对一致性要求不高的系统，</p>
+<p>往往不苛求系统的实时一致性，只要在允许的时间段内达到最终一致性即可，可采用事务补偿的方式。与事务在执行中发生错误后立即回滚的方式不同，事务补偿是一种事后检查补救的措施，一些常见的实现方法有：对数据进行对账检查，基于日志进行对比，定期同标准数据来源进行同步等等。事务补偿还要结合业务系统来考虑。</p>
+<h3 id="排序分页函数计算问题">排序、分页、函数计算问题</h3>
+<p>首先说带shardingkey的查询，比如就通过订单号查询，不管你分页还是怎么样都是能直接定位到具体的表来查询的，显然查询是不会有什么问题的。</p>
+<p>如果是shardingkey以外的情况，通用的方案是可以先在每个分片上执行相应的函数，然后将各个分片的结果集进行汇总和再次计算，最终得到结果。</p>
+<h3 id="跨库关联查询">跨库关联查询</h3>
+<p>在分库分表之前，我们可以通过 JOIN 多表的方式来查询复杂的数据。但是切分之后，数据可能分布在不同的节点上，此时再去 JOIN 几乎是不可能的事情。所以，对于分库分表的情况，我们通常的建议是：“抛弃 JOIN”。</p>
+<p>那么，为了解决关联查询的问题，我们可以想一些别的办法。例如：</p>
+<ul>
+<li>字段冗余设计：这是一种反范式的设计，也是空间换时间的典例，它是将需要多次用到的数据分布到多张表中，避免了 JOIN 查询</li>
+<li>数据组装：也就是多次查询，将多次查询的数据组装在一起构成整体数据</li>
+<li>拆分查询：注意，这里所说的查询指的是前端发起的查询请求，即前端把复杂查询（多表）拆分成多次简单查询（单表）</li>
+</ul>
+<p>由此，可以得出结论：分库分表对于 “大” 业务系统几乎是不可避免的，但是，分库分表同样存在非常严重的缺陷。如果你不能解决这些问题或给出合理的解决方案，慎用分库分表，反而是可以考虑使用分布式数据库（例如 HBase）去代替。</p>
+<h3 id="主键重复">主键重复</h3>
+<p>一般我们数据库的主键都是自增的，那么分表之后主键冲突的问题就是一个无法避免的问题，最简单的办法就是以一个唯一的业务字段作为唯一的主键，比如订单表的订单号肯定是全局唯一的。</p>
+<p>常见的分布式生成唯一ID的方式很多，最常见的雪花算法Snowflake、滴滴Tinyid、美团Leaf。以雪花算法举例来说，一毫秒可以生成4194304多个ID。
+第一位不使用，默认都是0，41位时间戳精确到毫秒，可以容纳69年的时间，10位工作机器ID高5位是数据中心ID，低5位是节点ID，12位序列号每个节点每毫秒累加，累计可以达到2^12 4096个ID。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202201301901469.png" alt=""></p>
+<p>第一步，分表后要怎么保证订单号的唯一搞定了，现在考虑下分表的问题。首先根据自身的业务量和增量来考虑分表的大小。</p>
+<p>举个例子，现在我们日单量是10万单，预估一年后可以达到日100万单，根据业务属性，一般我们就支持查询半年内的订单，超过半年的订单需要做归档处理。</p>
+<p>那么以日订单100万半年的数量级来看，不分表的话我们订单量将达到100万X180=1.8亿，以这个数据量级部分表的话肯定单表是扛不住的，就算你能扛RT的时间你也根本无法接受吧。根据经验单表几百万的数量对于数据库是没什么压力的，那么只要分256张表就足够了，1.8亿/256≈70万，如果为了保险起见，也可以分到512张表。那么考虑一下，如果业务量再增长10倍达到1000万单每天，分表1024就是比较合适的选择。</p>
+<p>通过分表加上超过半年的数据归档之后，单表70万的数据就足以应对大部分场景了。接下来对订单号hash，然后对256取模的就可以落到具体的哪张表了。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202201301904410.png" alt=""></p>
+<p>那么，因为唯一主键都是以订单号作为依据，以前你写的那些根据主键ID做查询的就不能用了，这就涉及到了历史一些查询功能的修改。不过这都不是事儿对吧，都改成以订单号来查就行了。这都不是问题，问题在我们的标题说的点上。</p>
+<h3 id="多数据源">多数据源</h3>
+<p>分库分表之后可能会面临从多个数据库或多个子表中获取数据，一般的解决思路有：客户端适配和代理层适配。</p>
+<p>业界常用的中间件有：</p>
+<ul>
+<li>shardingsphere（前身 sharding-jdbc）</li>
+<li>Mycat</li>
+</ul>
+<h3 id="二次扩容问题">二次扩容问题</h3>
+<p>业务发展快，初次分库分表后，满足不了数据存储，导致需要多次扩容</p>
+<h2 id="参考">参考</h2>
+<p><a href="https://juejin.cn/post/6892916124141551629">百亿级数据分表后怎么分页查询？</a></p>
+<p><a href="https://juejin.cn/post/6844903648670007310#heading-7">MySQL 分库分表方案，总结的非常好！</a></p>
+<p><a href="https://mp.weixin.qq.com/s/RlOezSf9bLiMAaevhwT5Zg">我们为什么要分库分表？</a></p>
+<p><a href="https://cloud.tencent.com/developer/article/1893163">你分库分表的姿势对么？——详谈水平分库分表</a></p>
+<p><a href="https://www.helloworld.net/p/9632685431">MySQL：互联网公司常用分库分表方案汇总</a></p>
+<p><a href="https://juejin.cn/post/6844903908360323079">一次难得的分库分表实践</a></p>
+<p><a href="http://xiaorui.cc/archives/3923">关于mysql分库分表及高可用集群经验 [下]</a></p>
+<p><a href="https://tech.meituan.com/2016/11/18/dianping-order-db-sharding.html">大众点评订单系统分库分表实践</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2022-01-30
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/mysql/">MySQL</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/mysql%E5%A6%82%E4%BD%95%E4%BC%98%E5%8C%96%E6%B7%B1%E5%88%86%E9%A1%B5/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">MySQL如何优化深分页</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/%E5%A6%82%E4%BD%95%E4%BD%BF%E7%94%A8redis%E7%BC%93%E5%AD%98%E5%88%86%E9%A1%B5%E6%9F%A5%E8%AF%A2/">
+            <span class="next-text nav-default">如何使用Redis缓存分页查询</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span>Forz</span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.js"></script>
+<script>
+docsearch({
+    apiKey: "b4b9da2eba53aa6dabe4b8ac9e8676e1",
+    indexName: "forz.forzvina.com",
+    appId: "IAR2EF5L65",
+    inputSelector: '.docsearch-input',
+    debug: false,
+});
+</script>
+</body>
+</html>
