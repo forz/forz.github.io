@@ -16,7 +16,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
 
 
-<meta name="author" content="Forz" /><meta name="description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage)—有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引" /><meta name="keywords" content="Hugo, theme, even" />
+<meta name="author" content="Forz" /><meta name="description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage): 有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引用得到)的对象，" /><meta name="keywords" content="Hugo, theme, even" />
 
 
 
@@ -40,19 +40,19 @@
 
 
 <meta property="og:title" content="Go的垃圾回收源码剖析" />
-<meta property="og:description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage)—有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引" />
+<meta property="og:description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage): 有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引用得到)的对象，" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/go%E7%9A%84%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" /><meta property="article:section" content="post" />
 <meta property="article:published_time" content="2020-11-30T14:52:24+00:00" />
 <meta property="article:modified_time" content="2020-11-30T14:52:24+00:00" />
 
 <meta itemprop="name" content="Go的垃圾回收源码剖析">
-<meta itemprop="description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage)—有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引"><meta itemprop="datePublished" content="2020-11-30T14:52:24+00:00" />
+<meta itemprop="description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage): 有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引用得到)的对象，"><meta itemprop="datePublished" content="2020-11-30T14:52:24+00:00" />
 <meta itemprop="dateModified" content="2020-11-30T14:52:24+00:00" />
-<meta itemprop="wordCount" content="47757">
+<meta itemprop="wordCount" content="46808">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的垃圾回收源码剖析"/>
-<meta name="twitter:description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage)—有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引"/>
+<meta name="twitter:description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage): 有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引用得到)的对象，"/>
 
 <!--[if lte IE 9]>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 47757 字 </span>
-          <span class="more-meta"> 预计阅读 96 分钟 </span>
+          <span class="more-meta"> 约 46808 字 </span>
+          <span class="more-meta"> 预计阅读 94 分钟 </span>
         
       </div>
     </header>
@@ -182,39 +182,65 @@
       <h2 id="垃圾分类">垃圾分类</h2>
 <p>垃圾分为以下两类:</p>
 <ul>
-<li>语义垃圾(semantic garbage)—有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引用 得到)的对象，但从语义上来讲他们是垃圾，垃圾回收器对此 无能为力。</li>
-<li>语法垃圾(syntactic garbage) 语法垃圾是讲那些从语法上无法到达的对象，这些才是垃圾收集器主要的收集目标。</li>
+<li>语义垃圾(semantic garbage): 有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引用得到)的对象，但从语义上来讲他们是垃圾，垃圾回收器对此无能为力。</li>
+<li>语法垃圾(syntactic garbage): 语法垃圾是讲那些从语法上无法到达的对象，这些才是垃圾收集器主要的收集目标。</li>
 </ul>
 <p>语法垃圾:</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210812214439.png" alt=""></p>
-<p>在 allocOnHeap 返回后， 堆上的 a 无法访问 便成为了语法垃圾.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nf">alloconheap</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">alloconheap</span><span class="p">()</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">a</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">int</span><span class="p">,</span> <span class="mi">10240</span><span class="p">)</span>
+	<span class="nb">println</span><span class="p">(</span><span class="nx">a</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>在 allocOnHeap 返回后， 堆上的 a 无法访问 便成为了语法垃圾.</p>
 <h2 id="设计理念">设计理念</h2>
-<p>Go 实现的垃圾回收器是无分代（对象没有代际之分）、不整理（回收过程中不对对象进行移动与整理）、并发（与用户代码并发执行）的三色标记清扫算法。 从宏观的角度来看，Go 运行时的垃圾回收器主要包含五个阶段：</p>
+<p>Go 实现的垃圾回收器是无分代(对象没有代际之分)、不整理(回收过程中不对对象进行移动与整理)、并发(与用户代码并发执行)的三色标记清扫算法。 从宏观的角度来看，Go 运行时的垃圾回收器主要包含五个阶段：</p>
 <ol>
-<li>清理终止阶段(STW):为下一个阶段的并发标记做准备工作，启动写屏障；
+<li>清理终止阶段(STW):对上个垃圾回收阶段进行一些收尾工作(例如清理缓存池、停止调度器等等)，启动写屏障；
 <ol>
-<li>暂停程序，所有的处理器在这时会进入安全点（Safe point）；</li>
+<li>暂停程序，所有的处理器在这时会进入安全点(Safe point)；</li>
 <li>如果当前垃圾收集循环是强制触发的，我们还需要处理还未被清理的内存管理单元；</li>
+<li>将状态切换至 <code>_GCmark</code>、开启写屏障、</li>
 </ol>
 </li>
 <li>标记阶段(并发):与赋值器并发执行，写屏障处于开启状态；
 <ol>
-<li>将状态切换至 _GCmark、开启写屏障、用户程序协助（Mutator Assiste）并将根对象入队；</li>
+<li>用户程序协助(Mutator Assist)并将根对象入队；</li>
 <li>恢复执行程序，标记进程和用于协助的用户程序会开始并发标记内存中的对象，写屏障会将被覆盖的指针和新指针都标记成灰色，而所有新创建的对象都会被直接标记成黑色；</li>
 <li>开始扫描根对象，包括所有 Goroutine 的栈、全局对象以及不在堆中的运行时数据结构，扫描 Goroutine 栈期间会暂停当前处理器；</li>
 <li>依次处理灰色队列中的对象，将对象标记成黑色并将它们指向的对象标记成灰色；</li>
 <li>使用分布式的终止算法检查剩余的工作，发现标记阶段完成后进入标记终止阶段；</li>
 </ol>
 </li>
-<li>标记终止阶段(STW):保证一个周期内标记任务完成，停止写屏障；
+<li>标记终止阶段(STW):完成标记阶段的收尾工作，关闭写屏障，并随后对整个 GC 阶段进行的各项数据进行统计。
 <ol>
-<li>暂停程序、将状态切换至_GCmarktermination 并关闭辅助标记的用户程序；</li>
+<li>暂停程序、将状态切换至<code>_GCmarktermination</code> 并关闭辅助标记的用户程序；</li>
 <li>清理处理器上的线程缓存；</li>
+<li>将状态切换至 <code>_GCoff</code> 开始清理阶段，初始化清理状态并关闭写屏障；</li>
 </ol>
 </li>
 <li>清理阶段(并发):将需要回收的内存归还到堆中，写屏障处于关闭状态；
 <ol>
-<li>将状态切换至 _GCoff 开始清理阶段，初始化清理状态并关闭写屏障；</li>
 <li>恢复用户程序，所有新创建的对象会标记成白色；</li>
 <li>后台并发清理所有的内存管理单元，当 Goroutine 申请新的内存管理单元时就会触发清理；</li>
 </ol>
@@ -223,27 +249,19 @@
 </ol>
 <p>GC流程图:</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210812215006.png" alt=""></p>
-<ul>
-<li>Stack scan：收集根对象（全局变量，和G stack），开启写屏障。全局变量、开启写屏障需要STW，G stack只需要停止该G就好，时间比较少。</li>
-<li>Mark: 扫描所有根对象, 和根对象可以到达的所有对象, 标记它们不被回收</li>
-<li>Mark Termination: 完成标记工作, 重新扫描部分根对象(要求STW)</li>
-<li>Sweep: 按标记结果清扫span</li>
-</ul>
-<p>需要注意的是, 不是所有根对象的扫描都需要STW, 例如扫描栈上的对象只需要停止拥有该栈的G.</p>
 <p>对象整理的优势是解决内存碎片问题以及“允许”使用顺序内存分配器。 但 Go 运行时的分配算法基于 tcmalloc，基本上没有碎片问题。 并且顺序内存分配器在多线程的场景下并不适用。 Go 使用的是基于 tcmalloc 的现代内存分配算法，对对象进行整理不会带来实质性的性能提升。</p>
-<p>在这五个阶段中，只有标记、内存清扫和内存归还三个阶段的写屏障状态是保持不变的。 在清扫终止过程中，写屏障先出于关闭状态， 而后对上个垃圾回收阶段进行一些收尾工作（例如清理缓存池、停止调度器等等）， 然后才被启动；在标记终止阶段，写屏障先出于启动状态，完成标记阶段的收尾工作后， 写屏障被关闭，并随后对整个 GC 阶段进行的各项数据进行统计等等收尾工作。 而在实际实现过程中，垃圾回收器通过 _GCoff、_GCMark 和 _GCMarktermination 三个标记来确定写屏障状态，这时写屏障的启动状态严格的在_GCoff 到 _GCMark 到_GCMarktermination 再到 _GCoff 的切换中进行变化。</p>
-<p>分代 GC 依赖分代假设，即 GC 将主要的回收目标放在新创建的对象上（存活时间短，更倾向于被回收）， 而非频繁检查所有对象。但 Go 的编译器会通过逃逸分析将大部分新生对象存储在栈上（栈直接被回收）， 只有那些需要长期存在的对象才会被分配到需要进行垃圾回收的堆中。 也就是说，分代 GC 回收的那些存活时间短的对象在 Go 中是直接被分配到栈上， 当 goroutine 死亡后栈也会被直接回收，不需要 GC 的参与，进而分代假设并没有带来直接优势。 并且 Go 的垃圾回收器与用户代码并发执行，使得 STW 的时间与对象的代际、对象的 size 没有关系。 Go 团队更关注于如何更好地让 GC 与用户代码并发执行（使用适当的 CPU 来执行垃圾回收）， 而非减少停顿时间这一单一目标上。</p>
+<p>分代 GC 依赖分代假设，即 GC 将主要的回收目标放在新创建的对象上(存活时间短，更倾向于被回收)， 而非频繁检查所有对象。但 Go 的编译器会通过逃逸分析将大部分新生对象存储在栈上(栈直接被回收)， 只有那些需要长期存在的对象才会被分配到需要进行垃圾回收的堆中。 也就是说，分代 GC 回收的那些存活时间短的对象在 Go 中是直接被分配到栈上， 当 goroutine 死亡后栈也会被直接回收，不需要 GC 的参与，进而分代假设并没有带来直接优势。 并且 Go 的垃圾回收器与用户代码并发执行，使得 STW 的时间与对象的代际、对象的 size 没有关系。 Go 团队更关注于如何更好地让 GC 与用户代码并发执行(使用适当的 CPU 来执行垃圾回收)， 而非减少停顿时间这一单一目标上。</p>
 <h2 id="三色抽象">三色抽象</h2>
 <p>三色抽象只是一种描述追踪式回收器的方法，在实践中并没有实际含义， 它的重要作用在于从逻辑上严密推导标记清理这种垃圾回收方法的正确性。 也就是说，当我们谈及三色标记法时，通常指标记清扫的垃圾回收。</p>
 <p>从垃圾回收器的视角来看，三色抽象规定了三种不同类型的对象，并用不同的颜色相称：</p>
 <ul>
-<li>白色对象（可能死亡）：未被回收器访问到的对象。在回收开始阶段，所有对象均为白色，当回收结束后，白色对象均不可达。</li>
-<li>灰色对象（波面）：已被回收器访问到的对象，但回收器需要对其中的一个或多个指针进行扫描，因为他们可能还指向白色对象。</li>
-<li>黑色对象（确定存活）：已被回收器访问到的对象，其中所有字段都已被扫描，黑色对象中任何一个指针都不可能直接指向白色对象。</li>
+<li>白色对象(可能死亡)：未被回收器访问到的对象。在回收开始阶段，所有对象均为白色，当回收结束后，白色对象均不可达。</li>
+<li>灰色对象(波面)：已被回收器访问到的对象，但回收器需要对其中的一个或多个指针进行扫描，因为他们可能还指向白色对象。</li>
+<li>黑色对象(确定存活)：已被回收器访问到的对象，其中所有字段都已被扫描，黑色对象中任何一个指针都不可能直接指向白色对象。</li>
 </ul>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201130153123.png" alt=""></p>
-<p>这样三种不变性所定义的回收过程其实是一个 波面（Wavefront） 不断前进的过程， 这个波面同时也是黑色对象和白色对象的边界，灰色对象就是这个波面。</p>
-<p>当垃圾回收开始时，只有白色对象。随着标记过程开始进行时，灰色对象开始出现（着色），这时候波面便开始扩大。当一个对象的所有子节点均完成扫描时，会被着色为黑色。当整个堆遍历完成时，只剩下黑色和白色对象，这时的黑色对象为可达对象，即存活；而白色对象为不可达对象，即死亡。这个过程可以视为以灰色对象为波面，将黑色对象和白色对象分离，使波面不断向前推进，直到所有可达的灰色对象都变为黑色对象为止的过程.</p>
+<p>这样三种不变性所定义的回收过程其实是一个 波面(Wavefront) 不断前进的过程， 这个波面同时也是黑色对象和白色对象的边界，灰色对象就是这个波面。</p>
+<p>当垃圾回收开始时，只有白色对象。随着标记过程开始进行时，灰色对象开始出现(着色)，这时候波面便开始扩大。当一个对象的所有子节点均完成扫描时，会被着色为黑色。当整个堆遍历完成时，只剩下黑色和白色对象，这时的黑色对象为可达对象，即存活；而白色对象为不可达对象，即死亡。这个过程可以视为以灰色对象为波面，将黑色对象和白色对象分离，使波面不断向前推进，直到所有可达的灰色对象都变为黑色对象为止的过程.</p>
 <p>对象的三种颜色可以这样来判断：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -301,16 +319,16 @@
 <h2 id="屏障技术">屏障技术</h2>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201215145709.png" alt=""></p>
 <p>上图，假如B对象变黑后，又给B指向对象G，因为这个时候G对象已经扫描过了，所以G 对象还是白色，会被误回收。怎么解决这个问题呢？</p>
-<p>最简单的方法就是STW(stop the world)。也就是说，停止所有的协程。这个方法比较暴力会引起程序的卡顿，并不友好。让GC回收器,满足下面两种情况之一时,可保对象不丢失. 所以引出强-弱三色不变式：</p>
+<p>最简单的方法就是STW(stop the world)。也就是说，停止所有的协程。这个方法比较暴力会引起程序的卡顿，并不友好。让GC回收器,满足下面两种情况之一时,可保对象不丢失. 所以引出强-弱三色不变性：</p>
 <p>内存屏障技术是一种屏障指令，它可以让 CPU 或者编译器在执行内存相关操作时遵循特定的约束，目前的多数的现代处理器都会乱序执行指令以最大化性能，但是该技术能够保证代码对内存操作的顺序性，在内存屏障前执行的操作一定会先于内存屏障后执行的操作。</p>
-<p>想要在并发或者增量的标记算法中保证正确性，我们需要达成以下两种三色不变性（Tri-color invariant）中的任意一种：</p>
+<p>想要在并发或者增量的标记算法中保证正确性，我们需要达成以下两种三色不变性(Tri-color invariant)中的任意一种：</p>
 <ul>
 <li>强三色不变性 — 黑色对象不会指向白色对象，只会指向灰色对象或者黑色对象；</li>
 <li>弱三色不变性 — 黑色对象指向的白色对象必须包含一条从灰色对象经由多个白色对象的可达路径；</li>
 </ul>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201130173312.png" alt=""></p>
 <p>上图分别展示了遵循强三色不变性和弱三色不变性的堆内存，遵循上述两个不变性中的任意一个，我们都能保证垃圾收集算法的正确性，而屏障技术就是在并发或者增量标记过程中保证三色不变性的重要技术。</p>
-<p>垃圾收集中的屏障技术更像是一个钩子方法，它是在用户程序读取对象、创建新对象以及更新对象指针时执行的一段代码，根据操作类型的不同，我们可以将它们分成读屏障（Read barrier）和写屏障（Write barrier）两种，因为读屏障需要在读操作中加入代码片段，对用户程序的性能影响很大，所以编程语言往往都会采用写屏障保证三色不变性。</p>
+<p>垃圾收集中的屏障技术更像是一个钩子方法，它是在用户程序读取对象、创建新对象以及更新对象指针时执行的一段代码，根据操作类型的不同，我们可以将它们分成读屏障(Read barrier)和写屏障(Write barrier)两种，因为读屏障需要在读操作中加入代码片段，对用户程序的性能影响很大，所以编程语言往往都会采用写屏障保证三色不变性。</p>
 <p>我们在这里想要介绍的是 Go 语言中使用的两种写屏障技术，分别是 Dijkstra 提出的插入写屏障和 Yuasa 提出的删除写屏障，这里会分析它们如何保证三色不变性和垃圾收集器的正确性。</p>
 <h3 id="插入写屏障">插入写屏障</h3>
 <p>Dijkstra 在 1978 年提出了插入写屏障，通过如下所示的写屏障，用户程序和垃圾收集器可以在交替工作的情况下保证程序执行的正确性：</p>
@@ -334,7 +352,7 @@
 <li>Slot 是 Go 代码里的被修改的指针对象</li>
 <li>Ptr 是 Slot 要修改成的值</li>
 </ul>
-<p>上述插入写屏障的伪代码非常好理解，每当我们执行类似 *slot = ptr 的表达式时，我们会执行上述写屏障通过 shade 函数尝试改变指针的颜色。如果 ptr 指针是白色的，那么该函数会将该对象设置成灰色，其他情况则保持不变。</p>
+<p>上述插入写屏障的伪代码非常好理解，每当我们执行类似 <code>*slot = ptr</code> 的表达式时，我们会执行上述写屏障通过 shade 函数尝试改变指针的颜色。如果 ptr 指针是白色的，那么该函数会将该对象设置成灰色，其他情况则保持不变。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201130174441.png" alt=""></p>
 <p>假设我们在应用程序中使用 Dijkstra 提出的插入写屏障，在一个垃圾收集器和用户程序交替运行的场景中会出现如上图所示的标记过程：</p>
 <ol>
@@ -344,10 +362,9 @@
 </ol>
 <p>Dijkstra 的插入写屏障是一种相对保守的屏障技术，它会将有存活可能的对象都标记成灰色以满足强三色不变性。在如上所示的垃圾收集过程中，实际上不再存活的 B 对象最后没有被回收；而如果我们在第二和第三步之间将指向 C 对象的指针改回指向 B，垃圾收集器仍然认为 C 对象是存活的，这些被错误标记的垃圾对象只有在下一个循环才会被回收。</p>
 <p>在 Go 语言 v1.7 版本之前，运行时会使用 Dijkstra 插入写屏障保证强三色不变性，但是运行时并没有在所有的垃圾收集根对象上开启插入写屏障。因为 Go 语言的应用程序可能包含成百上千的 Goroutine，而垃圾收集的根对象一般包括全局变量和栈对象，如果运行时需要在几百个 Goroutine 的栈上都开启写屏障，会带来巨大的额外开销，所以 Go 团队在实现上选择了在标记阶段完成时暂停程序、将所有栈对象标记为灰色并重新扫描，在活跃 Goroutine 非常多的程序中，重新扫描的过程需要占用 10 ~ 100ms 的时间。</p>
-<p>黑色对象的内存槽有两种位置, 栈和堆. 栈空间的特点是容量小,但是要求相应速度快,因为函数调用弹出频繁使用, 所以“插入屏障”机制,在栈空间的对象操作中不使用. 而仅仅使用在堆空间对象的操作中。</p>
 <p>插入式的 Dijkstra 写屏障虽然实现非常简单并且也能保证强三色不变性，但是它也有很明显的缺点。因为栈上的对象在垃圾收集中也会被认为是根对象，所以为了保证内存的安全，Dijkstra 在标记阶段完成重新对栈上的对象进行扫描，重新扫描栈对象时需要暂停程序,这个自然就会导致整个进程的赋值器卡顿，</p>
 <h3 id="删除写屏障">删除写屏障</h3>
-<p>删除写屏障也叫基于快照的写屏障方案，必须在起始时，STW 扫描整个栈（注意了，是所有的 goroutine 栈），保证所有堆上在用的对象都处于灰色保护下，保证的是弱三色不变式；</p>
+<p>删除写屏障也叫基于快照的写屏障方案，必须在起始时，STW 扫描整个栈(注意了，是所有的 goroutine 栈)，保证所有堆上在用的对象都处于灰色保护下，保证的是弱三色不变式；</p>
 <p>该算法会使用如下所示的写屏障保证增量或者并发执行垃圾收集时程序的正确性：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -380,27 +397,8 @@
 <li>弱三色不变性 — 垃圾收集器无法从某个灰色对象出发，经过几个连续的白色对象访问白色的 C 和 D 两个对象；</li>
 </ul>
 <p>Yuasa 删除写屏障通过对 C 对象的着色，保证了 C 对象和下游的 D 对象能够在这一次垃圾收集的循环中存活，避免发生悬挂指针以保证用户程序的正确性。</p>
-<p>由于起始快照的原因，起始也是执行 STW，删除写屏障不适用于栈特别大的场景，栈越大，STW 扫描时间越长，对于现代服务器上的程序来说，栈地址空间都很大，所以删除写屏障都不适用，一般适用于很小的栈内存，比如嵌入式，物联网的一些程序；</p>
-<p>并且删除写屏障会导致扫描进度（波面）的后退，所以扫描精度不如插入写屏障；</p>
-<p>思考问题：我不整机暂停 STW 栈，而是一个栈一个栈的快照，这样也没有 STW 了，是否可以满足要求？（这个就是当前 golang 混合写屏障的时候做的哈，虽然没有 STW 了，但是扫描到某一个具体的栈的时候，还是要暂停这一个 goroutine 的）</p>
-<p>不行，纯粹的删除写屏障，起始必须整个栈打快照，要把所有的堆对象都处于灰色保护中才行。</p>
-<p>举例：如果没有把栈完全扫黑，那么可能出现丢数据，如下：</p>
-<p>初始状态：</p>
-<ol>
-<li>A 是 g1 栈的一个对象，g1栈已经扫描完了，并且 C 也是扫黑了的对象；</li>
-<li>B 是 g2 栈的对象，指向了  C 和 D，g2 完全还没扫描，B 是一个灰色对象，D 是白色对象；</li>
-</ol>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201227153353.png" alt=""></p>
-<p>步骤一：g2 进行赋值变更，把 C 指向 D 对象，这个时候黑色的 C 就指向了白色的 D（由于是删除屏障，这里是不会触发hook的）</p>
-<p>步骤二：把 B 指向 C 的引用删除，由于是栈对象操作，不会触发删除写屏障；</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201227160658.png" alt=""></p>
-<p>步骤三：清理，因为 C 已经是黑色对象了，所以不会再扫描，所以 D 就会被错误的清理掉。</p>
-<p>解决办法有如下：</p>
-<p>方法一：栈上对象也 hook，所有对象赋值（插入，删除）都 hook（这个就不实际了）;</p>
-<p>所有的插入，删除如果都 hook ，那么一定都不会有问题，虽然本轮精度很差，但是下轮回收可以回收了。但是还是那句话，栈，寄存器的赋值 hook 是不现实的。</p>
-<p>方法二：起始快照整栈跨找，扫黑，使得整个堆上的在用对象都处于灰色保护；</p>
-<p>整栈扫黑，那么在用的堆上的对象是一定处于灰色堆对象的保护下的，之后配合堆对象删除写屏障就能保证在用对象不丢失。</p>
-<p>方法三：加入插入写屏障的逻辑，C 指向 D 的时候，把 D 置灰，这样扫描也没问题。这样就能去掉起始 STW 扫描，从而可以并发，一个一个栈扫描。这就成了当前在用的混合写屏障了</p>
+<p>由于起始快照的原因，起始也是执行 STW，删除写屏障不适用于栈特别大的场景，栈越大，STW 扫描时间越长，对于现代服务器上的程序来说，栈地址空间都很大，所以删除写屏障都不适用.</p>
+<p>删除写屏障会导致扫描进度(波面)的后退，所以扫描精度不如插入写屏障.</p>
 <h3 id="写屏障对比">写屏障对比</h3>
 <p>Dijkstra insertion barrier</p>
 <p>优点:</p>
@@ -410,8 +408,7 @@
 </ul>
 <p>缺点:</p>
 <ul>
-<li>不能防止栈上的黑色对象指向堆上的白色对象(这个白色对象之前是被堆上的黑/灰指着的)</li>
-<li>所以在mark结束后需要stw重新扫描所有 goroutine 栈</li>
+<li>不能防止栈上的黑色对象指向堆上的白色对象(这个白色对象之前是被堆上的黑/灰指着的),所以在mark结束后需要stw重新扫描所有 goroutine 栈</li>
 </ul>
 <p>Yuasa deletion barrier</p>
 <p>优点:</p>
@@ -421,10 +418,21 @@
 </ul>
 <p>缺点:</p>
 <ul>
-<li>不能防止堆上的黑色对象指向堆上的白色对象(这个白色对象之前是由栈的黑/灰色对象指着的)</li>
-<li>所以需要 GC 开始时 STW 对栈做快照</li>
+<li>不能防止堆上的黑色对象指向堆上的白色对象(这个白色对象之前是由栈的黑/灰色对象指着的),所以需要 GC 开始时 STW 对栈做快照</li>
 </ul>
 <h3 id="混合写屏障">混合写屏障</h3>
+<p>在删除写屏障下,如果我不 STW 所有的栈，而是一个栈一个栈的快照，有什么问题？举例：如果没有把栈完全扫黑，那么可能出现丢数据，如下：</p>
+<p>初始状态：</p>
+<ol>
+<li>A 是 g1 栈的一个对象，g1栈已经扫描完了，并且 C 也是扫黑了的对象；</li>
+<li>B 是 g2 栈的对象，指向了 C 和 D，g2 完全还没扫描，B 是一个灰色对象，D 是白色对象；</li>
+</ol>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201227153353.png" alt=""></p>
+<p>步骤一：g2 进行赋值变更，把 C 指向 D 对象，这个时候黑色的 C 就指向了白色的 D(由于是删除屏障，这里是不会触发hook的)</p>
+<p>步骤二：把 B 指向 C 的引用删除，由于是栈对象操作，不会触发删除写屏障；</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201227160658.png" alt=""></p>
+<p>步骤三：清理，因为 C 已经是黑色对象了，所以不会再扫描，所以 D 就会被错误的清理掉。</p>
+<p>解决办法:加入插入写屏障的逻辑，C 指向 D 的时候，把 D 置灰，这样扫描也没问题。这样就能去掉起始 STW 扫描，从而可以并发，一个一个栈扫描。这就成了当前在用的混合写屏障了</p>
 <p>Go 语言在 v1.8 组合 Dijkstra 插入写屏障和 Yuasa 删除写屏障构成了如下所示的混合写屏障，该写屏障会将被覆盖的对象标记成灰色并在当前栈没有扫描时将新对象也标记成灰色：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -460,7 +468,7 @@
 </div><p>混合写屏障具体操作:</p>
 <ol>
 <li>
-<p>GC开始将栈上的对象全部扫描并标记为黑色(之后不再进行第二次重复扫描，无需STW)，</p>
+<p>GC开始后逐一将栈上的对象全部扫描并标记为黑色(无需STW)，</p>
 </li>
 <li>
 <p>GC期间，任何在栈上创建的新对象，均为黑色。防止新分配的栈内存和堆内存中的对象被错误地回收，因为栈内存在标记阶段最终都会变为黑色，所以不再需要重新扫描栈空间。</p>
@@ -473,13 +481,12 @@
 </li>
 </ol>
 <p>满足: 变形的弱三色不变式.</p>
-<p>上面说到整个GC有两次STW，采用混合屏障后可以大幅压缩第二次STW的时间。</p>
+<p>采用混合屏障后可以大幅压缩1.7版本插入写屏障带来的的第二次STW的时间。</p>
 <p>总结：</p>
 <ol>
 <li>混合写屏障继承了插入写屏障的优点，起始无需 STW 打快照，直接并发扫描垃圾即可；</li>
-<li>混合写屏障继承了删除写屏障的优点，赋值器是黑色赋值器，扫描过一次就不需要扫描了，这样就消除了插入写屏障时期最后 STW 的重新扫描栈；</li>
-<li>混合写屏障扫描精度继承了删除写屏障，比插入写屏障更低，随着带来的是 GC 过程全程无 STW；</li>
-<li>混合写屏障扫描栈虽然没有 STW，但是扫描某一个具体的栈的时候，还是要停止这个 goroutine 赋值器的工作.（针对一个 goroutine 栈来说，是暂停扫的，要么全灰，要么全黑哈，原子状态切换）；</li>
+<li>混合写屏障继承了删除写屏障的优点，消除了插入写屏障时期最后 STW 的重新扫描栈；</li>
+<li>混合写屏障扫描栈虽然没有 STW，但是扫描某一个具体的栈的时候，还是要停止这个 goroutine 赋值器的工作.</li>
 </ol>
 <h2 id="增量和并发">增量和并发</h2>
 <p>传统的垃圾收集算法会在垃圾收集的执行期间暂停应用程序，一旦触发垃圾收集，垃圾收集器就会抢占 CPU 的使用权占据大量的计算资源以完成标记和清除工作，然而很多追求实时的应用程序无法接受长时间的 STW。</p>
@@ -491,11 +498,11 @@
 </ul>
 <p>因为增量和并发两种方式都可以与用户程序交替运行，所以我们需要使用屏障技术保证垃圾收集的正确性；与此同时，应用程序也不能等到内存溢出时触发垃圾收集，因为当内存不足时，应用程序已经无法分配内存，这与直接暂停程序没有什么区别，增量和并发的垃圾收集需要提前触发并在内存不足前完成整个循环，避免程序的长时间暂停。</p>
 <h3 id="增量收集器">增量收集器</h3>
-<p>增量式（Incremental）的垃圾收集是减少程序最长暂停时间的一种方案，它可以将原本时间较长的暂停时间切分成多个更小的 GC 时间片，虽然从垃圾收集开始到结束的时间更长了，但是这也减少了应用程序暂停的最大时间：</p>
+<p>增量式(Incremental)的垃圾收集是减少程序最长暂停时间的一种方案，它可以将原本时间较长的暂停时间切分成多个更小的 GC 时间片，虽然从垃圾收集开始到结束的时间更长了，但是这也减少了应用程序暂停的最大时间：</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201130181940.png" alt=""></p>
 <p>需要注意的是，增量式的垃圾收集需要与三色标记法一起使用，为了保证垃圾收集的正确性，我们需要在垃圾收集开始前打开写屏障，这样用户程序对内存的修改都会先经过写屏障的处理，保证了堆内存中对象关系的强三色不变性或者弱三色不变性。虽然增量式的垃圾收集能够减少最大的程序暂停时间，但是增量式收集也会增加一次 GC 循环的总时间，在垃圾收集期间，因为写屏障的影响用户程序也需要承担额外的计算开销，所以增量式的垃圾收集也不是只有优点的。</p>
 <h3 id="并发收集器">并发收集器</h3>
-<p>并发（Concurrent）的垃圾收集不仅能够减少程序的最长暂停时间，还能减少整个垃圾收集阶段的时间，通过开启读写屏障、利用多核优势与用户程序并行执行，并发垃圾收集器确实能够减少垃圾收集对应用程序的影响：</p>
+<p>并发(Concurrent)的垃圾收集不仅能够减少程序的最长暂停时间，还能减少整个垃圾收集阶段的时间，通过开启读写屏障、利用多核优势与用户程序并行执行，并发垃圾收集器确实能够减少垃圾收集对应用程序的影响：</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201130182040.png" alt=""></p>
 <p>虽然并发收集器能够与用户程序一起运行，但是并不是所有阶段都可以与用户程序一起运行，部分阶段还是需要暂停用户程序的，不过与传统的算法相比，并发的垃圾收集可以将能够并发执行的工作尽量并发执行；当然，因为读写屏障的引入，并发的垃圾收集器也一定会带来额外开销，不仅会增加垃圾收集的总时间，还会影响用户程序，这是我们在设计垃圾收集策略时必须要注意的。</p>
 <p>Go 语言在 v1.5 中引入了并发的垃圾收集器，该垃圾收集器使用了我们上面提到的三色抽象和写屏障技术保证垃圾收集器执行的正确性，如何实现并发的垃圾收集器在这里就不展开介绍了，我们来了解一些并发垃圾收集器的工作流程。</p>
@@ -505,16 +512,16 @@
 <p>v1.5 版本实现的并发垃圾收集策略由专门的 Goroutine 负责在处理器之间同步和协调垃圾收集的状态。当其他的 Goroutine 发现需要触发垃圾收集时，它们需要将该信息通知给负责修改状态的主 Goroutine，然而这个通知的过程会带来一定的延迟，这个延迟的时间窗口很可能是不可控的，用户程序会在这段时间分配界面很多内存空间。</p>
 <p>v1.6 引入了去中心化的垃圾收集协调机制，将垃圾收集器变成一个显式的状态机，任意的 Goroutine 都可以调用方法触发状态的迁移，常见的状态迁移方法包括以下几个</p>
 <ul>
-<li>runtime.gcStart — 从 _GCoff 转换至_GCmark 阶段，进入并发标记阶段并打开写屏障；</li>
-<li>runtime.gcMarkDone — 如果所有可达对象都已经完成扫描，调用 runtime.gcMarkTermination；</li>
-<li>runtime.gcMarkTermination — 从 _GCmark 转换_GCmarktermination 阶段，进入标记终止阶段并在完成后进入 _GCoff；</li>
+<li>runtime.gcStart — 从 <code>_GCoff</code> 转换至<code>_GCmark</code> 阶段，进入并发标记阶段并打开写屏障；</li>
+<li>runtime.gcMarkDone — 如果所有可达对象都已经完成扫描，调用 <code>runtime.gcMarkTermination</code>；</li>
+<li>runtime.gcMarkTermination — 从 <code>_GCmark</code> 转换<code>_GCmarktermination</code> 阶段，进入标记终止阶段并在完成后进入 <code>_GCoff</code>；</li>
 </ul>
 <h2 id="调步算法">调步算法</h2>
 <p>STW 的垃圾收集器虽然需要暂停程序，但是它能够有效地控制堆内存的大小，Go 语言运行时的默认配置会在堆内存达到上一次垃圾收集的 2 倍时，触发新一轮的垃圾收集，这个行为可以通过环境变量 GOGC 调整，在默认情况下它的值为 100，即增长 100% 的堆内存才会触发 GC。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201130183236.png" alt=""></p>
 <p>因为并发垃圾收集器会与程序一起运行，所以它无法准确的控制堆内存的大小，并发收集器需要在达到目标前触发垃圾收集，这样才能够保证内存大小的可控，并发收集器需要尽可能保证垃圾收集结束时的堆内存与用户配置的 GOGC 一致。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201130183303.png" alt=""></p>
-<p>Go 语言 v1.5 引入并发垃圾收集器的同时使用垃圾收集调步（Pacing）算法计算触发的垃圾收集的最佳时间，确保触发的时间既不会浪费计算资源，也不会超出预期的堆大小。如上图所示，其中黑色的部分是上一次垃圾收集后标记的堆大小，绿色部分是上次垃圾收集结束后新分配的内存，因为我们使用并发垃圾收集，所以黄色的部分就是在垃圾收集期间分配的内存，最后的红色部分是垃圾收集结束时与目标的差值，我们希望尽可能减少红色部分内存，降低垃圾收集带来的额外开销以及程序的暂停时间。</p>
+<p>Go 语言 v1.5 引入并发垃圾收集器的同时使用垃圾收集调步(Pacing)算法计算触发的垃圾收集的最佳时间，确保触发的时间既不会浪费计算资源，也不会超出预期的堆大小。如上图所示，其中黑色的部分是上一次垃圾收集后标记的堆大小，绿色部分是上次垃圾收集结束后新分配的内存，因为我们使用并发垃圾收集，所以黄色的部分就是在垃圾收集期间分配的内存，最后的红色部分是垃圾收集结束时与目标的差值，我们希望尽可能减少红色部分内存，降低垃圾收集带来的额外开销以及程序的暂停时间。</p>
 <p>垃圾收集调步算法是跟随 v1.5 一同引入的，该算法的目标是优化堆的增长速度和垃圾收集器的 CPU 利用率，而在 v1.10 版本中又对该算法进行了优化，将原有的目的堆大小拆分成了软硬两个目标.</p>
 <p>调步算法包含四个部分：</p>
 <ol>
@@ -527,7 +534,7 @@
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201215105711.png" alt=""></p>
 <p>Ht的时候开始GC，Ha的时候结束GC，Ha非常接近Hg。</p>
 <p>如何保证在Ht开始gc时所有的span都被清扫完？</p>
-<p>除了有一个后台清扫协程外，用户在分配内存时也需要辅助清扫来保证在开启下一轮的gc时span都被清扫完毕。假设有k page的span需要sweep，那么距离下一次gc还有Ht-Hm（n-1）的内存可供分配，那么平均每申请1byte内存需要清扫k/ Ht-Hm（n-1） page 的span。（k值会根据sweep进度更改）</p>
+<p>除了有一个后台清扫协程外，用户在分配内存时也需要辅助清扫来保证在开启下一轮的gc时span都被清扫完毕。假设有k page的span需要sweep，那么距离下一次gc还有<code>Ht-Hm(n-1)</code>的内存可供分配，那么平均每申请1byte内存需要清扫<code>k/ Ht-Hm(n-1)</code> page 的span。(k值会根据sweep进度更改)</p>
 <p>辅助清扫申请新span时才会检查,辅助清扫的触发可以看cacheSpan函数, 触发时G会帮助回收&quot;工作量&quot;页的对象.</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -539,7 +546,7 @@
 </div>
 </div><p>意思是分配的大小乘以系数sweepPagesPerByte, sweepPagesPerByte的计算在函数gcSetTriggerRatio中.</p>
 <p>如何保证在Ha时gc都被mark完?</p>
-<p>Gc在Ht开始，在到达Hg时尽量标记完所有的对象，除了后台的标记协程外还需要在分配内存是进行辅助mark。从Ht到Hg的内存可以分配，这个时候还有scanWorkExpected的对象需要scan，那么平均分配1byte内存需要辅助mark量：scanWorkExpected/(Hg-Ht) 个对象，scanWorkExpected会根据mark进度更改。</p>
+<p>Gc在Ht开始，在到达Hg时尽量标记完所有的对象，除了后台的标记协程外还需要在分配内存是进行辅助mark。从Ht到Hg的内存可以分配，这个时候还有<code>scanWorkExpected</code>的对象需要scan，那么平均分配1byte内存需要辅助mark量：<code>scanWorkExpected/(Hg-Ht)</code> 个对象，scanWorkExpected会根据mark进度更改。</p>
 <p>辅助标记的触发可以查看上面的mallocgc函数, 触发时G会帮助扫描&quot;工作量&quot;个对象, 工作量的计算公式是:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -894,7 +901,7 @@
 </span><span class="c1"></span>	<span class="nx">gcTriggerTime</span>
 
 	<span class="c1">// gcTriggerCycle 表示如果我们还没有启动第 gcTrigger.n 个周期
-</span><span class="c1"></span>	<span class="c1">// （相对于 work.cycles）时应开始一个周期。
+</span><span class="c1"></span>	<span class="c1">// (相对于 work.cycles)时应开始一个周期。
 </span><span class="c1"></span>	<span class="nx">gcTriggerCycle</span>
 <span class="p">)</span>
 <span class="c1">// test 报告当前出发条件是否满足，换句话说 _GCoff 阶段的退出条件已满足。
@@ -1004,7 +1011,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>为了减少对计算资源的占用，该 Goroutine 会在循环中调用 runtime.goparkunlock 主动陷入休眠等待其他 Goroutine 的唤醒，runtime.</p>
+</div><p>为了减少对计算资源的占用，该 Goroutine 会在循环中调用 <code>runtime.goparkunlock</code> 主动陷入休眠等待其他 Goroutine 的唤醒，runtime.forcegchelper 在大多数时间都是陷入休眠的，但是它会被系统监控器 <code>runtime.sysmon</code> 在满足垃圾收集条件时唤醒：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt">1
@@ -1021,8 +1028,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>forcegchelper 在大多数时间都是陷入休眠的，但是它会被系统监控器 runtime.sysmon 在满足垃圾收集条件时唤醒：</p>
-<div class="highlight"><div class="chroma">
+</div><div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
@@ -1229,7 +1235,7 @@
 <h4 id="申请内存">申请内存</h4>
 <p>最后一个可能会触发垃圾收集的就是 runtime.mallocgc 函数了，我们在内存分配器中曾经介绍过运行时会将堆上的对象按大小分成微对象、小对象和大对象三类，这三类对象的创建都可能会触发新的垃圾收集循环：</p>
 <ol>
-<li>当前线程的内存管理单元中不存在空闲空间时，创建微对象和小对象需要调用 runtime.mcache.nextFree 方法从中心缓存或者页堆中获取新的管理单元，在这时就可能触发垃圾收集；</li>
+<li>当前线程的内存管理单元中不存在空闲空间时，创建微对象和小对象需要调用 <code>runtime.mcache.nextFree</code> 方法从中心缓存或者页堆中获取新的管理单元，在这时就可能触发垃圾收集；</li>
 <li>当用户程序申请分配 32KB 以上的大对象时，一定会构建 runtime.gcTrigger 结构体尝试触发 垃圾收集；</li>
 </ol>
 <div class="highlight"><div class="chroma">
@@ -1708,7 +1714,7 @@
 </div>
 </div><p>在分析垃圾收集的启动过程中，我们省略了几个关键的过程，其中包括暂停和恢复应用程序和后台任务的启动，下面将详细分析这几个过程的实现原理。</p>
 <h4 id="gcbgmarkstartworkers">gcBgMarkStartWorkers</h4>
-<p>在垃圾收集启动期间，运行时会调用 runtime.gcBgMarkStartWorkers 为全局每个处理器创建用于执行后台标记任务的 Goroutine，每一个 Goroutine 都会运行 runtime.gcBgMarkWorker，所有运行 runtime.gcBgMarkWorker 的 Goroutine 在启动后都会陷入休眠等待调度器的唤醒：</p>
+<p>在垃圾收集启动期间，运行时会调用 <code>runtime.gcBgMarkStartWorkers</code> 为全局每个处理器创建用于执行后台标记任务的 Goroutine，这些 Goroutine 都会运行 <code>runtime.gcBgMarkWorker</code>，所有运行 runtime.gcBgMarkWorker 的 Goroutine 在启动后都会陷入休眠等待调度器的唤醒：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -2342,7 +2348,7 @@
 <p>用于并发扫描对象的工作协程 Goroutine 总共有三种不同的模式 runtime.gcMarkWorkerMode，这三种不同模式的 Goroutine 在标记对象时使用完全不同的策略，垃圾收集控制器会按照需要执行不同类型的工作协程：</p>
 <ul>
 <li>gcMarkWorkerDedicatedMode — 处理器专门负责标记对象，不会被调度器抢占；</li>
-<li>gcMarkWorkerFractionalMode — 当垃圾收集的后台 CPU 使用率达不到预期时（默认为 25%），启动该类型的工作协程帮助垃圾收集达到利用率的目标，因为它只占用同一个 CPU 的部分资源，所以可以被调度；</li>
+<li>gcMarkWorkerFractionalMode — 当垃圾收集的后台 CPU 使用率达不到预期时(默认为 25%)，启动该类型的工作协程帮助垃圾收集达到利用率的目标，因为它只占用同一个 CPU 的部分资源，所以可以被调度；</li>
 <li>gcMarkWorkerIdleMode — 当处理器没有可以执行的 Goroutine 时，它会运行垃圾收集的标记任务直到被抢占；</li>
 </ul>
 <p>runtime.gcControllerState.startCycle 会根据全局处理器的个数以及垃圾收集的 CPU 利用率计算出 dedicatedMarkWorkersNeeded 和 fractionalUtilizationGoal 以决定不同模式的工作协程的数量。</p>
@@ -3078,7 +3084,7 @@
 <p>运行时会使用 runtime.gcDrain 函数扫描工作缓冲区中的灰色对象，它会根据传入 gcDrainFlags 的不同选择不同的策略：</p>
 <p>gcDrain 这个函数就是从队列里不断获取，处理这些对象，最重要的一个就是调用 scanobject 继续扫描对象。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201227003549.png" alt=""></p>
-<p>markroot 从根（栈）扫描，把扫描到的对象投入扫描队列。gcDrain 等函数从里面不断获取，不断处理，并且扫描这些对象，进一步挖掘引用关系，当扫描结束之后，那些没有扫描到的就是垃圾了。</p>
+<p>markroot 从根(栈)扫描，把扫描到的对象投入扫描队列。gcDrain 等函数从里面不断获取，不断处理，并且扫描这些对象，进一步挖掘引用关系，当扫描结束之后，那些没有扫描到的就是垃圾了。</p>
 <h4 id="findrunnablegcworker">findRunnableGCWorker</h4>
 <p>调度器在调度循环 runtime.schedule 中可以通过垃圾收集控制器的 findRunnableGCWorker 方法获取并执行用于后台标记的任务。</p>
 <div class="highlight"><div class="chroma">
@@ -4770,9 +4776,9 @@
 </div>
 </div><p>设置preemptscan后, 在抢占G成功时会调用scanstack扫描它自己的栈, 具体代码在这里.</p>
 <h6 id="scanstack">scanstack</h6>
-<p>这个函数是起点函数（ 起始最原始的还是 markroot，但是我们这里梳理主线 ），该扫描栈上所有可达对象，因为栈是一个根，因为你做事情总要有个开始的地方，那么“栈”就是 golang 的起点。</p>
+<p>这个函数是起点函数( 起始最原始的还是 markroot，但是我们这里梳理主线 )，该扫描栈上所有可达对象，因为栈是一个根，因为你做事情总要有个开始的地方，那么“栈”就是 golang 的起点。</p>
 <ol>
-<li>找到这个 goroutine 栈上的内存对象（一个个找，一个个处理）；</li>
+<li>找到这个 goroutine 栈上的内存对象(一个个找，一个个处理)；</li>
 <li>找到对象之后，获取到这个对象的 type 结构，然后取出 type.ptrdata, type.gcdata ，从而我们就知道扫描的内存范围，和内存块上指针的所在位置；</li>
 <li>调用 scanblock 扫描这个内存块；</li>
 </ol>
@@ -5421,7 +5427,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h5 id="scanobject">scanobject</h5>
+</div><h4 id="scanobject">scanobject</h4>
 <p>gcDrain函数扫描完根对象, 就会开始消费标记队列, 对从标记队列中取出的对象调用scanobject函数.</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -7811,7 +7817,7 @@
 		<span class="nf">mProf_Flush</span><span class="p">()</span>
 		<span class="k">return</span>
 	<span class="p">}</span>
-	<span class="c1">// 并发清扫（唤醒后台 Goroutine）
+	<span class="c1">// 并发清扫(唤醒后台 Goroutine)
 </span><span class="c1"></span>	<span class="c1">// Background sweep.
 </span><span class="c1"></span>	<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sweep</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
 	<span class="k">if</span> <span class="nx">sweep</span><span class="p">.</span><span class="nx">parked</span> <span class="p">{</span>
@@ -7980,7 +7986,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>垃圾收集的清理中包含对象回收器（Reclaimer）和内存单元回收器，这两种回收器使用不同的算法清理堆内存：</p>
+</div><p>垃圾收集的清理中包含对象回收器(Reclaimer)和内存单元回收器，这两种回收器使用不同的算法清理堆内存：</p>
 <ul>
 <li>对象回收器在内存管理单元中查找并释放未被标记的对象，但是如果 runtime.mspan 中的所有对象都没有被标记，整个单元就会被直接回收，该过程会被 runtime.mcentral.cacheSpan 或者 runtime.sweepone 异步触发；</li>
 <li>内存单元回收器会在内存中查找所有的对象都未被标记的 runtime.mspan，该过程会被 runtime.mheap.reclaim 触发；</li>
