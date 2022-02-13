@@ -23,7 +23,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.92.1 with theme even" />
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
 
 
 <link rel="canonical" href="/post/go%E8%BF%9B%E7%A8%8B%E7%9A%84%E7%94%9F%E5%91%BD%E5%91%A8%E6%9C%9F%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
@@ -49,7 +49,7 @@
 <meta itemprop="name" content="Go进程的生命周期源码剖析">
 <meta itemprop="description" content="runtime Go 语言是一⻔有 runtime 的语言，那么 runtime 是什么? 可以认为 runtime 是为了实现额外的功能，而在程序运行时自动 加载/运行的一些模块。 Go 语言的 runtime 包括: 这些模块中，"><meta itemprop="datePublished" content="2020-11-18T14:34:06+00:00" />
 <meta itemprop="dateModified" content="2020-11-18T14:34:06+00:00" />
-<meta itemprop="wordCount" content="9522">
+<meta itemprop="wordCount" content="9172">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go进程的生命周期源码剖析"/>
 <meta name="twitter:description" content="runtime Go 语言是一⻔有 runtime 的语言，那么 runtime 是什么? 可以认为 runtime 是为了实现额外的功能，而在程序运行时自动 加载/运行的一些模块。 Go 语言的 runtime 包括: 这些模块中，"/>
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 9522 字 </span>
-          <span class="more-meta"> 预计阅读 20 分钟 </span>
+          <span class="more-meta"> 约 9172 字 </span>
+          <span class="more-meta"> 预计阅读 19 分钟 </span>
         
       </div>
     </header>
@@ -148,16 +148,15 @@
     <li><a href="#go进程的执行入口">Go进程的执行入口</a></li>
     <li><a href="#go启动的初始化工作">Go启动的初始化工作</a>
       <ul>
-        <li><a href="#调整-sp">调整 SP</a></li>
-        <li><a href="#初始化-g0-栈">初始化 g0 栈</a></li>
-        <li><a href="#主线程绑定-m0">主线程绑定 m0</a></li>
-        <li><a href="#初始化-m0">初始化 m0</a></li>
-        <li><a href="#main-goroutine创建">main goroutine创建</a></li>
+        <li><a href="#argc和argv处理">argc和argv处理</a></li>
+        <li><a href="#全局g0和m0初始化">全局g0和m0初始化</a></li>
+        <li><a href="#初始化系统核心数与调度器">初始化系统核心数与调度器</a></li>
+        <li><a href="#创建runtime-main-goroutine">创建runtime main goroutine</a></li>
+        <li><a href="#主线程开始-schedule-循环">主线程开始 schedule 循环</a></li>
       </ul>
     </li>
-    <li><a href="#g0栈和用户栈的迁移">g0栈和用户栈的迁移</a></li>
-    <li><a href="#schedule-循环">schedule 循环</a></li>
-    <li><a href="#goroutine-执行与退出">goroutine 执行与退出</a></li>
+    <li><a href="#runtime-main-goroutine-执行与退出">runtime main goroutine 执行与退出</a></li>
+    <li><a href="#转载">转载</a></li>
   </ul>
 </nav>
   </div>
@@ -367,7 +366,7 @@
 <p>继续跳转到 runtime·rt0_go(SB)，完成 go 启动时所有的初始化工作。位于 /usr/local/go/src/runtime/asm_amd64.s.</p>
 <p>或者使用开源反编译工具cutter.</p>
 <h2 id="go启动的初始化工作">Go启动的初始化工作</h2>
-<p>rt0_go完成 go 启动时所有的初始化工作.</p>
+<p>rt0_go完成 go 启动时所有的初始化工作.请注意这里的用户mian函数是通过执行runtime.main函数来执行的.</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210808222951.png" alt=""></p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -581,7 +580,7 @@
 </div>
 </div><p>这段代码完成之后，整个 Go 程序就可以跑起来了。</p>
 <p>调度器初始化函数：schedinit 返回后，调度器的相关参数都已经初始化好了.</p>
-<h3 id="调整-sp">调整 SP</h3>
+<h3 id="argc和argv处理">argc和argv处理</h3>
 <p>第一段代码，将 SP 调整到了一个地址是 16 的倍数的位置：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -604,7 +603,7 @@
 存在两种情况，这也是第一步将 SP 下移的时候，多移了 7 个 Byte 的原因。第一张图里，与 ~15 相与的时候，SP 值减少了 1，第二张图则减少了 9。最后都是移位到了 16 字节对齐的位置。</p>
 <p>两张图的共同点是 SP 与 argc 中间多出了 16 个字节的空位。这个后面应该会用到，我们接着探索。</p>
 <p>至于为什么进行 16 个字节对齐，就比较好理解了：因为 CPU 有一组 SSE 指令，这些指令中出现的内存地址必须是 16 的倍数。</p>
-<h3 id="初始化-g0-栈">初始化 g0 栈</h3>
+<h3 id="全局g0和m0初始化">全局g0和m0初始化</h3>
 <p>接着往后看，开始初始化 g0 的栈了。g0 栈的作用就是为运行 runtime 代码提供一个“环境”。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -639,7 +638,6 @@
 </div><p>代码 L2 把 g0 的地址存入 DI 寄存器；L4 将 SP 下移 (64K-104)B，并将地址存入 BX 寄存器；L6 将 BX 里存储的地址赋给 g0.stackguard0；L8，L10，L12 分别 将 BX 里存储的地址赋给 g0.stackguard1， g0.stack.lo， g0.stack.hi。</p>
 <p>这部分完成之后，g0 栈空间如下图：</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201116151552.png" alt=""></p>
-<h3 id="主线程绑定-m0">主线程绑定 m0</h3>
 <p>m0: Go 程序启动后创建的第一个线程</p>
 <p>接着往下看，中间我们省略了很多检查 CPU 相关的代码，直接看主线程绑定 m0 的部分：</p>
 <div class="highlight"><div class="chroma">
@@ -785,7 +783,7 @@
 <p>目前这个指针指向g0，表示代码正运行在 g0 栈。</p>
 <p>于是，前面的图又增加了新的玩伴 m0：</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201116161105.png" alt=""></p>
-<h3 id="初始化-m0">初始化 m0</h3>
+<h3 id="初始化系统核心数与调度器">初始化系统核心数与调度器</h3>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt">1
@@ -812,7 +810,7 @@
 </div>
 </div><p>L1-L2 将 16(SP) 处的内容移动到 0(SP)，也就是栈顶，通过前面的图，16(SP) 处的内容为 argc；L3-L4 将 argv 存入 8(SP)，接下来调用 runtime·args 函数，处理命令行参数。</p>
 <p>接着，连续调用了两个 runtime 函数。osinit 函数初始化系统核心数，将全局变量 ncpu 初始化的核心数，schedinit 则是调度器的初始化。</p>
-<h3 id="main-goroutine创建">main goroutine创建</h3>
+<h3 id="创建runtime-main-goroutine">创建runtime main goroutine</h3>
 <p>继续看代码，前面我们完成了 schedinit 函数，这是 runtime·rt0_go 函数里的一步，接着往后看：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -883,12 +881,10 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>每个 goroutine 都有自己的栈空间，newproc 函数会新创建一个新的 goroutine 来执行 fn 函数.</p>
-<p>当前代码在 g0 栈上执行，因此执行完<code>_g_ := getg()</code> 之后，无论是在什么情况下都可以得到 <em>g</em> = g0。之后通过 g0 找到其绑定的 P，也就是 p0。</p>
+<p>当前代码在 g0 栈上执行，因此执行完<code>_g_ := getg()</code> 之后，无论是在什么情况下都可以得到 <code>_g_ = g0</code>。之后通过 g0 找到其绑定的 P，也就是 p0。</p>
 <p>接着，尝试从 p0 上找一个空闲的 G.</p>
 <p>如果拿不到，则会在堆上创建一个新的 G，为其分配 2KB 大小的栈，并设置好新 goroutine 的 stack 成员，设置其状态为 _Gdead，并将其添加到全局变量 allgs 中。创建完成之后，我们就在堆上有了一个 2K 大小的栈。于是，我们的图再次丰富：</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201116223753.png" alt=""></p>
-<p>这样，main goroutine 就诞生了。</p>
-<h2 id="g0栈和用户栈的迁移">g0栈和用户栈的迁移</h2>
 <p>g0 栈用于执行调度器的代码，执行完之后，要跳转到执行用户代码的地方，如何跳转？这中间涉及到栈和寄存器的切换。</p>
 <p>将 fn 的参数从 g0 栈上拷贝到 newg 的栈上，memmove 函数需要传入源地址、目的地址、参数大小。由于 main 函数在这里没有参数需要拷贝，因此这里相当于没做什么。</p>
 <p>接着，初始化 newg 的各种字段，而且涉及到最重要的 pc，sp 等字段：</p>
@@ -898,7 +894,7 @@
 <p>上图中，newg 新增了 sched.pc 指向 runtime.main 函数，当它被调度起来执行时，就从这里开始；新增了 sched.sp 指向了 newg 栈顶位置，同时，newg 栈顶位置的内容是一个跳转地址，指向 runtime.goexit 的第二条指令，当 goroutine 退出时，这条地址会载入 CPU 的 PC 寄存器，跳转到这里执行“扫尾”工作。</p>
 <p>newg 的状态变成可执行后（Runnable），就可以将它加入到 P 的本地运行队列里，等待调度。所以，goroutine 何时被执行，用户代码决定不了。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201117103816.png" alt=""></p>
-<h2 id="schedule-循环">schedule 循环</h2>
+<h3 id="主线程开始-schedule-循环">主线程开始 schedule 循环</h3>
 <p>在 runtime·rt0_go 函数里，执行完 runtime·newproc(SB) 后，两条 POP 指令将之前为调用它构建的参数弹出栈。只剩下一个函数了：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -917,9 +913,7 @@
 <p>主要是设置了 g0.sched.sp 和 g0.sched.pc，前者指向 mstart1 函数栈上参数的位置，后者则指向 gosave 函数返回后的下一条指令。如下图：</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201117112607.png" alt=""></p>
 <p>图中 sched.pc 并不直接指向返回地址，所以图中的虚线并没有箭头。</p>
-<p>接下来，进入 schedule 函数，找到了可以运行的 main goroutine，调用 execute(gp, inheritTime) 将 gp 的状态改为 _Grunning，将 m 和 gp 相互关联起来。最后，调用 gogo 完成从 g0 到 gp 的切换，CPU 的执行权将从 g0 转让到 gp。开始执行 runtime.main 函数。</p>
-<p>用一张流程图总结一下从 g0 切换到 main goroutine 的过程.</p>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201117143423.png" alt=""></p>
+<p>接下来，进入 schedule 函数，找到了可以运行的 runtime.main goroutine，调用 execute(gp, inheritTime) 将 gp 的状态改为 _Grunning，将 m 和 gp 相互关联起来。最后，调用 gogo 完成从 g0 到 gp 的切换，CPU 的执行权将从 g0 转让到 gp。开始执行 runtime.main 函数。</p>
 <p>main goroutine 退出后直接调用 exit(0) 使得整个进程退出，而普通 goroutine 退出后，则进行了一系列的调用，最终又切到 g0 栈，执行 schedule 函数。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201117170452.png" alt=""></p>
 <p>如图所示，rt0_go 负责 Go 程序启动的所有初始化，中间进行了很多初始化工作，调用 mstart 之前，已经切换到了 g0 栈，图中不同色块表示使用不同的栈空间。</p>
@@ -937,10 +931,7 @@
 </div><p>可以看出，一轮调度从调用 schedule 函数开始，经过一系列过程再次调用 schedule 函数来进行新一轮的调度，从一轮调度到新一轮调度的过程称之为一个调度循环。</p>
 <p>这里说的调度循环是指某一个工作线程的调度循环，而同一个Go 程序中存在多个工作线程，每个工作线程都在进行着自己的调度循环。</p>
 <p>从前面的代码分析可以得知，上面调度循环中的每一个函数调用都没有返回，虽然 <code>goroutine 任务-&gt; goexit() -&gt; goexit1() -&gt; mcall()</code> 是在 g2 的栈空间执行的，但剩下的函数都是在 g0 的栈空间执行的。</p>
-<p>那么问题就来了，在一个复杂的程序中，调度可能会进行无数次循环，也就是说会进行无数次没有返回的函数调用，大家都知道，每调用一次函数都会消耗一定的栈空间，而如果一直这样无返回的调用下去无论 g0 有多少栈空间终究是会耗尽的，那么这里是不是有问题？其实没有问题！关键点就在于，每次执行 mcall 切换到 g0 栈时都是切换到 g0.sched.sp 所指的固定位置，这之所以行得通，正是因为从 schedule 函数开始之后的一系列函数永远都不会返回，所以重用这些函数上一轮调度时所使用过的栈内存是没有问题的。</p>
-<p>我再解释一下：栈空间在调用函数时会自动“增大”，而函数返回时，会自动“减小”，这里的增大和减小是指栈顶指针 SP 的变化。上述这些函数都没有返回，说明调用者不需要用到被调用者的返回值，有点像“尾递归”。</p>
-<p>因为 g0 一直没有动过，所有它之前保存的 sp 还能继续使用。每一次调度循环都会覆盖上一次调度循环的栈数据，完美！</p>
-<h2 id="goroutine-执行与退出">goroutine 执行与退出</h2>
+<h2 id="runtime-main-goroutine-执行与退出">runtime main goroutine 执行与退出</h2>
 <p>我们探索 main goroutine 以及普通 goroutine 从执行到退出的整个过程。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1242,6 +1233,8 @@
 <li>对于 main goroutine，在执行完用户定义的 main 函数的所有代码后，直接调用 exit(0) 退出整个进程，非常霸道。</li>
 <li>对于普通 goroutine 则没这么“舒服”，需要经历一系列的过程。先是跳转到提前设置好的 goexit 函数的第二条指令，然后调用 runtime.goexit1，接着调用 mcall(goexit0)，而 mcall 函数会切换到 g0 栈，运行 goexit0 函数，清理 goroutine 的一些字段，并将其添加到 goroutine 缓存池里，然后进入 schedule 调度循环。到这里，普通 goroutine 才算完成使命。</li>
 </ul>
+<h2 id="转载">转载</h2>
+<p><a href="https://qcrao.com/ishare/go-scheduler/#true%E8%87%AA%E6%88%91%E4%BB%8B%E7%BB%8D">Asciidoc 笔记</a></p>
 
     </div>
 
@@ -1270,8 +1263,8 @@
             <span class="prev-text nav-default">Linux的网络IO模型</span>
             <span class="prev-text nav-mobile">上一篇</span>
           </a>
-        <a class="next" href="/post/go%E7%9A%84netpoller%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
-            <span class="next-text nav-default">Go的netpoller源码剖析</span>
+        <a class="next" href="/post/go%E7%9A%84%E7%BD%91%E7%BB%9C%E8%BD%AE%E8%AF%A2%E5%99%A8%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <span class="next-text nav-default">Go的网络轮询器源码剖析</span>
             <span class="next-text nav-mobile">下一篇</span>
             <i class="iconfont icon-right"></i>
           </a>

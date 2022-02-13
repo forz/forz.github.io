@@ -23,7 +23,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.87.0 with theme even" />
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
 
 
 <link rel="canonical" href="/post/go%E7%9A%84%E7%BD%91%E7%BB%9C%E8%BD%AE%E8%AF%A2%E5%99%A8%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
@@ -49,7 +49,7 @@
 <meta itemprop="name" content="Go的网络轮询器源码剖析">
 <meta itemprop="description" content="导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的"><meta itemprop="datePublished" content="2020-11-14T22:52:29+00:00" />
 <meta itemprop="dateModified" content="2020-11-14T22:52:29+00:00" />
-<meta itemprop="wordCount" content="14088">
+<meta itemprop="wordCount" content="15136">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的网络轮询器源码剖析"/>
 <meta name="twitter:description" content="导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的"/>
@@ -95,7 +95,7 @@
   <div class="container" id="mobile-panel">
     <header id="header" class="header">
         <div class="logo-wrapper">
-  <a href="/%20/" class="logo">Forz Blog</a>
+  <a href="/" class="logo">Forz Blog</a>
 </div>
 
 
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 14088 字 </span>
-          <span class="more-meta"> 预计阅读 29 分钟 </span>
+          <span class="more-meta"> 约 15136 字 </span>
+          <span class="more-meta"> 预计阅读 31 分钟 </span>
         
       </div>
     </header>
@@ -144,6 +144,7 @@
     <nav id="TableOfContents">
   <ul>
     <li><a href="#导言">导言</a></li>
+    <li><a href="#阻塞与非阻塞">阻塞与非阻塞</a></li>
     <li><a href="#基本原理">基本原理</a></li>
     <li><a href="#polldesc">pollDesc</a></li>
     <li><a href="#pollcache">pollCache</a></li>
@@ -164,6 +165,7 @@
       </ul>
     </li>
     <li><a href="#价值">价值</a></li>
+    <li><a href="#缺陷">缺陷</a></li>
     <li><a href="#参考">参考</a></li>
   </ul>
 </nav>
@@ -177,6 +179,8 @@
 <p>本文将基于 Linux 平台来解析 Go netpoller 之 I/O 多路复用的底层是如何基于 epoll 封装实现的，从源码层层推进，全面而深度地解析 Go netpoller 的设计理念和实现原理，以及 Go 是如何利用 netpoller 来构建它的原生网络模型的。</p>
 <p>Go runtime已经实现了netpoller，这使得即便G发起网络I/O操作也不会导致M被阻塞（仅阻塞G），从而不会导致大量M被创建出来。但是对于regular file的I/O操作一旦阻塞，那么M将进入sleep状态，等待I/O返回后被唤醒；这种情况下P将与sleep的M分离，再选择一个idle的M。如果此时没有idle的M，则会新创建一个M，这就是为何大量I/O操作导致大量Thread被创建的原因。</p>
 <p>Ian Lance Taylor在Go 1.9 dev周期中增加了一个Poller for os package的功能，这个功能可以像netpoller那样，在G操作支持pollable的fd时，仅阻塞G，而不阻塞M。不过该功能依然不能对regular file有效，regular file不是pollable的。不过，对于scheduler而言，这也算是一个进步了。</p>
+<h2 id="阻塞与非阻塞">阻塞与非阻塞</h2>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210915205027.png" alt=""></p>
 <h2 id="基本原理">基本原理</h2>
 <p>Go netpoller 通过在底层对 epoll/kqueue/iocp 的封装，从而实现了使用同步编程模式达到异步执行的效果。总结来说，所有的网络操作都以网络描述符 netFD 为中心实现。netFD 与底层 PollDesc 结构绑定，当在一个 netFD 上读写遇到 EAGAIN 错误时，就将当前 goroutine 存储到这个 netFD 对应的 PollDesc 中，同时调用 gopark 把当前 goroutine 给 park 住，直到这个 netFD 上再次发生读写事件，才将此 goroutine 给 ready 激活重新运行。显然，在底层通知 goroutine 再次发生读写等事件的方式就是 epoll/kqueue/iocp 等事件驱动机制。</p>
 <p>总所周知，Go 是一门跨平台的编程语言，而不同平台针对特定的功能有不用的实现，这当然也包括了 I/O 多路复用技术，比如 Linux 里的 I/O 多路复用有 select、poll 和 epoll，而 freeBSD 或者 MacOS 里则是 kqueue，而 Windows 里则是基于异步 I/O 实现的 iocp，等等；因此，Go 为了实现底层 I/O 多路复用的跨平台，分别基于上述的这些不同平台的系统调用实现了多版本的 netpollers，具体的源码路径如下：</p>
@@ -441,6 +445,7 @@
 <li>internal/poll.pollDesc.init — 通过 net.netFD.init 和 os.newFile 初始化网络 I/O 和文件 I/O 的轮询信息时；</li>
 <li>runtime.doaddtimer — 向处理器中增加新的计时器时；</li>
 </ol>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210915204535.png" alt=""></p>
 <p>网络轮询器的初始化会使用 runtime.poll_runtime_pollServerInit 和 runtime.netpollGenericInit 两个函数：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -868,6 +873,7 @@
 </span><span class="lnt">73
 </span><span class="lnt">74
 </span><span class="lnt">75
+</span><span class="lnt">76
 </span></code></pre></td>
 <td class="lntd">
 <pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">//go:linkname poll_runtime_pollWait internal/poll.runtime_pollWait
@@ -934,6 +940,7 @@
 </span><span class="c1"></span>	<span class="c1">// 然后 unpark 返回，在 gopark 内部会把当前 goroutine 的抽象数据结构 g 存入
 </span><span class="c1"></span>	<span class="c1">// gpp(pollDesc.rg/pollDesc.wg) 指针里，以便在后面的 netpoll 函数取出 pollDesc 之后，
 </span><span class="c1"></span>	<span class="c1">// 把 g 添加到链表里返回，接着重新调度 goroutine
+</span><span class="c1"></span>	<span class="c1">// 不管用户是暂时Read不了还是Write不了你的goroutine都会被gopark起来
 </span><span class="c1"></span>	<span class="k">if</span> <span class="nx">waitio</span> <span class="o">||</span> <span class="nf">netpollcheckerr</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="nx">mode</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
 		<span class="c1">// 注册 netpollblockcommit 回调给 gopark，在 gopark 内部会执行它，保存当前 goroutine 到 gpp
 </span><span class="c1"></span>		<span class="nf">gopark</span><span class="p">(</span><span class="nx">netpollblockcommit</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">gpp</span><span class="p">),</span> <span class="nx">waitReasonIOWait</span><span class="p">,</span> <span class="nx">traceEvGoBlockNet</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span>
@@ -983,7 +990,9 @@
 </div>
 </div><p>runtime.netpollblock 是 Goroutine 等待 I/O 事件的关键函数，它会使用运行时提供的 runtime.gopark 让出当前线程，将 Goroutine 转换到休眠状态并等待运行时的唤醒。</p>
 <h4 id="轮询等待">轮询等待</h4>
+<p>在调度和GC的关键点上都会检查一次netpoll，看是否有已经ready的fd,相当于每次调度循环都要走到netpoll，检查的频率还是比较高的.</p>
 <p>Go 语言的运行时会在调度或者系统监控中调用 runtime.netpoll 轮询网络，该函数的执行过程可以分成以下几个部分：</p>
+<p>根据 ready 的事件是 Read 或 Write 分别从 pollDesc 的 rg、 wg 上拿到该唤醒的 goroutine.</p>
 <ol>
 <li>根据调用方的入参 delay，设置对应的调用 epollwait 的 timeout 值；</li>
 <li>调用 epollwait 等待发生了可读/可写事件的 fd；</li>
@@ -1236,6 +1245,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>另一种是其他文件描述符的正常读写事件，对于这些事件，我们会交给 runtime.netpollready 处理：</p>
+<p>已经 ready 的 goroutine push 到 toRun 链表</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -1250,23 +1260,48 @@
 </span><span class="lnt">10
 </span><span class="lnt">11
 </span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
 </span></code></pre></td>
 <td class="lntd">
 <pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// netpollready 调用 netpollunblock 返回就绪 fd 对应的 goroutine 的抽象数据结构 g
-</span><span class="c1"></span><span class="kd">func</span> <span class="nf">netpollready</span><span class="p">(</span><span class="nx">toRun</span> <span class="o">*</span><span class="nx">gList</span><span class="p">,</span> <span class="nx">pd</span><span class="o">*</span><span class="nx">pollDesc</span><span class="p">,</span> <span class="nx">mode</span> <span class="kt">int32</span><span class="p">)</span> <span class="p">{</span>
+</span><span class="c1">// netpollready is called by the platform-specific netpoll function.
+</span><span class="c1">// It declares that the fd associated with pd is ready for I/O.
+</span><span class="c1">// The toRun argument is used to build a list of goroutines to return
+</span><span class="c1">// from netpoll. The mode argument is &#39;r&#39;, &#39;w&#39;, or &#39;r&#39;+&#39;w&#39; to indicate
+</span><span class="c1">// whether the fd is ready for reading or writing or both.
+</span><span class="c1">//
+</span><span class="c1">// This may run while the world is stopped, so write barriers are not allowed.
+</span><span class="c1">//go:nowritebarrier
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">netpollready</span><span class="p">(</span><span class="nx">toRun</span> <span class="o">*</span><span class="nx">gList</span><span class="p">,</span> <span class="nx">pd</span> <span class="o">*</span><span class="nx">pollDesc</span><span class="p">,</span> <span class="nx">mode</span> <span class="kt">int32</span><span class="p">)</span> <span class="p">{</span>
 	<span class="kd">var</span> <span class="nx">rg</span><span class="p">,</span> <span class="nx">wg</span> <span class="o">*</span><span class="nx">g</span>
-	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">mode</span> <span class="o">==</span> <span class="sc">&#39;r&#39;</span> <span class="o">||</span> <span class="nx">mode</span> <span class="o">==</span> <span class="sc">&#39;r&#39;</span><span class="o">+</span><span class="sc">&#39;w&#39;</span> <span class="p">{</span>
+		<span class="nx">rg</span> <span class="p">=</span> <span class="nf">netpollunblock</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="sc">&#39;r&#39;</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+	<span class="p">}</span>
 	<span class="k">if</span> <span class="nx">mode</span> <span class="o">==</span> <span class="sc">&#39;w&#39;</span> <span class="o">||</span> <span class="nx">mode</span> <span class="o">==</span> <span class="sc">&#39;r&#39;</span><span class="o">+</span><span class="sc">&#39;w&#39;</span> <span class="p">{</span>
 		<span class="nx">wg</span> <span class="p">=</span> <span class="nf">netpollunblock</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="sc">&#39;w&#39;</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
 	<span class="p">}</span>
-	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">rg</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">toRun</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="nx">rg</span><span class="p">)</span>
+	<span class="p">}</span>
 	<span class="k">if</span> <span class="nx">wg</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
 		<span class="nx">toRun</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="nx">wg</span><span class="p">)</span>
 	<span class="p">}</span>
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>runtime.netpollunblock 会在读写事件发生时，将 runtime.pollDesc 中的读或者写信号量转换成 pdReady 并返回其中存储的 Goroutine；如果返回的 Goroutine 不会为空，那么该 Goroutine 就会被加入 toRun 列表，运行时会将列表中的全部 Goroutine 加入运行队列并等待调度器的调度。</p>
+</div><p>toRun 列表最终从 netpoll() 中返回，通过 injectglist 进入全局队列</p>
+<p>runtime.netpollunblock 会在读写事件发生时，将 runtime.pollDesc 中的读或者写信号量转换成 pdReady 并返回其中存储的 Goroutine；如果返回的 Goroutine 不会为空，那么该 Goroutine 就会被加入 toRun 列表，运行时会将列表中的全部 Goroutine 加入运行队列并等待调度器的调度。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -1768,6 +1803,7 @@
 </div>
 </div><p>方法返回了一个 <code>*TCPListener</code>，它是一个实现了 net.Listener 接口的 struct，而通过 listener.Accept() 接收的新连接*TCPConn 则是一个实现了 net.Conn 接口的 struct，它内嵌了 net.conn struct。</p>
 <p>仔细阅读上面的源码可以发现，不管是 Listener 的 Accept 还是 Conn 的 Read/Write 方法，都是基于一个 netFD 的数据结构的操作， netFD 是一个网络描述符，类似于 Linux 的文件描述符的概念，netFD 中包含一个 poll.FD 数据结构，而 poll.FD 中包含两个重要的数据结构 Sysfd 和 pollDesc，前者是真正的系统文件描述符，后者对是底层事件驱动的封装，所有的读写超时等操作都是通过调用后者的对应方法实现的。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210915203645.png" alt=""></p>
 <p>netFD 和 poll.FD 的源码：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1818,6 +1854,12 @@
 </span><span class="lnt">45
 </span><span class="lnt">46
 </span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
 </span></code></pre></td>
 <td class="lntd">
 <pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">
@@ -1836,34 +1878,40 @@
 
 <span class="c1">// FD is a file descriptor. The net and os packages use this type as a
 </span><span class="c1">// field of a larger type representing a network connection or OS file.
+</span><span class="c1">// windows和linux对这个poll.FD的定义是有些区别的
 </span><span class="c1"></span><span class="kd">type</span> <span class="nx">FD</span> <span class="kd">struct</span> <span class="p">{</span>
 	<span class="c1">// Lock sysfd and serialize access to Read and Write methods.
+</span><span class="c1"></span>	<span class="c1">//这个锁是为了保证对同一个文件的读、写操作能分别被序列化
 </span><span class="c1"></span>	<span class="nx">fdmu</span> <span class="nx">fdMutex</span>
-
 	<span class="c1">// System file descriptor. Immutable until Close.
+</span><span class="c1"></span>	<span class="c1">// 这个是操作系统给我们返回的fd值
 </span><span class="c1"></span>	<span class="nx">Sysfd</span> <span class="kt">int</span>
 
 	<span class="c1">// I/O poller.
+</span><span class="c1"></span>	<span class="c1">// I/0 poller.这是Go对poll 过程的一个抽象，所有平台的抽象都是一样的
 </span><span class="c1"></span>	<span class="nx">pd</span> <span class="nx">pollDesc</span>
 
 	<span class="c1">// Writev cache.
 </span><span class="c1"></span>	<span class="nx">iovecs</span> <span class="o">*</span><span class="p">[]</span><span class="nx">syscall</span><span class="p">.</span><span class="nx">Iovec</span>
-
-	<span class="c1">// Semaphore signaled when file is closed.
+	<span class="c1">//文件被关闭时会触发该sema
+</span><span class="c1"></span>	<span class="c1">// Semaphore signaled when file is closed.
 </span><span class="c1"></span>	<span class="nx">csema</span> <span class="kt">uint32</span>
-
-	<span class="c1">// Non-zero if this file has been set to blocking mode.
+	<span class="c1">// 如果非0,说明FD被设置为了blocking模式
+</span><span class="c1"></span>	<span class="c1">// Non-zero if this file has been set to blocking mode.
 </span><span class="c1"></span>	<span class="nx">isBlocking</span> <span class="kt">uint32</span>
 
 	<span class="c1">// Whether this is a streaming descriptor, as opposed to a
 </span><span class="c1"></span>	<span class="c1">// packet-based descriptor like a UDP socket. Immutable.
+</span><span class="c1"></span>	<span class="c1">// 区分这个是不是一个流式的FD，与流式相反的是基于packet的，即UDP socket。该值不可变
 </span><span class="c1"></span>	<span class="nx">IsStream</span> <span class="kt">bool</span>
 
 	<span class="c1">// Whether a zero byte read indicates EOF. This is false for a
 </span><span class="c1"></span>	<span class="c1">// message based socket connection.
+</span><span class="c1"></span>	<span class="c1">// 当连接读到0长度时，用来区分是否代表EOF。如果是基于消息的socket连接始终是false
 </span><span class="c1"></span>	<span class="nx">ZeroReadIsEOF</span> <span class="kt">bool</span>
 
 	<span class="c1">// Whether this is a file rather than a network socket.
+</span><span class="c1"></span>	<span class="c1">// 区分这个FD代表的是文件，还是网络连接
 </span><span class="c1"></span>	<span class="nx">isFile</span> <span class="kt">bool</span>
 <span class="p">}</span>
 
@@ -1872,6 +1920,7 @@
 </div><h3 id="netlisten">net.Listen</h3>
 <p>调用 net.Listen 之后，底层调用 Linux 的系统调用 socket.</p>
 <p>socket方法创建一个 fd 分配给 listener，并用以来初始化 listener 的 netFD ，接着调用 netFD 的 listenStream 方法完成对 socket 的 bind&amp;listen 操作以及对 netFD 的初始化（主要是对 netFD 里的 pollDesc 的初始化），调用链是 <code>runtime.runtime_pollServerInit --&gt; runtime.poll_runtime_pollServerInit --&gt; runtime.netpollGenericInit</code>.</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210915204655.png" alt=""></p>
 <p>runtime.netpollGenericInit 会调用平台上特定实现的 runtime.netpollinit 函数，即 Linux 上的 epoll，</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2275,6 +2324,7 @@
 </div>
 </div><h3 id="listeneraccept">Listener.Accept</h3>
 <p>netpoll accept socket 的工作流程如下：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210915204735.png" alt=""></p>
 <ol>
 <li>服务端的 netFD 在 listen 时会创建 epoll 的实例，并将 listenerFD 加入 epoll 的事件队列</li>
 <li>netFD 在 accept 时将返回的 connFD 也加入 epoll 的事件队列</li>
@@ -2552,7 +2602,14 @@
 </div>
 </div><p>然后把这个 socket fd 注册到 listener 的 epoll 实例的事件队列中去，等待 I/O 事件。</p>
 <h3 id="connreadconnwrite">Conn.Read/Conn.Write</h3>
+<ul>
+<li>同一条连接上的读需要被序列化</li>
+<li>同一条连接上的写需要被序列化</li>
+<li>读和写可以并发</li>
+<li>同一个 FD 上的读/写操作，底层是一定有锁的</li>
+</ul>
 <p>我们先来看看 Conn.Read 方法是如何实现的，原理其实和 Listener.Accept 是一样的，具体调用链还是首先调用 conn 的 netFD.Read ，然后内部再调用 poll.FD.Read ，最后使用 Linux 的系统调用 read: syscall.Read 完成数据读取：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210915204817.png" alt=""></p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -2620,6 +2677,7 @@
 </span><span class="lnt">63
 </span><span class="lnt">64
 </span><span class="lnt">65
+</span><span class="lnt">66
 </span></code></pre></td>
 <td class="lntd">
 <pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Implementation of the Conn interface.
@@ -2644,7 +2702,8 @@
 
 <span class="c1">// Read implements io.Reader.
 </span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">fd</span> <span class="o">*</span><span class="nx">FD</span><span class="p">)</span> <span class="nf">Read</span><span class="p">(</span><span class="nx">p</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">(</span><span class="kt">int</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
-	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">fd</span><span class="p">.</span><span class="nf">readLock</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+	<span class="c1">// 注意，这里的readLock不是我们常见的read lock，同一条连接的所有read都是彼此互斥的
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">fd</span><span class="p">.</span><span class="nf">readLock</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
 		<span class="k">return</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">err</span>
 	<span class="p">}</span>
 	<span class="k">defer</span> <span class="nx">fd</span><span class="p">.</span><span class="nf">readUnlock</span><span class="p">()</span>
@@ -2690,9 +2749,122 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>conn.Write 和 conn.Read 的原理是一致的，它也是通过类似 pollDesc.waitRead 的 pollDesc.waitWrite 来 park 住 goroutine 直至期待的 I/O 事件发生才返回恢复执行。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210915205203.png" alt=""></p>
 <p>pollDesc.waitRead 内部调用了 poll.runtime_pollWait &ndash;&gt; runtime.poll_runtime_pollWait 来达成无 I/O 事件时 park 住 goroutine 的目的</p>
-<p>pollDesc.waitWrite 的内部实现原理和 pollDesc.waitRead 是一样的，都是基于 poll.runtime_pollWait &ndash;&gt; runtime.poll_runtime_pollWait，这里就不再赘述。</p>
-<h3 id="总结">总结</h3>
+<p>pollDesc.waitWrite 的内部实现原理和 pollDesc.waitRead 是一样的，都是基于 poll.runtime_pollWait &ndash;&gt; runtime.poll_runtime_pollWait.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Write implements the Conn Write method.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">conn</span><span class="p">)</span> <span class="nf">Write</span><span class="p">(</span><span class="nx">b</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">(</span><span class="kt">int</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">c</span><span class="p">.</span><span class="nf">ok</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">EINVAL</span>
+	<span class="p">}</span>
+	<span class="nx">n</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nf">Write</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">err</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">OpError</span><span class="p">{</span><span class="nx">Op</span><span class="p">:</span> <span class="s">&#34;write&#34;</span><span class="p">,</span> <span class="nx">Net</span><span class="p">:</span> <span class="nx">c</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nx">net</span><span class="p">,</span> <span class="nx">Source</span><span class="p">:</span> <span class="nx">c</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nx">laddr</span><span class="p">,</span> <span class="nx">Addr</span><span class="p">:</span> <span class="nx">c</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nx">raddr</span><span class="p">,</span> <span class="nx">Err</span><span class="p">:</span> <span class="nx">err</span><span class="p">}</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">err</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">fd</span> <span class="o">*</span><span class="nx">netFD</span><span class="p">)</span> <span class="nf">Write</span><span class="p">(</span><span class="nx">p</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">(</span><span class="nx">nn</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">nn</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">pfd</span><span class="p">.</span><span class="nf">Write</span><span class="p">(</span><span class="nx">p</span><span class="p">)</span>
+	<span class="nx">runtime</span><span class="p">.</span><span class="nf">KeepAlive</span><span class="p">(</span><span class="nx">fd</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">nn</span><span class="p">,</span> <span class="nf">wrapSyscallError</span><span class="p">(</span><span class="nx">writeSyscallName</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">// Write implements io.Writer.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">fd</span> <span class="o">*</span><span class="nx">FD</span><span class="p">)</span> <span class="nf">Write</span><span class="p">(</span><span class="nx">p</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">(</span><span class="kt">int</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="c1">//  同一条连接的所有写也是彼此互斥的
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">fd</span><span class="p">.</span><span class="nf">writeLock</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="k">defer</span> <span class="nx">fd</span><span class="p">.</span><span class="nf">writeUnlock</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">pd</span><span class="p">.</span><span class="nf">prepareWrite</span><span class="p">(</span><span class="nx">fd</span><span class="p">.</span><span class="nx">isFile</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="kd">var</span> <span class="nx">nn</span> <span class="kt">int</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">max</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">p</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">IsStream</span> <span class="o">&amp;&amp;</span> <span class="nx">max</span><span class="o">-</span><span class="nx">nn</span> <span class="p">&gt;</span> <span class="nx">maxRW</span> <span class="p">{</span>
+			<span class="nx">max</span> <span class="p">=</span> <span class="nx">nn</span> <span class="o">+</span> <span class="nx">maxRW</span>
+		<span class="p">}</span>
+		<span class="nx">n</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">ignoringEINTRIO</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nx">Write</span><span class="p">,</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">Sysfd</span><span class="p">,</span> <span class="nx">p</span><span class="p">[</span><span class="nx">nn</span><span class="p">:</span><span class="nx">max</span><span class="p">])</span>
+		<span class="k">if</span> <span class="nx">n</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">nn</span> <span class="o">+=</span> <span class="nx">n</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">nn</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="nx">p</span><span class="p">)</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">nn</span><span class="p">,</span> <span class="nx">err</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">==</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">EAGAIN</span> <span class="o">&amp;&amp;</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">pd</span><span class="p">.</span><span class="nf">pollable</span><span class="p">()</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">pd</span><span class="p">.</span><span class="nf">waitWrite</span><span class="p">(</span><span class="nx">fd</span><span class="p">.</span><span class="nx">isFile</span><span class="p">);</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="k">continue</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">nn</span><span class="p">,</span> <span class="nx">err</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">n</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">nn</span><span class="p">,</span> <span class="nx">io</span><span class="p">.</span><span class="nx">ErrUnexpectedEOF</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="总结">总结</h3>
 <p>所以我们现在可以来从整体的层面来概括 Go 的网络业务 goroutine 是如何被规划调度的了：</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201119153905.png" alt=""></p>
 <p>首先，client 连接 server 的时候，listener 通过 accept 调用接收新 connection，每一个新 connection 都启动一个 goroutine 处理，accept 调用会把该 connection 的 fd 连带所在的 goroutine 上下文信息封装注册到 epoll 的监听列表里去，当 goroutine 调用 conn.Read 或者 conn.Write 等需要阻塞等待的函数时，会被 gopark 给封存起来并使之休眠，让 P 去执行本地调度队列里的下一个可执行的 goroutine，往后 Go scheduler 会在循环调度的 runtime.schedule() 函数以及 sysmon 监控线程中调用 runtime.nepoll 以获取可运行的 goroutine 列表并通过调用 injectglist 把剩下的 g 放入全局调度队列或者当前 P 本地调度队列去重新执行。</p>
@@ -2705,6 +2877,11 @@
 <p>就是为了避免让操作网络 I/O 的 goroutine 陷入到系统调用从而进入内核态，因为一旦进入内核态，整个程序的控制权就会发生转移(到内核)，不再属于用户进程了，那么也就无法借助于 Go 强大的 runtime scheduler 来调度业务程序的并发了.</p>
 <p>而有了 netpoll 之后，借助于非阻塞 I/O ，G 就再也不会因为系统调用的读写而 (长时间) 陷入内核态，当 G 被阻塞在某个 network I/O 操作上时，实际上它不是因为陷入内核态被阻塞住了，而是被 Go runtime 调用 gopark 给 park 住了，此时 G 会被放置到某个 wait queue 中，而 M 会尝试运行下一个 _Grunnable 的 G，如果此时没有_Grunnable 的 G 供 M 运行，那么 M 将解绑 P，并进入 sleep 状态。</p>
 <p>当 I/O available，在 epoll 的 eventpoll.rdr 中等待的 G 会被放到 eventpoll.rdllist 链表里并通过 netpoll 中的 epoll_wait 系统调用返回放置到全局调度队列或者 P 的本地调度队列，标记为_Grunnable ，等待 P 绑定 M 恢复执行。</p>
+<h2 id="缺陷">缺陷</h2>
+<p>当前我们线上的系统，一般活跃连接较少，大多是类似于:总连接数:5w;活跃连接数:1k 这样的情况，活跃连接在总连接中的比例较低。</p>
+<p>不活跃的连接，一般情况下都是阻塞在 conn.Read上，所有阻塞的 goroutine 都会占用 goroutine 的栈空间，以及 Read buffer 的空间</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210915211633.png" alt=""></p>
+<p>可以认为，这种模式最大的缺陷:那些不活跃的连接要占用太多的资源</p>
 <h2 id="参考">参考</h2>
 <p><a href="https://draveness.me/golang/docs/part3-runtime/ch06-concurrency/golang-netpoller/">6.6 网络轮询器</a>
 <a href="https://strikefreedom.top/go-netpoll-io-multiplexing-reactor#b3_solo_h2_16%EF%BC%8C%E4%BB%8E%E5%85%A8%E9%9D%A2%E6%80%A7%E5%92%8C%E5%8F%AF%E9%9D%A0%E6%80%A7%E6%9D%A5%E8%AF%B4%E6%88%91%E8%BF%98%E6%98%AF%E5%BB%BA%E8%AE%AE%E4%BD%BF%E7%94%A8">go netpoller 原生网络模型之源码全面解析</a></p>
@@ -2736,8 +2913,8 @@
             <span class="prev-text nav-default">Go进程的生命周期源码剖析</span>
             <span class="prev-text nav-mobile">上一篇</span>
           </a>
-        <a class="next" href="/post/go%E7%9A%84sysmon%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
-            <span class="next-text nav-default">Go的sysmon源码剖析</span>
+        <a class="next" href="/post/go%E7%9A%84%E7%B3%BB%E7%BB%9F%E7%9B%91%E6%8E%A7%E5%8D%8F%E7%A8%8B%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
+            <span class="next-text nav-default">Go的系统监控协程源码剖析</span>
             <span class="next-text nav-mobile">下一篇</span>
             <i class="iconfont icon-right"></i>
           </a>
@@ -2782,7 +2959,7 @@
   <span class="copyright-year">
     &copy; 
     2017 - 
-    2021<span class="heart"><i class="iconfont icon-heart"></i></span><span>Forz</span>
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span>Forz</span>
   </span>
 </div>
 
