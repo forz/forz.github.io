@@ -49,7 +49,7 @@
 <meta itemprop="name" content="Go的网络轮询器源码剖析">
 <meta itemprop="description" content="导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的"><meta itemprop="datePublished" content="2020-11-14T22:52:29+00:00" />
 <meta itemprop="dateModified" content="2020-11-14T22:52:29+00:00" />
-<meta itemprop="wordCount" content="15496">
+<meta itemprop="wordCount" content="15967">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的网络轮询器源码剖析"/>
 <meta name="twitter:description" content="导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的"/>
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 15496 字 </span>
-          <span class="more-meta"> 预计阅读 31 分钟 </span>
+          <span class="more-meta"> 约 15967 字 </span>
+          <span class="more-meta"> 预计阅读 32 分钟 </span>
         
       </div>
     </header>
@@ -1533,7 +1533,20 @@
 <li>sysmon 监控线程会在循环过程中检查距离上一次 runtime.netpoll 被调用是否超过了 10ms，若是则会去调用它拿到可运行的 goroutine 列表并通过调用 injectglist 把 g 列表放入全局调度队列或者当前 P 本地调度队列等待被执行.</li>
 </ol>
 <h4 id="截止日期">截止日期</h4>
-<p>网络轮询器和计时器的关系非常紧密，这不仅仅是因为网络轮询器负责计时器的唤醒，还因为文件和网络 I/O 的截止日期也由网络轮询器负责处理。截止日期在 I/O 操作中，尤其是网络调用中很关键，网络请求存在很高的不确定因素，我们需要设置一个截止日期保证程序的正常运行，这时就需要用到网络轮询器中的 runtime.poll_runtime_pollSetDeadline 函数：</p>
+<h5 id="pollsetdeadline">pollSetDeadline</h5>
+<p>网络轮询器和计时器的关系非常紧密，这不仅仅是因为网络轮询器负责计时器的唤醒，还因为文件和网络 I/O 的截止日期也由网络轮询器负责处理。截止日期在 I/O 操作中，尤其是网络调用中很关键，网络请求存在很高的不确定因素，我们需要设置一个截止日期保证程序的正常运行，这时就需要用到网络轮询器中的 runtime.poll_runtime_pollSetDeadline 函数.</p>
+<p>该函数会先使用截止日期计算出过期的时间点，然后根据 runtime.pollDesc 的状态做出以下不同的处理：</p>
+<ol>
+<li>如果结构体中的计时器没有设置执行的函数时，该函数会设置计时器到期后执行的函数、传入的参数并调用 runtime.resettimer 重置计时器；</li>
+<li>如果结构体的读截止日期已经被改变，我们会根据新的截止日期做出不同的处理：
+<ol>
+<li>如果新的截止日期大于 0，调用 runtime.modtimer 修改计时器；</li>
+<li>如果新的截止日期小于 0，调用 runtime.deltimer 删除计时器；</li>
+</ol>
+</li>
+</ol>
+<p>在 runtime.poll_runtime_pollSetDeadline 函数的最后，会重新检查轮询信息中存储的截止日期</p>
+<p>如果截止日期小于 0，上述代码会调用 runtime.netpollgoready 直接唤醒对应的 Goroutine。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -1559,76 +1572,150 @@
 </span><span class="lnt">21
 </span><span class="lnt">22
 </span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
 </span></code></pre></td>
 <td class="lntd">
 <pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">poll_runtime_pollSetDeadline</span><span class="p">(</span><span class="nx">pd</span> <span class="o">*</span><span class="nx">pollDesc</span><span class="p">,</span> <span class="nx">d</span> <span class="kt">int64</span><span class="p">,</span> <span class="nx">mode</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">closing</span> <span class="p">{</span>
+		<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
 	<span class="nx">rd0</span><span class="p">,</span> <span class="nx">wd0</span> <span class="o">:=</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span><span class="p">,</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wd</span>
+	<span class="nx">combo0</span> <span class="o">:=</span> <span class="nx">rd0</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">rd0</span> <span class="o">==</span> <span class="nx">wd0</span>
 	<span class="k">if</span> <span class="nx">d</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
 		<span class="nx">d</span> <span class="o">+=</span> <span class="nf">nanotime</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">d</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="c1">// If the user has a deadline in the future, but the delay calculation
+</span><span class="c1"></span>			<span class="c1">// overflows, then set the deadline to the maximum possible value.
+</span><span class="c1"></span>			<span class="nx">d</span> <span class="p">=</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">63</span> <span class="o">-</span> <span class="mi">1</span>
+		<span class="p">}</span>
 	<span class="p">}</span>
-	<span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span> <span class="p">=</span> <span class="nx">d</span>
-	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">mode</span> <span class="o">==</span> <span class="sc">&#39;r&#39;</span> <span class="o">||</span> <span class="nx">mode</span> <span class="o">==</span> <span class="sc">&#39;r&#39;</span><span class="o">+</span><span class="sc">&#39;w&#39;</span> <span class="p">{</span>
+		<span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span> <span class="p">=</span> <span class="nx">d</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">mode</span> <span class="o">==</span> <span class="sc">&#39;w&#39;</span> <span class="o">||</span> <span class="nx">mode</span> <span class="o">==</span> <span class="sc">&#39;r&#39;</span><span class="o">+</span><span class="sc">&#39;w&#39;</span> <span class="p">{</span>
+		<span class="nx">pd</span><span class="p">.</span><span class="nx">wd</span> <span class="p">=</span> <span class="nx">d</span>
+	<span class="p">}</span>
+	<span class="nx">combo</span> <span class="o">:=</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span> <span class="o">==</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wd</span>
+	<span class="nx">rtf</span> <span class="o">:=</span> <span class="nx">netpollReadDeadline</span>
+	<span class="k">if</span> <span class="nx">combo</span> <span class="p">{</span>
+		<span class="nx">rtf</span> <span class="p">=</span> <span class="nx">netpollDeadline</span>
+	<span class="p">}</span>
 	<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rt</span><span class="p">.</span><span class="nx">f</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
 		<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
-			<span class="nx">pd</span><span class="p">.</span><span class="nx">rt</span><span class="p">.</span><span class="nx">f</span> <span class="p">=</span> <span class="nx">netpollReadDeadline</span>
-			<span class="nx">pd</span><span class="p">.</span><span class="nx">rt</span><span class="p">.</span><span class="nx">arg</span> <span class="p">=</span> <span class="nx">pd</span>
+			<span class="nx">pd</span><span class="p">.</span><span class="nx">rt</span><span class="p">.</span><span class="nx">f</span> <span class="p">=</span> <span class="nx">rtf</span>
+			<span class="c1">// Copy current seq into the timer arg.
+</span><span class="c1"></span>			<span class="c1">// Timer func will check the seq against current descriptor seq,
+</span><span class="c1"></span>			<span class="c1">// if they differ the descriptor was reused or timers were reset.
+</span><span class="c1"></span>			<span class="nx">pd</span><span class="p">.</span><span class="nx">rt</span><span class="p">.</span><span class="nx">arg</span> <span class="p">=</span> <span class="nx">pd</span><span class="p">.</span><span class="nf">makeArg</span><span class="p">()</span>
 			<span class="nx">pd</span><span class="p">.</span><span class="nx">rt</span><span class="p">.</span><span class="nx">seq</span> <span class="p">=</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rseq</span>
 			<span class="nf">resettimer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">rt</span><span class="p">,</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span><span class="p">)</span>
 		<span class="p">}</span>
-	<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span> <span class="o">!=</span> <span class="nx">rd0</span> <span class="p">{</span>
-		<span class="nx">pd</span><span class="p">.</span><span class="nx">rseq</span><span class="o">++</span>
-		<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
-			<span class="nf">modtimer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">rt</span><span class="p">,</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">rtf</span><span class="p">,</span> <span class="nx">pd</span><span class="p">,</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rseq</span><span class="p">)</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span> <span class="o">!=</span> <span class="nx">rd0</span> <span class="o">||</span> <span class="nx">combo</span> <span class="o">!=</span> <span class="nx">combo0</span> <span class="p">{</span>
+		<span class="nx">pd</span><span class="p">.</span><span class="nx">rseq</span><span class="o">++</span> <span class="c1">// invalidate current timers
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nf">modtimer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">rt</span><span class="p">,</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">rtf</span><span class="p">,</span> <span class="nx">pd</span><span class="p">.</span><span class="nf">makeArg</span><span class="p">(),</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rseq</span><span class="p">)</span>
 		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
 			<span class="nf">deltimer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">rt</span><span class="p">)</span>
 			<span class="nx">pd</span><span class="p">.</span><span class="nx">rt</span><span class="p">.</span><span class="nx">f</span> <span class="p">=</span> <span class="kc">nil</span>
 		<span class="p">}</span>
 	<span class="p">}</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>该函数会先使用截止日期计算出过期的时间点，然后根据 runtime.pollDesc 的状态做出以下不同的处理：</p>
-<ol>
-<li>如果结构体中的计时器没有设置执行的函数时，该函数会设置计时器到期后执行的函数、传入的参数并调用 runtime.resettimer 重置计时器；</li>
-<li>如果结构体的读截止日期已经被改变，我们会根据新的截止日期做出不同的处理：
-<ol>
-<li>如果新的截止日期大于 0，调用 runtime.modtimer 修改计时器；</li>
-<li>如果新的截止日期小于 0，调用 runtime.deltimer 删除计时器；</li>
-</ol>
-</li>
-</ol>
-<p>在 runtime.poll_runtime_pollSetDeadline 函数的最后，会重新检查轮询信息中存储的截止日期：</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
-</span><span class="lnt"> 2
-</span><span class="lnt"> 3
-</span><span class="lnt"> 4
-</span><span class="lnt"> 5
-</span><span class="lnt"> 6
-</span><span class="lnt"> 7
-</span><span class="lnt"> 8
-</span><span class="lnt"> 9
-</span><span class="lnt">10
-</span><span class="lnt">11
-</span><span class="lnt">12
-</span></code></pre></td>
-<td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">	<span class="kd">var</span> <span class="nx">rg</span> <span class="o">*</span><span class="nx">g</span>
-	<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wt</span><span class="p">.</span><span class="nx">f</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wd</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nx">combo</span> <span class="p">{</span>
+			<span class="nx">pd</span><span class="p">.</span><span class="nx">wt</span><span class="p">.</span><span class="nx">f</span> <span class="p">=</span> <span class="nx">netpollWriteDeadline</span>
+			<span class="nx">pd</span><span class="p">.</span><span class="nx">wt</span><span class="p">.</span><span class="nx">arg</span> <span class="p">=</span> <span class="nx">pd</span><span class="p">.</span><span class="nf">makeArg</span><span class="p">()</span>
+			<span class="nx">pd</span><span class="p">.</span><span class="nx">wt</span><span class="p">.</span><span class="nx">seq</span> <span class="p">=</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wseq</span>
+			<span class="nf">resettimer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">wt</span><span class="p">,</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wd</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wd</span> <span class="o">!=</span> <span class="nx">wd0</span> <span class="o">||</span> <span class="nx">combo</span> <span class="o">!=</span> <span class="nx">combo0</span> <span class="p">{</span>
+		<span class="nx">pd</span><span class="p">.</span><span class="nx">wseq</span><span class="o">++</span> <span class="c1">// invalidate current timers
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wd</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nx">combo</span> <span class="p">{</span>
+			<span class="nf">modtimer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">wt</span><span class="p">,</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wd</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">netpollWriteDeadline</span><span class="p">,</span> <span class="nx">pd</span><span class="p">.</span><span class="nf">makeArg</span><span class="p">(),</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wseq</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nf">deltimer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">wt</span><span class="p">)</span>
+			<span class="nx">pd</span><span class="p">.</span><span class="nx">wt</span><span class="p">.</span><span class="nx">f</span> <span class="p">=</span> <span class="kc">nil</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="c1">// If we set the new deadline in the past, unblock currently pending IO if any.
+</span><span class="c1"></span>	<span class="kd">var</span> <span class="nx">rg</span><span class="p">,</span> <span class="nx">wg</span> <span class="o">*</span><span class="nx">g</span>
+	<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wd</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">atomic</span><span class="p">.</span><span class="nf">StorepNoWB</span><span class="p">(</span><span class="nf">noescape</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">wg</span><span class="p">)),</span> <span class="kc">nil</span><span class="p">)</span> <span class="c1">// full memory barrier between stores to rd/wd and load of rg/wg in netpollunblock
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
 			<span class="nx">rg</span> <span class="p">=</span> <span class="nf">netpollunblock</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="sc">&#39;r&#39;</span><span class="p">,</span> <span class="kc">false</span><span class="p">)</span>
 		<span class="p">}</span>
-		<span class="o">...</span>
+		<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wd</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">wg</span> <span class="p">=</span> <span class="nf">netpollunblock</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="sc">&#39;w&#39;</span><span class="p">,</span> <span class="kc">false</span><span class="p">)</span>
+		<span class="p">}</span>
 	<span class="p">}</span>
+	<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
 	<span class="k">if</span> <span class="nx">rg</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
 		<span class="nf">netpollgoready</span><span class="p">(</span><span class="nx">rg</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
 	<span class="p">}</span>
-	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">wg</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nf">netpollgoready</span><span class="p">(</span><span class="nx">wg</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+	<span class="p">}</span>
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>如果截止日期小于 0，上述代码会调用 runtime.netpollgoready 直接唤醒对应的 Goroutine。</p>
-<p>在 runtime.poll_runtime_pollSetDeadline 函数中直接调用 runtime.netpollgoready 是相对比较特殊的情况。在正常情况下，运行时都会在计时器到期时调用 runtime.netpollDeadline、runtime.netpollReadDeadline 和 runtime.netpollWriteDeadline 三个函数：</p>
+</div><p>在 runtime.poll_runtime_pollSetDeadline 函数中直接调用 runtime.netpollgoready 是相对比较特殊的情况。在正常情况下，运行时都会在计时器到期时调用 runtime.netpollDeadline、runtime.netpollReadDeadline 和 runtime.netpollWriteDeadline 三个函数：</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201119224335.png" alt=""></p>
 <p>上述三个函数都会通过 runtime.netpolldeadlineimpl 调用 runtime.netpollgoready 直接唤醒相应的 Goroutine:</p>
 <div class="highlight"><div class="chroma">
@@ -1653,28 +1740,92 @@
 </span><span class="lnt">18
 </span><span class="lnt">19
 </span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
 </span></code></pre></td>
 <td class="lntd">
 <pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">netpolldeadlineimpl</span><span class="p">(</span><span class="nx">pd</span> <span class="o">*</span><span class="nx">pollDesc</span><span class="p">,</span> <span class="nx">seq</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">read</span><span class="p">,</span> <span class="nx">write</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">currentSeq</span> <span class="o">:=</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rseq</span>
+	<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+	<span class="c1">// Seq arg is seq when the timer was set.
+</span><span class="c1"></span>	<span class="c1">// If it&#39;s stale, ignore the timer event.
+</span><span class="c1"></span>	<span class="nx">currentSeq</span> <span class="o">:=</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rseq</span>
 	<span class="k">if</span> <span class="p">!</span><span class="nx">read</span> <span class="p">{</span>
 		<span class="nx">currentSeq</span> <span class="p">=</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wseq</span>
 	<span class="p">}</span>
 	<span class="k">if</span> <span class="nx">seq</span> <span class="o">!=</span> <span class="nx">currentSeq</span> <span class="p">{</span>
+		<span class="c1">// The descriptor was reused or timers were reset.
+</span><span class="c1"></span>		<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
 		<span class="k">return</span>
 	<span class="p">}</span>
-<span class="kd">var</span> <span class="nx">rg</span> <span class="o">*</span><span class="nx">g</span>
+	<span class="kd">var</span> <span class="nx">rg</span> <span class="o">*</span><span class="nx">g</span>
 	<span class="k">if</span> <span class="nx">read</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">rt</span><span class="p">.</span><span class="nx">f</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;runtime: inconsistent read deadline&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
 		<span class="nx">pd</span><span class="p">.</span><span class="nx">rd</span> <span class="p">=</span> <span class="o">-</span><span class="mi">1</span>
-		<span class="nx">atomic</span><span class="p">.</span><span class="nf">StorepNoWB</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">rt</span><span class="p">.</span><span class="nx">f</span><span class="p">),</span> <span class="kc">nil</span><span class="p">)</span>
-		<span class="nx">rg</span> <span class="p">=</span> <span class="nf">netpollunblock</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="sc">&#39;r&#39;</span><span class="p">,</span> <span class="kc">false</span><span class="p">)</span>
+		<span class="nx">atomic</span><span class="p">.</span><span class="nf">StorepNoWB</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">rt</span><span class="p">.</span><span class="nx">f</span><span class="p">),</span> <span class="kc">nil</span><span class="p">)</span> <span class="c1">// full memory barrier between store to rd and load of rg in netpollunblock
+</span><span class="c1"></span>		<span class="nx">rg</span> <span class="p">=</span> <span class="nf">netpollunblock</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="sc">&#39;r&#39;</span><span class="p">,</span> <span class="kc">false</span><span class="p">)</span>
 	<span class="p">}</span>
-	<span class="o">...</span>
+	<span class="kd">var</span> <span class="nx">wg</span> <span class="o">*</span><span class="nx">g</span>
+	<span class="k">if</span> <span class="nx">write</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wd</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">wt</span><span class="p">.</span><span class="nx">f</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nx">read</span> <span class="p">{</span>
+			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;runtime: inconsistent write deadline&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">pd</span><span class="p">.</span><span class="nx">wd</span> <span class="p">=</span> <span class="o">-</span><span class="mi">1</span>
+		<span class="nx">atomic</span><span class="p">.</span><span class="nf">StorepNoWB</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">wt</span><span class="p">.</span><span class="nx">f</span><span class="p">),</span> <span class="kc">nil</span><span class="p">)</span> <span class="c1">// full memory barrier between store to wd and load of wg in netpollunblock
+</span><span class="c1"></span>		<span class="nx">wg</span> <span class="p">=</span> <span class="nf">netpollunblock</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="sc">&#39;w&#39;</span><span class="p">,</span> <span class="kc">false</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
 	<span class="k">if</span> <span class="nx">rg</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
 		<span class="nf">netpollgoready</span><span class="p">(</span><span class="nx">rg</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
 	<span class="p">}</span>
-	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">wg</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nf">netpollgoready</span><span class="p">(</span><span class="nx">wg</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+	<span class="p">}</span>
 <span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">netpollDeadline</span><span class="p">(</span><span class="nx">arg</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">seq</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nf">netpolldeadlineimpl</span><span class="p">(</span><span class="nx">arg</span><span class="p">.(</span><span class="o">*</span><span class="nx">pollDesc</span><span class="p">),</span> <span class="nx">seq</span><span class="p">,</span> <span class="kc">true</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">netpollReadDeadline</span><span class="p">(</span><span class="nx">arg</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">seq</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nf">netpolldeadlineimpl</span><span class="p">(</span><span class="nx">arg</span><span class="p">.(</span><span class="o">*</span><span class="nx">pollDesc</span><span class="p">),</span> <span class="nx">seq</span><span class="p">,</span> <span class="kc">true</span><span class="p">,</span> <span class="kc">false</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">netpollWriteDeadline</span><span class="p">(</span><span class="nx">arg</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">seq</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nf">netpolldeadlineimpl</span><span class="p">(</span><span class="nx">arg</span><span class="p">.(</span><span class="o">*</span><span class="nx">pollDesc</span><span class="p">),</span> <span class="nx">seq</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+<span class="p">}</span>
+
 </code></pre></td></tr></table>
 </div>
 </div><p>Goroutine 在被唤醒之后就会意识到当前的 I/O 操作已经超时，可以根据需要选择重试请求或者中止调用。</p>
@@ -2028,7 +2179,7 @@
 </span><span class="c1"></span>	<span class="nx">Sysfd</span> <span class="kt">int</span>
 
 	<span class="c1">// I/O poller.
-</span><span class="c1"></span>	<span class="c1">// I/0 poller.这是Go对poll 过程的一个抽象，所有平台的抽象都是一样的
+</span><span class="c1"></span>	<span class="c1">// I/0 poller.这是Go对poll过程的一个抽象，所有平台的抽象都是一样的
 </span><span class="c1"></span>	<span class="nx">pd</span> <span class="nx">pollDesc</span>
 
 	<span class="c1">// Writev cache.
