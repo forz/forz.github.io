@@ -49,7 +49,7 @@
 <meta itemprop="name" content="Go的网络轮询器源码剖析">
 <meta itemprop="description" content="导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的"><meta itemprop="datePublished" content="2020-11-14T22:52:29+00:00" />
 <meta itemprop="dateModified" content="2020-11-14T22:52:29+00:00" />
-<meta itemprop="wordCount" content="15136">
+<meta itemprop="wordCount" content="15496">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的网络轮询器源码剖析"/>
 <meta name="twitter:description" content="导言 Go 基于 I/O multiplexing 和 goroutine scheduler 构建了一个简洁而高性能的原生网络模型(基于 Go 的 I/O 多路复用 netpoller )，提供了 goroutine-per-connection 这样简单的网络编程模式。在这种模式下，开发者使用的"/>
@@ -132,7 +132,7 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 15136 字 </span>
+          <span class="more-meta"> 约 15496 字 </span>
           <span class="more-meta"> 预计阅读 31 分钟 </span>
         
       </div>
@@ -151,12 +151,14 @@
     <li><a href="#运行机制">运行机制</a>
       <ul>
         <li><a href="#初始化">初始化</a></li>
-        <li><a href="#轮询事件">轮询事件</a></li>
+        <li><a href="#增删轮询事件">增删轮询事件</a></li>
         <li><a href="#事件循环">事件循环</a></li>
       </ul>
     </li>
     <li><a href="#tcp-server">TCP Server</a>
       <ul>
+        <li><a href="#tcplistener">TCPListener</a></li>
+        <li><a href="#tcpconn">TCPConn</a></li>
         <li><a href="#netfd">netFD</a></li>
         <li><a href="#netlisten">net.Listen</a></li>
         <li><a href="#listeneraccept">Listener.Accept</a></li>
@@ -405,8 +407,178 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>Go runtime 会在调用 poll_runtime_pollOpen 往 epoll 实例注册 fd 之时首次调用 runtime.pollCache.alloc方法时批量初始化大小 4KB 的 runtime.pollDesc 结构体的链表，初始化过程中会调用 runtime.persistentalloc 来为这些数据结构分配不会被 GC 回收的内存，确保这些数据结构只能被 epoll和kqueue 在内核空间去引用。</p>
-<p>再往后每次调用这个方法则会先判断链表头是否已经分配过值了，若是，则直接返回表头这个 pollDesc，这种批量初始化数据进行缓存而后每次都直接从缓存取数据的方式是一种很常见的性能优化手段，在这里这种方式可以有效地提升 netpoller 的吞吐量。</p>
+</div><p>Go runtime 会在调用 poll_runtime_pollOpen 往 epoll 实例注册 fd 之时首次调用 <code>runtime.pollCache.alloc</code>方法时批量初始化大小 4KB 的 runtime.pollDesc 结构体的链表，初始化过程中会调用 runtime.persistentalloc 来为这些数据结构分配不会被 GC 回收的内存，确保这些数据结构只能被 epoll和kqueue 在内核空间去引用。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Wrapper around sysAlloc that can allocate small chunks.
+</span><span class="c1">// There is no associated free operation.
+</span><span class="c1">// Intended for things like function/type/debug-related persistent data.
+</span><span class="c1">// If align is 0, uses default align (currently 8).
+</span><span class="c1">// The returned memory will be zeroed.
+</span><span class="c1">//
+</span><span class="c1">// Consider marking persistentalloc&#39;d types go:notinheap.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">persistentalloc</span><span class="p">(</span><span class="nx">size</span><span class="p">,</span> <span class="nx">align</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">sysStat</span> <span class="o">*</span><span class="nx">sysMemStat</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">p</span> <span class="o">*</span><span class="nx">notInHeap</span>
+	<span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">p</span> <span class="p">=</span> <span class="nf">persistentalloc1</span><span class="p">(</span><span class="nx">size</span><span class="p">,</span> <span class="nx">align</span><span class="p">,</span> <span class="nx">sysStat</span><span class="p">)</span>
+	<span class="p">})</span>
+	<span class="k">return</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">p</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">// Must run on system stack because stack growth can (re)invoke it.
+</span><span class="c1">// See issue 9174.
+</span><span class="c1">//go:systemstack
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">persistentalloc1</span><span class="p">(</span><span class="nx">size</span><span class="p">,</span> <span class="nx">align</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">sysStat</span> <span class="o">*</span><span class="nx">sysMemStat</span><span class="p">)</span> <span class="o">*</span><span class="nx">notInHeap</span> <span class="p">{</span>
+	<span class="kd">const</span> <span class="p">(</span>
+		<span class="nx">maxBlock</span> <span class="p">=</span> <span class="mi">64</span> <span class="o">&lt;&lt;</span> <span class="mi">10</span> <span class="c1">// VM reservation granularity is 64K on windows
+</span><span class="c1"></span>	<span class="p">)</span>
+
+	<span class="k">if</span> <span class="nx">size</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;persistentalloc: size == 0&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">align</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">align</span><span class="o">&amp;</span><span class="p">(</span><span class="nx">align</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;persistentalloc: align is not a power of 2&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">align</span> <span class="p">&gt;</span> <span class="nx">_PageSize</span> <span class="p">{</span>
+			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;persistentalloc: align is too large&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="nx">align</span> <span class="p">=</span> <span class="mi">8</span>
+	<span class="p">}</span>
+
+	<span class="k">if</span> <span class="nx">size</span> <span class="o">&gt;=</span> <span class="nx">maxBlock</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="p">(</span><span class="o">*</span><span class="nx">notInHeap</span><span class="p">)(</span><span class="nf">sysAlloc</span><span class="p">(</span><span class="nx">size</span><span class="p">,</span> <span class="nx">sysStat</span><span class="p">))</span>
+	<span class="p">}</span>
+
+	<span class="nx">mp</span> <span class="o">:=</span> <span class="nf">acquirem</span><span class="p">()</span>
+	<span class="kd">var</span> <span class="nx">persistent</span> <span class="o">*</span><span class="nx">persistentAlloc</span>
+	<span class="k">if</span> <span class="nx">mp</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">mp</span><span class="p">.</span><span class="nx">p</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">persistent</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">mp</span><span class="p">.</span><span class="nx">p</span><span class="p">.</span><span class="nf">ptr</span><span class="p">().</span><span class="nx">palloc</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">globalAlloc</span><span class="p">.</span><span class="nx">mutex</span><span class="p">)</span>
+		<span class="nx">persistent</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">globalAlloc</span><span class="p">.</span><span class="nx">persistentAlloc</span>
+	<span class="p">}</span>
+	<span class="nx">persistent</span><span class="p">.</span><span class="nx">off</span> <span class="p">=</span> <span class="nf">alignUp</span><span class="p">(</span><span class="nx">persistent</span><span class="p">.</span><span class="nx">off</span><span class="p">,</span> <span class="nx">align</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">persistent</span><span class="p">.</span><span class="nx">off</span><span class="o">+</span><span class="nx">size</span> <span class="p">&gt;</span> <span class="nx">persistentChunkSize</span> <span class="o">||</span> <span class="nx">persistent</span><span class="p">.</span><span class="nx">base</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">persistent</span><span class="p">.</span><span class="nx">base</span> <span class="p">=</span> <span class="p">(</span><span class="o">*</span><span class="nx">notInHeap</span><span class="p">)(</span><span class="nf">sysAlloc</span><span class="p">(</span><span class="nx">persistentChunkSize</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">other_sys</span><span class="p">))</span>
+		<span class="k">if</span> <span class="nx">persistent</span><span class="p">.</span><span class="nx">base</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">persistent</span> <span class="o">==</span> <span class="o">&amp;</span><span class="nx">globalAlloc</span><span class="p">.</span><span class="nx">persistentAlloc</span> <span class="p">{</span>
+				<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">globalAlloc</span><span class="p">.</span><span class="nx">mutex</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;runtime: cannot allocate memory&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
+
+		<span class="c1">// Add the new chunk to the persistentChunks list.
+</span><span class="c1"></span>		<span class="k">for</span> <span class="p">{</span>
+			<span class="nx">chunks</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">persistentChunks</span><span class="p">))</span>
+			<span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">persistent</span><span class="p">.</span><span class="nx">base</span><span class="p">))</span> <span class="p">=</span> <span class="nx">chunks</span>
+			<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Casuintptr</span><span class="p">((</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">persistentChunks</span><span class="p">)),</span> <span class="nx">chunks</span><span class="p">,</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">persistent</span><span class="p">.</span><span class="nx">base</span><span class="p">)))</span> <span class="p">{</span>
+				<span class="k">break</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="nx">persistent</span><span class="p">.</span><span class="nx">off</span> <span class="p">=</span> <span class="nf">alignUp</span><span class="p">(</span><span class="nx">sys</span><span class="p">.</span><span class="nx">PtrSize</span><span class="p">,</span> <span class="nx">align</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">p</span> <span class="o">:=</span> <span class="nx">persistent</span><span class="p">.</span><span class="nx">base</span><span class="p">.</span><span class="nf">add</span><span class="p">(</span><span class="nx">persistent</span><span class="p">.</span><span class="nx">off</span><span class="p">)</span>
+	<span class="nx">persistent</span><span class="p">.</span><span class="nx">off</span> <span class="o">+=</span> <span class="nx">size</span>
+	<span class="nf">releasem</span><span class="p">(</span><span class="nx">mp</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">persistent</span> <span class="o">==</span> <span class="o">&amp;</span><span class="nx">globalAlloc</span><span class="p">.</span><span class="nx">persistentAlloc</span> <span class="p">{</span>
+		<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">globalAlloc</span><span class="p">.</span><span class="nx">mutex</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="k">if</span> <span class="nx">sysStat</span> <span class="o">!=</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">other_sys</span> <span class="p">{</span>
+		<span class="nx">sysStat</span><span class="p">.</span><span class="nf">add</span><span class="p">(</span><span class="nb">int64</span><span class="p">(</span><span class="nx">size</span><span class="p">))</span>
+		<span class="nx">memstats</span><span class="p">.</span><span class="nx">other_sys</span><span class="p">.</span><span class="nf">add</span><span class="p">(</span><span class="o">-</span><span class="nb">int64</span><span class="p">(</span><span class="nx">size</span><span class="p">))</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">p</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>再往后每次调用这个方法则会先判断链表头是否已经分配过值了，若是，则直接返回表头这个 pollDesc，这种批量初始化数据进行缓存而后每次都直接从缓存取数据的方式是一种很常见的性能优化手段，在这里这种方式可以有效地提升 netpoller 的吞吐量。</p>
 <p>Go runtime 会在关闭 pollDesc 之时调用 runtime.pollCache.free 释放内存,它会直接将结构体插入链表的最前面：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -446,48 +618,8 @@
 <li>runtime.doaddtimer — 向处理器中增加新的计时器时；</li>
 </ol>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210915204535.png" alt=""></p>
-<p>网络轮询器的初始化会使用 runtime.poll_runtime_pollServerInit 和 runtime.netpollGenericInit 两个函数：</p>
+<p>网络轮询器的初始化会使用 <code>runtime.poll_runtime_pollServerInit</code> 和 <code>runtime.netpollGenericInit</code> 两个函数：</p>
 <div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
-</span><span class="lnt"> 2
-</span><span class="lnt"> 3
-</span><span class="lnt"> 4
-</span><span class="lnt"> 5
-</span><span class="lnt"> 6
-</span><span class="lnt"> 7
-</span><span class="lnt"> 8
-</span><span class="lnt"> 9
-</span><span class="lnt">10
-</span><span class="lnt">11
-</span><span class="lnt">12
-</span><span class="lnt">13
-</span><span class="lnt">14
-</span><span class="lnt">15
-</span><span class="lnt">16
-</span><span class="lnt">17
-</span></code></pre></td>
-<td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 使用 sync.Once 来确保一个 listener 只持有一个 epoll 实例
-</span><span class="c1"></span><span class="kd">var</span> <span class="nx">serverInit</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Once</span>
-
-<span class="c1">// 它会创建 epoll 实例并把 listener fd 加入监听队列
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">pd</span> <span class="o">*</span><span class="nx">pollDesc</span><span class="p">)</span> <span class="nf">init</span><span class="p">(</span><span class="nx">fd</span> <span class="o">*</span><span class="nx">FD</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
-	<span class="nx">serverInit</span><span class="p">.</span><span class="nf">Do</span><span class="p">(</span><span class="nx">runtime_pollServerInit</span><span class="p">)</span>
-	<span class="nx">ctx</span><span class="p">,</span> <span class="nx">errno</span> <span class="o">:=</span> <span class="nf">runtime_pollOpen</span><span class="p">(</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">fd</span><span class="p">.</span><span class="nx">Sysfd</span><span class="p">))</span>
-	<span class="k">if</span> <span class="nx">errno</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="k">if</span> <span class="nx">ctx</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
-			<span class="nf">runtime_pollUnblock</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
-			<span class="nf">runtime_pollClose</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
-		<span class="p">}</span>
-		<span class="k">return</span> <span class="nf">errnoErr</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nf">Errno</span><span class="p">(</span><span class="nx">errno</span><span class="p">))</span>
-	<span class="p">}</span>
-	<span class="nx">pd</span><span class="p">.</span><span class="nx">runtimeCtx</span> <span class="p">=</span> <span class="nx">ctx</span>
-	<span class="k">return</span> <span class="kc">nil</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
-</div>
-</div><div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
 </span><span class="lnt"> 2
@@ -663,8 +795,9 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>因为目前的计时器由网络轮询器管理和触发，它能够让网络轮询器立刻返回并让运行时检查是否有需要触发的计时器。</p>
-<h3 id="轮询事件">轮询事件</h3>
-<p>调用 internal/poll.pollDesc.init 初始化文件描述符时不只会初始化网络轮询器，还会通过 runtime.poll_runtime_pollOpen 函数重置轮询信息 runtime.pollDesc 并调用 runtime.netpollopen 初始化轮询事件：</p>
+<h3 id="增删轮询事件">增删轮询事件</h3>
+<h4 id="pollopen">pollOpen</h4>
+<p>调用 <code>internal/poll.pollDesc.init</code> 初始化文件描述符时不只会初始化网络轮询器，还会通过 <code>runtime.poll_runtime_pollOpen</code> 函数重置轮询信息 <code>runtime.pollDesc</code> 并调用 <code>runtime.netpollopen</code> 初始化轮询事件：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -738,7 +871,8 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>从全局的 epfd 中删除待监听的文件描述符可以使用 runtime.netpollclose 函数，因为该函数的实现与 runtime.netpollopen 比较相似，所以这里就不展开分析了。</p>
+</div><h4 id="pollclose">pollClose</h4>
+<p>从全局的 epfd 中删除待监听的文件描述符可以使用 <code>runtime.netpollclose</code> 函数，因为该函数的实现与 <code>runtime.netpollopen</code> 比较相似，所以这里就不展开分析了。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -795,7 +929,61 @@
 </ul>
 <p>上述过程连接了操作系统中的 I/O 多路复用机制和 Go 语言的运行时，在两个不同体系之间构建了桥梁，我们将分别介绍上述的两个过程。</p>
 <h4 id="等待事件">等待事件</h4>
-<p>当我们在文件描述符上执行读写操作时，如果文件描述符不可读或者不可写，当前 Goroutine 就会执行 runtime.poll_runtime_pollWait 检查 runtime.pollDesc 的状态并调用 runtime.netpollblock 等待文件描述符的可读或者可写：</p>
+<p>当我们在文件描述符上执行读写操作时，如果文件描述符不可读或者不可写，当前 Goroutine 就会执行 <code>runtime.poll_runtime_pollWait</code> 检查 <code>runtime.pollDesc</code> 的状态并调用 <code>runtime.netpollblock</code> 等待文件描述符的可读或者可写</p>
+<h5 id="pollwait">pollWait</h5>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">//go:linkname poll_runtime_pollWait internal/poll.runtime_pollWait
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">poll_runtime_pollWait</span><span class="p">(</span><span class="nx">pd</span> <span class="o">*</span><span class="nx">pollDesc</span><span class="p">,</span> <span class="nx">mode</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
+	<span class="nx">err</span> <span class="o">:=</span> <span class="nf">netpollcheckerr</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">mode</span><span class="p">))</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="nx">pollNoError</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="c1">// As for now only Solaris, illumos, and AIX use level-triggered IO.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">GOOS</span> <span class="o">==</span> <span class="s">&#34;solaris&#34;</span> <span class="o">||</span> <span class="nx">GOOS</span> <span class="o">==</span> <span class="s">&#34;illumos&#34;</span> <span class="o">||</span> <span class="nx">GOOS</span> <span class="o">==</span> <span class="s">&#34;aix&#34;</span> <span class="p">{</span>
+		<span class="nf">netpollarm</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="nx">mode</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="c1">// 进入 netpollblock 并且判断是否有期待的 I/O 事件发生，
+</span><span class="c1"></span>	<span class="c1">// 这里的 for 循环是为了一直等到 io ready
+</span><span class="c1"></span>	<span class="k">for</span> <span class="p">!</span><span class="nf">netpollblock</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">mode</span><span class="p">),</span> <span class="kc">false</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">err</span> <span class="p">=</span> <span class="nf">netpollcheckerr</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">mode</span><span class="p">))</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">err</span>
+		<span class="p">}</span>
+		<span class="c1">// Can happen if timeout has fired and unblocked us,
+</span><span class="c1"></span>		<span class="c1">// but before we had a chance to run, timeout has been reset.
+</span><span class="c1"></span>		<span class="c1">// Pretend it has not happened and retry.
+</span><span class="c1"></span>	<span class="p">}</span>
+	<span class="k">return</span> <span class="mi">0</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h5 id="netpollblock">netpollblock</h5>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -850,57 +1038,9 @@
 </span><span class="lnt">50
 </span><span class="lnt">51
 </span><span class="lnt">52
-</span><span class="lnt">53
-</span><span class="lnt">54
-</span><span class="lnt">55
-</span><span class="lnt">56
-</span><span class="lnt">57
-</span><span class="lnt">58
-</span><span class="lnt">59
-</span><span class="lnt">60
-</span><span class="lnt">61
-</span><span class="lnt">62
-</span><span class="lnt">63
-</span><span class="lnt">64
-</span><span class="lnt">65
-</span><span class="lnt">66
-</span><span class="lnt">67
-</span><span class="lnt">68
-</span><span class="lnt">69
-</span><span class="lnt">70
-</span><span class="lnt">71
-</span><span class="lnt">72
-</span><span class="lnt">73
-</span><span class="lnt">74
-</span><span class="lnt">75
-</span><span class="lnt">76
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">//go:linkname poll_runtime_pollWait internal/poll.runtime_pollWait
-</span><span class="c1"></span><span class="kd">func</span> <span class="nf">poll_runtime_pollWait</span><span class="p">(</span><span class="nx">pd</span> <span class="o">*</span><span class="nx">pollDesc</span><span class="p">,</span> <span class="nx">mode</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
-	<span class="nx">err</span> <span class="o">:=</span> <span class="nf">netpollcheckerr</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">mode</span><span class="p">))</span>
-	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="nx">pollNoError</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="nx">err</span>
-	<span class="p">}</span>
-	<span class="c1">// As for now only Solaris, illumos, and AIX use level-triggered IO.
-</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">GOOS</span> <span class="o">==</span> <span class="s">&#34;solaris&#34;</span> <span class="o">||</span> <span class="nx">GOOS</span> <span class="o">==</span> <span class="s">&#34;illumos&#34;</span> <span class="o">||</span> <span class="nx">GOOS</span> <span class="o">==</span> <span class="s">&#34;aix&#34;</span> <span class="p">{</span>
-		<span class="nf">netpollarm</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="nx">mode</span><span class="p">)</span>
-	<span class="p">}</span>
-	<span class="c1">// 进入 netpollblock 并且判断是否有期待的 I/O 事件发生，
-</span><span class="c1"></span>	<span class="c1">// 这里的 for 循环是为了一直等到 io ready
-</span><span class="c1"></span>	<span class="k">for</span> <span class="p">!</span><span class="nf">netpollblock</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">mode</span><span class="p">),</span> <span class="kc">false</span><span class="p">)</span> <span class="p">{</span>
-		<span class="nx">err</span> <span class="p">=</span> <span class="nf">netpollcheckerr</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">mode</span><span class="p">))</span>
-		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
-			<span class="k">return</span> <span class="nx">err</span>
-		<span class="p">}</span>
-		<span class="c1">// Can happen if timeout has fired and unblocked us,
-</span><span class="c1"></span>		<span class="c1">// but before we had a chance to run, timeout has been reset.
-</span><span class="c1"></span>		<span class="c1">// Pretend it has not happened and retry.
-</span><span class="c1"></span>	<span class="p">}</span>
-	<span class="k">return</span> <span class="mi">0</span>
-<span class="p">}</span>
-
-<span class="c1">// returns true if IO is ready, or false if timedout or closed
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// returns true if IO is ready, or false if timedout or closed
 </span><span class="c1">// waitio - wait only for completed IO, ignore errors
 </span><span class="c1"></span><span class="kd">func</span> <span class="nf">netpollblock</span><span class="p">(</span><span class="nx">pd</span> <span class="o">*</span><span class="nx">pollDesc</span><span class="p">,</span> <span class="nx">mode</span> <span class="kt">int32</span><span class="p">,</span> <span class="nx">waitio</span> <span class="kt">bool</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
 	<span class="c1">// gpp 保存的是 goroutine 的数据结构 g，这里会根据 mode 的值决定是 rg 还是 wg，
@@ -990,6 +1130,7 @@
 </div>
 </div><p>runtime.netpollblock 是 Goroutine 等待 I/O 事件的关键函数，它会使用运行时提供的 runtime.gopark 让出当前线程，将 Goroutine 转换到休眠状态并等待运行时的唤醒。</p>
 <h4 id="轮询等待">轮询等待</h4>
+<h5 id="netpoll">netpoll</h5>
 <p>在调度和GC的关键点上都会检查一次netpoll，看是否有已经ready的fd,相当于每次调度循环都要走到netpoll，检查的频率还是比较高的.</p>
 <p>Go 语言的运行时会在调度或者系统监控中调用 runtime.netpoll 轮询网络，该函数的执行过程可以分成以下几个部分：</p>
 <p>根据 ready 的事件是 Read 或 Write 分别从 pollDesc 的 rg、 wg 上拿到该唤醒的 goroutine.</p>
@@ -1192,7 +1333,8 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>处理的事件总共包含两种:</p>
+</div><p>处理的事件总共包含两种.</p>
+<h5 id="netpollbreak">netpollBreak</h5>
 <p>一种是调用 runtime.netpollBreak 函数触发的事件，该函数的作用是中断网络轮询器；</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1244,7 +1386,8 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>另一种是其他文件描述符的正常读写事件，对于这些事件，我们会交给 runtime.netpollready 处理：</p>
+</div><h5 id="netpollready">netpollready</h5>
+<p>另一种是其他文件描述符的正常读写事件，对于这些事件，我们会交给 runtime.netpollready 处理：</p>
 <p>已经 ready 的 goroutine push 到 toRun 链表</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1301,7 +1444,8 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>toRun 列表最终从 netpoll() 中返回，通过 injectglist 进入全局队列</p>
-<p>runtime.netpollunblock 会在读写事件发生时，将 runtime.pollDesc 中的读或者写信号量转换成 pdReady 并返回其中存储的 Goroutine；如果返回的 Goroutine 不会为空，那么该 Goroutine 就会被加入 toRun 列表，运行时会将列表中的全部 Goroutine 加入运行队列并等待调度器的调度。</p>
+<h5 id="netpollunblock">netpollunblock</h5>
+<p><code>runtime.netpollunblock</code>会在读写事件发生时，将 runtime.pollDesc 中的读或者写信号量转换成 pdReady 并返回其中存储的 Goroutine；如果返回的 Goroutine 不会为空，那么该 Goroutine 就会被加入 toRun 列表，运行时会将列表中的全部 Goroutine 加入运行队列并等待调度器的调度。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -1627,7 +1771,88 @@
 </div><p>上面是一个基于 Go 原生网络模型（基于 netpoller）编写的一个 TCP server，模式是 goroutine-per-connection ，在这种模式下，开发者使用的是同步的模式去编写异步的逻辑而且对于开发者来说 I/O 是否阻塞是无感知的，也就是说开发者无需考虑 goroutines 甚至更底层的线程、进程的调度和上下文切换。而 Go netpoller 最底层的事件驱动技术肯定是基于 epoll/kqueue/iocp 这一类的 I/O 事件驱动技术，只不过是把这些调度和上下文切换的工作转移到了 runtime 的 Go scheduler，让它来负责调度 goroutines，从而极大地降低了程序员的心智负担！</p>
 <p>Go 的这种同步模式的网络服务器的基本架构通常如下：</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201119150735.png" alt=""></p>
-<p>上面的示例代码中相关的在源码里的几个数据结构和方法：</p>
+<h3 id="tcplistener">TCPListener</h3>
+<p><code>net.Listen(&quot;tcp&quot;, &quot;:8888&quot;)</code>方法返回了一个 <code>*TCPListener</code>，它是一个实现了 net.Listener 接口的 struct.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// TCPListener is a TCP network listener. Clients should typically
+</span><span class="c1">// use variables of type Listener instead of assuming TCP.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">TCPListener</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">fd</span> <span class="o">*</span><span class="nx">netFD</span>
+	<span class="nx">lc</span> <span class="nx">ListenConfig</span>
+<span class="p">}</span>
+
+<span class="c1">// Accept implements the Accept method in the Listener interface; it
+</span><span class="c1">// waits for the next call and returns a generic Conn.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">l</span><span class="o">*</span><span class="nx">TCPListener</span><span class="p">)</span> <span class="nf">Accept</span><span class="p">()</span> <span class="p">(</span><span class="nx">Conn</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">l</span><span class="p">.</span><span class="nf">ok</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">EINVAL</span>
+	<span class="p">}</span>
+	<span class="nx">c</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">l</span><span class="p">.</span><span class="nf">accept</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">OpError</span><span class="p">{</span><span class="nx">Op</span><span class="p">:</span> <span class="s">&#34;accept&#34;</span><span class="p">,</span> <span class="nx">Net</span><span class="p">:</span> <span class="nx">l</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nx">net</span><span class="p">,</span> <span class="nx">Source</span><span class="p">:</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">Addr</span><span class="p">:</span> <span class="nx">l</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nx">laddr</span><span class="p">,</span> <span class="nx">Err</span><span class="p">:</span> <span class="nx">err</span><span class="p">}</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">c</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">ln</span> <span class="o">*</span><span class="nx">TCPListener</span><span class="p">)</span> <span class="nf">accept</span><span class="p">()</span> <span class="p">(</span><span class="o">*</span><span class="nx">TCPConn</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">fd</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">ln</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nf">accept</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="nx">tc</span> <span class="o">:=</span> <span class="nf">newTCPConn</span><span class="p">(</span><span class="nx">fd</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">ln</span><span class="p">.</span><span class="nx">lc</span><span class="p">.</span><span class="nx">KeepAlive</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">setKeepAlive</span><span class="p">(</span><span class="nx">fd</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+		<span class="nx">ka</span> <span class="o">:=</span> <span class="nx">ln</span><span class="p">.</span><span class="nx">lc</span><span class="p">.</span><span class="nx">KeepAlive</span>
+		<span class="k">if</span> <span class="nx">ln</span><span class="p">.</span><span class="nx">lc</span><span class="p">.</span><span class="nx">KeepAlive</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">ka</span> <span class="p">=</span> <span class="nx">defaultTCPKeepAlive</span>
+		<span class="p">}</span>
+		<span class="nf">setKeepAlivePeriod</span><span class="p">(</span><span class="nx">fd</span><span class="p">,</span> <span class="nx">ka</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">tc</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="tcpconn">TCPConn</h3>
+<p>通过 <code>listener.Accept()</code> 接收的新连接<code>*TCPConn</code> 是一个实现了 net.Conn 接口的 struct，它内嵌了 <code>net.conn</code> struct。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -1672,83 +1897,9 @@
 </span><span class="lnt">40
 </span><span class="lnt">41
 </span><span class="lnt">42
-</span><span class="lnt">43
-</span><span class="lnt">44
-</span><span class="lnt">45
-</span><span class="lnt">46
-</span><span class="lnt">47
-</span><span class="lnt">48
-</span><span class="lnt">49
-</span><span class="lnt">50
-</span><span class="lnt">51
-</span><span class="lnt">52
-</span><span class="lnt">53
-</span><span class="lnt">54
-</span><span class="lnt">55
-</span><span class="lnt">56
-</span><span class="lnt">57
-</span><span class="lnt">58
-</span><span class="lnt">59
-</span><span class="lnt">60
-</span><span class="lnt">61
-</span><span class="lnt">62
-</span><span class="lnt">63
-</span><span class="lnt">64
-</span><span class="lnt">65
-</span><span class="lnt">66
-</span><span class="lnt">67
-</span><span class="lnt">68
-</span><span class="lnt">69
-</span><span class="lnt">70
-</span><span class="lnt">71
-</span><span class="lnt">72
-</span><span class="lnt">73
-</span><span class="lnt">74
-</span><span class="lnt">75
-</span><span class="lnt">76
-</span><span class="lnt">77
-</span><span class="lnt">78
-</span><span class="lnt">79
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// TCPListener is a TCP network listener. Clients should typically
-</span><span class="c1">// use variables of type Listener instead of assuming TCP.
-</span><span class="c1"></span><span class="kd">type</span> <span class="nx">TCPListener</span> <span class="kd">struct</span> <span class="p">{</span>
-	<span class="nx">fd</span> <span class="o">*</span><span class="nx">netFD</span>
-	<span class="nx">lc</span> <span class="nx">ListenConfig</span>
-<span class="p">}</span>
-
-<span class="c1">// Accept implements the Accept method in the Listener interface; it
-</span><span class="c1">// waits for the next call and returns a generic Conn.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">l</span><span class="o">*</span><span class="nx">TCPListener</span><span class="p">)</span> <span class="nf">Accept</span><span class="p">()</span> <span class="p">(</span><span class="nx">Conn</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
-	<span class="k">if</span> <span class="p">!</span><span class="nx">l</span><span class="p">.</span><span class="nf">ok</span><span class="p">()</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">EINVAL</span>
-	<span class="p">}</span>
-	<span class="nx">c</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">l</span><span class="p">.</span><span class="nf">accept</span><span class="p">()</span>
-	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">OpError</span><span class="p">{</span><span class="nx">Op</span><span class="p">:</span> <span class="s">&#34;accept&#34;</span><span class="p">,</span> <span class="nx">Net</span><span class="p">:</span> <span class="nx">l</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nx">net</span><span class="p">,</span> <span class="nx">Source</span><span class="p">:</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">Addr</span><span class="p">:</span> <span class="nx">l</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nx">laddr</span><span class="p">,</span> <span class="nx">Err</span><span class="p">:</span> <span class="nx">err</span><span class="p">}</span>
-	<span class="p">}</span>
-	<span class="k">return</span> <span class="nx">c</span><span class="p">,</span> <span class="kc">nil</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="p">(</span><span class="nx">ln</span> <span class="o">*</span><span class="nx">TCPListener</span><span class="p">)</span> <span class="nf">accept</span><span class="p">()</span> <span class="p">(</span><span class="o">*</span><span class="nx">TCPConn</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">fd</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">ln</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nf">accept</span><span class="p">()</span>
-	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
-	<span class="p">}</span>
-	<span class="nx">tc</span> <span class="o">:=</span> <span class="nf">newTCPConn</span><span class="p">(</span><span class="nx">fd</span><span class="p">)</span>
-	<span class="k">if</span> <span class="nx">ln</span><span class="p">.</span><span class="nx">lc</span><span class="p">.</span><span class="nx">KeepAlive</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="nf">setKeepAlive</span><span class="p">(</span><span class="nx">fd</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
-		<span class="nx">ka</span> <span class="o">:=</span> <span class="nx">ln</span><span class="p">.</span><span class="nx">lc</span><span class="p">.</span><span class="nx">KeepAlive</span>
-		<span class="k">if</span> <span class="nx">ln</span><span class="p">.</span><span class="nx">lc</span><span class="p">.</span><span class="nx">KeepAlive</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
-			<span class="nx">ka</span> <span class="p">=</span> <span class="nx">defaultTCPKeepAlive</span>
-		<span class="p">}</span>
-		<span class="nf">setKeepAlivePeriod</span><span class="p">(</span><span class="nx">fd</span><span class="p">,</span> <span class="nx">ka</span><span class="p">)</span>
-	<span class="p">}</span>
-	<span class="k">return</span> <span class="nx">tc</span><span class="p">,</span> <span class="kc">nil</span>
-<span class="p">}</span>
-
-<span class="c1">// TCPConn is an implementation of the Conn interface for TCP network
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// TCPConn is an implementation of the Conn interface for TCP network
 </span><span class="c1">// connections.
 </span><span class="c1"></span><span class="kd">type</span> <span class="nx">TCPConn</span> <span class="kd">struct</span> <span class="p">{</span>
 	<span class="nx">conn</span>
@@ -1793,16 +1944,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><h3 id="netfd">netFD</h3>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre tabindex="0" class="chroma"><code><span class="lnt">1
-</span></code></pre></td>
-<td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">net</span><span class="p">.</span><span class="nf">Listen</span><span class="p">(</span><span class="s">&#34;tcp&#34;</span><span class="p">,</span> <span class="s">&#34;:8888&#34;</span><span class="p">)</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>方法返回了一个 <code>*TCPListener</code>，它是一个实现了 net.Listener 接口的 struct，而通过 listener.Accept() 接收的新连接*TCPConn 则是一个实现了 net.Conn 接口的 struct，它内嵌了 net.conn struct。</p>
-<p>仔细阅读上面的源码可以发现，不管是 Listener 的 Accept 还是 Conn 的 Read/Write 方法，都是基于一个 netFD 的数据结构的操作， netFD 是一个网络描述符，类似于 Linux 的文件描述符的概念，netFD 中包含一个 poll.FD 数据结构，而 poll.FD 中包含两个重要的数据结构 Sysfd 和 pollDesc，前者是真正的系统文件描述符，后者对是底层事件驱动的封装，所有的读写超时等操作都是通过调用后者的对应方法实现的。</p>
+<p>不管是 Listener 的 Accept 还是 Conn 的 Read/Write 方法，都是基于一个 netFD 的数据结构的操作， netFD 是一个网络描述符，类似于 Linux 的文件描述符的概念，netFD 中包含一个 poll.FD 数据结构，而 poll.FD 中包含两个重要的数据结构 Sysfd 和 pollDesc，前者是真正的系统文件描述符，后者对是底层事件驱动的封装，所有的读写超时等操作都是通过调用后者的对应方法实现的。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210915203645.png" alt=""></p>
 <p>netFD 和 poll.FD 的源码：</p>
 <div class="highlight"><div class="chroma">
@@ -1859,11 +2001,9 @@
 </span><span class="lnt">50
 </span><span class="lnt">51
 </span><span class="lnt">52
-</span><span class="lnt">53
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">
-<span class="c1">// Network file descriptor.
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Network file descriptor.
 </span><span class="c1"></span><span class="kd">type</span> <span class="nx">netFD</span> <span class="kd">struct</span> <span class="p">{</span>
 	<span class="nx">pfd</span> <span class="nx">poll</span><span class="p">.</span><span class="nx">FD</span>
 
@@ -1915,6 +2055,147 @@
 </span><span class="c1"></span>	<span class="nx">isFile</span> <span class="kt">bool</span>
 <span class="p">}</span>
 
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">newFD</span><span class="p">(</span><span class="nx">sysfd</span><span class="p">,</span> <span class="nx">family</span><span class="p">,</span> <span class="nx">sotype</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">net</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">netFD</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">ret</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">netFD</span><span class="p">{</span>
+		<span class="nx">pfd</span><span class="p">:</span> <span class="nx">poll</span><span class="p">.</span><span class="nx">FD</span><span class="p">{</span>
+			<span class="nx">Sysfd</span><span class="p">:</span>         <span class="nx">sysfd</span><span class="p">,</span>
+			<span class="nx">IsStream</span><span class="p">:</span>      <span class="nx">sotype</span> <span class="o">==</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SOCK_STREAM</span><span class="p">,</span>
+			<span class="nx">ZeroReadIsEOF</span><span class="p">:</span> <span class="nx">sotype</span> <span class="o">!=</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SOCK_DGRAM</span> <span class="o">&amp;&amp;</span> <span class="nx">sotype</span> <span class="o">!=</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SOCK_RAW</span><span class="p">,</span>
+		<span class="p">},</span>
+		<span class="nx">family</span><span class="p">:</span> <span class="nx">family</span><span class="p">,</span>
+		<span class="nx">sotype</span><span class="p">:</span> <span class="nx">sotype</span><span class="p">,</span>
+		<span class="nx">net</span><span class="p">:</span>    <span class="nx">net</span><span class="p">,</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">ret</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>init 过程调用链：netFD.init() &ndash;&gt; poll.FD.Init() &ndash;&gt; poll.pollDesc.init()</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">fd</span> <span class="o">*</span><span class="nx">netFD</span><span class="p">)</span> <span class="nf">init</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">pfd</span><span class="p">.</span><span class="nf">Init</span><span class="p">(</span><span class="nx">fd</span><span class="p">.</span><span class="nx">net</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Init initializes the FD. The Sysfd field should already be set.
+</span><span class="c1">// This can be called multiple times on a single FD.
+</span><span class="c1">// The net argument is a network name from the net package (e.g., &#34;tcp&#34;),
+</span><span class="c1">// or &#34;file&#34;.
+</span><span class="c1">// Set pollable to true if fd should be managed by runtime netpoll.
+</span><span class="c1">// netFD.init 会调用 poll.FD.Init 并最终调用到 pollDesc.init，
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">fd</span> <span class="o">*</span><span class="nx">FD</span><span class="p">)</span> <span class="nf">Init</span><span class="p">(</span><span class="nx">net</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">pollable</span> <span class="kt">bool</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="c1">// We don&#39;t actually care about the various network types.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">net</span> <span class="o">==</span> <span class="s">&#34;file&#34;</span> <span class="p">{</span>
+		<span class="nx">fd</span><span class="p">.</span><span class="nx">isFile</span> <span class="p">=</span> <span class="kc">true</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">pollable</span> <span class="p">{</span>
+		<span class="nx">fd</span><span class="p">.</span><span class="nx">isBlocking</span> <span class="p">=</span> <span class="mi">1</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+	<span class="c1">// netFD.init 会调用 poll.FD.Init 并最终调用到 pollDesc.init，
+</span><span class="c1"></span>	<span class="c1">// 它会创建 epoll 实例并把 listener fd 加入监听队列
+</span><span class="c1"></span>	<span class="nx">err</span> <span class="o">:=</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">pd</span><span class="p">.</span><span class="nf">init</span><span class="p">(</span><span class="nx">fd</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// If we could not initialize the runtime poller,
+</span><span class="c1"></span>		<span class="c1">// assume we are using blocking mode.
+</span><span class="c1"></span>		<span class="nx">fd</span><span class="p">.</span><span class="nx">isBlocking</span> <span class="p">=</span> <span class="mi">1</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">err</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 使用 sync.Once 来确保一个 listener 只持有一个 epoll 实例
+</span><span class="c1"></span><span class="kd">var</span> <span class="nx">serverInit</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Once</span>
+
+<span class="c1">// 它会创建 epoll 实例并把 listener fd 加入监听队列
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">pd</span> <span class="o">*</span><span class="nx">pollDesc</span><span class="p">)</span> <span class="nf">init</span><span class="p">(</span><span class="nx">fd</span> <span class="o">*</span><span class="nx">FD</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">serverInit</span><span class="p">.</span><span class="nf">Do</span><span class="p">(</span><span class="nx">runtime_pollServerInit</span><span class="p">)</span>
+	<span class="nx">ctx</span><span class="p">,</span> <span class="nx">errno</span> <span class="o">:=</span> <span class="nf">runtime_pollOpen</span><span class="p">(</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">fd</span><span class="p">.</span><span class="nx">Sysfd</span><span class="p">))</span>
+	<span class="k">if</span> <span class="nx">errno</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">ctx</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nf">runtime_pollUnblock</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+			<span class="nf">runtime_pollClose</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="k">return</span> <span class="nf">errnoErr</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nf">Errno</span><span class="p">(</span><span class="nx">errno</span><span class="p">))</span>
+	<span class="p">}</span>
+	<span class="nx">pd</span><span class="p">.</span><span class="nx">runtimeCtx</span> <span class="p">=</span> <span class="nx">ctx</span>
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
 </div><h3 id="netlisten">net.Listen</h3>
@@ -2105,22 +2386,6 @@
 </span><span class="lnt">179
 </span><span class="lnt">180
 </span><span class="lnt">181
-</span><span class="lnt">182
-</span><span class="lnt">183
-</span><span class="lnt">184
-</span><span class="lnt">185
-</span><span class="lnt">186
-</span><span class="lnt">187
-</span><span class="lnt">188
-</span><span class="lnt">189
-</span><span class="lnt">190
-</span><span class="lnt">191
-</span><span class="lnt">192
-</span><span class="lnt">193
-</span><span class="lnt">194
-</span><span class="lnt">195
-</span><span class="lnt">196
-</span><span class="lnt">197
 </span></code></pre></td>
 <td class="lntd">
 <pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Listen</span><span class="p">(</span><span class="nx">network</span><span class="p">,</span> <span class="nx">address</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">Listener</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
@@ -2281,22 +2546,6 @@
 	<span class="p">}</span>
 	<span class="k">return</span> <span class="nx">s</span><span class="p">,</span> <span class="kc">nil</span>
 <span class="p">}</span>
-
-
-<span class="kd">func</span> <span class="nf">newFD</span><span class="p">(</span><span class="nx">sysfd</span><span class="p">,</span> <span class="nx">family</span><span class="p">,</span> <span class="nx">sotype</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">net</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">netFD</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">ret</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">netFD</span><span class="p">{</span>
-		<span class="nx">pfd</span><span class="p">:</span> <span class="nx">poll</span><span class="p">.</span><span class="nx">FD</span><span class="p">{</span>
-			<span class="nx">Sysfd</span><span class="p">:</span>         <span class="nx">sysfd</span><span class="p">,</span>
-			<span class="nx">IsStream</span><span class="p">:</span>      <span class="nx">sotype</span> <span class="o">==</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SOCK_STREAM</span><span class="p">,</span>
-			<span class="nx">ZeroReadIsEOF</span><span class="p">:</span> <span class="nx">sotype</span> <span class="o">!=</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SOCK_DGRAM</span> <span class="o">&amp;&amp;</span> <span class="nx">sotype</span> <span class="o">!=</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SOCK_RAW</span><span class="p">,</span>
-		<span class="p">},</span>
-		<span class="nx">family</span><span class="p">:</span> <span class="nx">family</span><span class="p">,</span>
-		<span class="nx">sotype</span><span class="p">:</span> <span class="nx">sotype</span><span class="p">,</span>
-		<span class="nx">net</span><span class="p">:</span>    <span class="nx">net</span><span class="p">,</span>
-	<span class="p">}</span>
-	<span class="k">return</span> <span class="nx">ret</span><span class="p">,</span> <span class="kc">nil</span>
-<span class="p">}</span>
-
 
 <span class="c1">// 对 listener fd 进行 bind&amp;listen 操作，并且调用 init 方法完成初始化
 </span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">fd</span> <span class="o">*</span><span class="nx">netFD</span><span class="p">)</span> <span class="nf">listenStream</span><span class="p">(</span><span class="nx">laddr</span> <span class="nx">sockaddr</span><span class="p">,</span> <span class="nx">backlog</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">ctrlFn</span> <span class="kd">func</span><span class="p">(</span><span class="kt">string</span><span class="p">,</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">RawConn</span><span class="p">)</span> <span class="kt">error</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
@@ -2543,64 +2792,8 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>pollDesc.waitRead 方法主要负责检测当前这个 pollDesc 的上层 netFD 对应的 fd 是否有『期待的』I/O 事件发生，如果有就直接返回，否则就 park 住当前的 goroutine 并持续等待直至对应的 fd 上发生可读/可写或者其他『期待的』I/O 事件为止，然后它就会返回到外层的 for 循环，让 goroutine 继续执行逻辑。</p>
-<p>poll.FD.Accept() 返回之后，会构造一个对应这个新 socket 的 netFD，然后调用 init() 方法完成初始化，这个 init 过程和前面 net.Listen() 是一样的，调用链：netFD.init() &ndash;&gt; poll.FD.Init() &ndash;&gt; poll.pollDesc.init()</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
-</span><span class="lnt"> 2
-</span><span class="lnt"> 3
-</span><span class="lnt"> 4
-</span><span class="lnt"> 5
-</span><span class="lnt"> 6
-</span><span class="lnt"> 7
-</span><span class="lnt"> 8
-</span><span class="lnt"> 9
-</span><span class="lnt">10
-</span><span class="lnt">11
-</span><span class="lnt">12
-</span><span class="lnt">13
-</span><span class="lnt">14
-</span><span class="lnt">15
-</span><span class="lnt">16
-</span><span class="lnt">17
-</span><span class="lnt">18
-</span><span class="lnt">19
-</span><span class="lnt">20
-</span><span class="lnt">21
-</span><span class="lnt">22
-</span><span class="lnt">23
-</span><span class="lnt">24
-</span><span class="lnt">25
-</span></code></pre></td>
-<td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Init initializes the FD. The Sysfd field should already be set.
-</span><span class="c1">// This can be called multiple times on a single FD.
-</span><span class="c1">// The net argument is a network name from the net package (e.g., &#34;tcp&#34;),
-</span><span class="c1">// or &#34;file&#34;.
-</span><span class="c1">// Set pollable to true if fd should be managed by runtime netpoll.
-</span><span class="c1">// netFD.init 会调用 poll.FD.Init 并最终调用到 pollDesc.init，
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">fd</span> <span class="o">*</span><span class="nx">FD</span><span class="p">)</span> <span class="nf">Init</span><span class="p">(</span><span class="nx">net</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">pollable</span> <span class="kt">bool</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
-	<span class="c1">// We don&#39;t actually care about the various network types.
-</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">net</span> <span class="o">==</span> <span class="s">&#34;file&#34;</span> <span class="p">{</span>
-		<span class="nx">fd</span><span class="p">.</span><span class="nx">isFile</span> <span class="p">=</span> <span class="kc">true</span>
-	<span class="p">}</span>
-	<span class="k">if</span> <span class="p">!</span><span class="nx">pollable</span> <span class="p">{</span>
-		<span class="nx">fd</span><span class="p">.</span><span class="nx">isBlocking</span> <span class="p">=</span> <span class="mi">1</span>
-		<span class="k">return</span> <span class="kc">nil</span>
-	<span class="p">}</span>
-	<span class="c1">// netFD.init 会调用 poll.FD.Init 并最终调用到 pollDesc.init，
-</span><span class="c1"></span>	<span class="c1">// 它会创建 epoll 实例并把 listener fd 加入监听队列
-</span><span class="c1"></span>	<span class="nx">err</span> <span class="o">:=</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">pd</span><span class="p">.</span><span class="nf">init</span><span class="p">(</span><span class="nx">fd</span><span class="p">)</span>
-	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="c1">// If we could not initialize the runtime poller,
-</span><span class="c1"></span>		<span class="c1">// assume we are using blocking mode.
-</span><span class="c1"></span>		<span class="nx">fd</span><span class="p">.</span><span class="nx">isBlocking</span> <span class="p">=</span> <span class="mi">1</span>
-	<span class="p">}</span>
-	<span class="k">return</span> <span class="nx">err</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>然后把这个 socket fd 注册到 listener 的 epoll 实例的事件队列中去，等待 I/O 事件。</p>
+<p>poll.FD.Accept() 返回之后，会构造一个对应这个新 socket 的 netFD，然后调用 init() 方法完成初始化，</p>
+<p>然后把这个 socket fd 注册到 listener 的 epoll 实例的事件队列中去，等待 I/O 事件。</p>
 <h3 id="connreadconnwrite">Conn.Read/Conn.Write</h3>
 <ul>
 <li>同一条连接上的读需要被序列化</li>
