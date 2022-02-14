@@ -49,7 +49,7 @@
 <meta itemprop="name" content="Go的系统监控协程源码剖析">
 <meta itemprop="description" content="设计原理 Go 语言的系统监控起到了很重要的作用，它在内部启动了一个不会中止的循环，在循环的内部会轮询网络、抢占长期运行或者处于系统调用的 Goroutine 以及触"><meta itemprop="datePublished" content="2020-11-12T19:32:21+00:00" />
 <meta itemprop="dateModified" content="2020-11-12T19:32:21+00:00" />
-<meta itemprop="wordCount" content="9067">
+<meta itemprop="wordCount" content="8878">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的系统监控协程源码剖析"/>
 <meta name="twitter:description" content="设计原理 Go 语言的系统监控起到了很重要的作用，它在内部启动了一个不会中止的循环，在循环的内部会轮询网络、抢占长期运行或者处于系统调用的 Goroutine 以及触"/>
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 9067 字 </span>
-          <span class="more-meta"> 预计阅读 19 分钟 </span>
+          <span class="more-meta"> 约 8878 字 </span>
+          <span class="more-meta"> 预计阅读 18 分钟 </span>
         
       </div>
     </header>
@@ -584,9 +584,9 @@
 			<span class="nx">forcegc</span><span class="p">.</span><span class="nx">idle</span> <span class="p">=</span> <span class="mi">0</span>
 			<span class="kd">var</span> <span class="nx">list</span> <span class="nx">gList</span>
 			<span class="nx">list</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="nx">forcegc</span><span class="p">.</span><span class="nx">g</span><span class="p">)</span>
-            <span class="nf">injectglist</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">list</span><span class="p">)</span>
-            <span class="c1">//forcegc就是强制GC的专用G。它在runtime2.go中定义，类型是forcegcstate。
-</span><span class="c1"></span>            <span class="c1">//forcegcstate是一个结构体类型，其中封装了一个G。
+            		<span class="nf">injectglist</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">list</span><span class="p">)</span>
+            		<span class="c1">//forcegc就是强制GC的专用G。它在runtime2.go中定义，类型是forcegcstate。
+</span><span class="c1"></span>            		<span class="c1">//forcegcstate是一个结构体类型，其中封装了一个G。
 </span><span class="c1"></span>			<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">forcegc</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
         <span class="p">}</span>
         <span class="c1">//如果程序运行之前设置了GODEBUG环境变量，并且包含schedtrace=x，那么系统监测程序就会每过x毫秒打印一次调度器跟踪信息。这的x就是打印周期。
@@ -922,12 +922,13 @@
 <p>系统监控在循环中调用 runtime.retake 函数抢占处于运行或者系统调用中的处理器，该函数会遍历运行时的全局处理器，</p>
 <p>runtime.retake 中的循环包含了两种不同的抢占逻辑：</p>
 <ol>
-<li>当处理器处于 _Prunning 状态时，如果上一次触发调度的时间已经过去了 10ms，我们就会通过 runtime.preemptone 抢占当前处理器；</li>
+<li>当处理器处于 Prunning 或 Psyscall 状态时，如果上一次触发调度的时间已经过去了 10ms，我们就会通过 runtime.preemptone 抢占当前处理器；</li>
 <li>当处理器处于 _Psyscall 状态时，在满足以下两种情况下会调用 runtime.handoffp 让出处理器的使用权：
-<ol>
-<li>当处理器的运行队列不为空或者不存在空闲处理器时；</li>
-<li>当系统调用时间超过了 10ms 时；</li>
-</ol>
+<ul>
+<li>P的可运行G队列不为空.</li>
+<li>没有自旋的M或者有休息的P.</li>
+<li>距离上一次系统调用的时间超过10ms.</li>
+</ul>
 </li>
 </ol>
 <div class="highlight"><div class="chroma">
@@ -1036,14 +1037,11 @@
 </span><span class="lnt">102
 </span><span class="lnt">103
 </span><span class="lnt">104
-</span><span class="lnt">105
-</span><span class="lnt">106
-</span><span class="lnt">107
 </span></code></pre></td>
 <td class="lntd">
 <pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">retake</span><span class="p">(</span><span class="nx">now</span> <span class="kt">int64</span><span class="p">)</span> <span class="kt">uint32</span> <span class="p">{</span>
-	<span class="c1">//在retake函数开始处，首先初始化了一个变量n := 0，它用来记录成功抢夺到P的次数
-</span><span class="c1"></span>    <span class="c1">//而最后retake函数的返回值也是这个n，所以在sysmon函数中我们能够用retake函数的返回值是否大于0来判断抢夺P是否成功。
+	<span class="c1">// 在retake函数开始处，首先初始化了一个变量n := 0，它用来记录成功抢夺到P的次数
+</span><span class="c1"></span>   	<span class="c1">// 而最后retake函数的返回值也是这个n，所以在sysmon函数中我们能够用retake函数的返回值是否大于0来判断抢夺P是否成功。
 </span><span class="c1"></span>	<span class="nx">n</span> <span class="o">:=</span> <span class="mi">0</span>
 	<span class="c1">// Prevent allp slice changes. This lock will be completely
 </span><span class="c1"></span>	<span class="c1">// uncontended unless we&#39;re already stopping the world.
@@ -1101,11 +1099,8 @@
 				<span class="nx">pd</span><span class="p">.</span><span class="nx">syscallwhen</span> <span class="p">=</span> <span class="nx">now</span>
 				<span class="k">continue</span>
 			<span class="p">}</span>
-			<span class="c1">//这一步的目的很明显，就是要在某些条件下放弃对P的抢夺。要想放弃对P的抢夺，条件还是很严苛的，要同时满足三个条件：
-</span><span class="c1"></span>            		<span class="c1">//一是P的可运行G队列为空不抢，因为没活干的P抢过来也没用.
-</span><span class="c1"></span>            		<span class="c1">//二是有自旋的M或者有休息的P不抢，因为有自旋的M说明有M正在全力查找可运行的G，该P的可运行G队列一定会被全力查找可运行G的流程找到，就不用系统监测程序插手了
-</span><span class="c1"></span>            		<span class="c1">//三是距离上一次系统调用的时间不足10ms不抢
-</span><span class="c1"></span>            		<span class="c1">//这个条件中用到的上次系统调用时间正是备份中的syscallwhen字段，因为如果P的系统调用计数和备份中的不同步，说明在此次系统调用之前，已经有人捷足先登进行过系统调用了，那么最新的系统调用的时间也就必定不是备份中syscallwhen字段记录的时刻，这就会导致这里我们用备份中的syscallwhen字段来判断距离上次系统调用的时间间隔是否大于10ms是不准确的。
+
+            		<span class="c1">//这个条件中用到的上次系统调用时间正是备份中的syscallwhen字段，因为如果P的系统调用计数和备份中的不同步，说明在此次系统调用之前，已经有人捷足先登进行过系统调用了，那么最新的系统调用的时间也就必定不是备份中syscallwhen字段记录的时刻，这就会导致这里我们用备份中的syscallwhen字段来判断距离上次系统调用的时间间隔是否大于10ms是不准确的。
 </span><span class="c1"></span>            		<span class="c1">//所以在第一小步中一旦发现P的系统调用计数和备份中的不同步，就应该更新备份，并且忽略后面的步骤。
 </span><span class="c1"></span>			<span class="c1">// On the one hand we don&#39;t want to retake Ps if there is no other work to do,
 </span><span class="c1"></span>			<span class="c1">// but on the other hand we want to retake them eventually
@@ -1190,7 +1185,7 @@
 </div><p>前面两个字段记录调度器调度的次数和时间，后面两个字段记录系统调用的次数和时间。</p>
 <p>其实sysmontick结构中的syscalltick字段和syscallwhen字段在P结构体中也有，那么为什么这里还要重复存一份呢？目的就是为了备份，当发现sysmontick中的syscalltick值与P中的不一样是，就说明新的系统调用发生了，此时就可以更新syscallwhen字段为当前时间，记录下此次系统调用的时刻了。</p>
 <p>在下一次扫描时，对比 sysmon 记录下的 p 的调度次数和时间，与当前 p 自己记录下的调度次数和时间对比，如果一致。说明 P 在这一段时间内一直在运行同一个 goroutine。那就来计算一下运行时间是否太长了。</p>
-<p>如果发现运行时间超过了 10 ms，则要调用 preemptone(<em>p</em>) 发起抢占的请求</p>
+<p>如果发现运行时间超过了 10 ms，则要调用 <code>preemptone(_p_)</code> 发起抢占的请求</p>
 <h2 id="参考">参考</h2>
 <p><a href="https://blog.csdn.net/puss0/article/details/80627753#%E5%9F%BA%E6%9C%AC%E7%BB%93%E6%9E%84">地鼠宝宝的秩事异闻之调度器</a></p>
 <p><a href="https://draveness.me/golang/docs/part3-runtime/ch06-concurrency/golang-sysmon/">6.7 系统监控</a></p>

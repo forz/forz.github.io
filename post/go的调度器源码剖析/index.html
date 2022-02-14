@@ -49,7 +49,7 @@
 <meta itemprop="name" content="Go的调度器源码剖析">
 <meta itemprop="description" content="协程 进程时代 最初的计算机上面没有操作系统，更别提进程、线程和协程了。 后来，现代化的计算机有了操作系统，每个程序都是一个进程，但是操作系统在一"><meta itemprop="datePublished" content="2019-07-12T13:29:52+00:00" />
 <meta itemprop="dateModified" content="2019-07-12T13:29:52+00:00" />
-<meta itemprop="wordCount" content="81819">
+<meta itemprop="wordCount" content="81870">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的调度器源码剖析"/>
 <meta name="twitter:description" content="协程 进程时代 最初的计算机上面没有操作系统，更别提进程、线程和协程了。 后来，现代化的计算机有了操作系统，每个程序都是一个进程，但是操作系统在一"/>
@@ -132,7 +132,7 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 81819 字 </span>
+          <span class="more-meta"> 约 81870 字 </span>
           <span class="more-meta"> 预计阅读 164 分钟 </span>
         
       </div>
@@ -9718,9 +9718,9 @@ golang-goroutine-state-transition</li>
 <p>CGO也会触发系统态的阻塞</p>
 <h3 id="抢占式调度">抢占式调度</h3>
 <p>如果某个 G 执行时间过长，其他的 G 如何才能被正常的调度？我们需要进行抢占式调度.</p>
-<h4 id="协作式抢占调度">协作式抢占调度</h4>
 <p>我们知道现代操作系统的调度器多为抢占式调度，其实现方式通过硬件中断来支持线程的切换， 进而能安全的保存运行上下文。在 Go 运行时实现抢占式调度同样也可以使用类似的方式，通过 向线程发送系统信号的方式来中断 M 的执行，进而达到抢占的目的。 但与操作系统的不同之处在于，由于运行时诸多机制的存在（例如垃圾回收器），还必须能够在 Goroutine 被停止时，保存充足的上下文信息。 这就给中断信号带来了麻烦，如果中断信号恰好发生在一些关键阶段（例如写屏障期间）， 则无法保证程序的正确性。这也就要求我们需要严格考虑触发异步抢占的时机。</p>
 <p>异步抢占式调度的一种方式就与运行时系统监控有关，监控循环会将发生阻塞的 Goroutine 抢占， 解绑 P 与 M，从而让其他的线程能够获得 P 继续执行其他的 Goroutine。 这得益于 sysmon 中调用的 retake 方法。这个方法处理了两种抢占情况， 一是抢占阻塞在系统调用上的 P，二是抢占运行时间过长的 G。 其中抢占运行时间过长的 G 这一方式还会出现在垃圾回收需要进入 STW 时。</p>
+<h4 id="协作式抢占调度">协作式抢占调度</h4>
 <p>协作式抢占调度的工作原理：</p>
 <ol>
 <li>编译器会在调用函数前插入 runtime.morestack；</li>
@@ -10506,7 +10506,7 @@ golang-goroutine-state-transition</li>
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><p>Go 语言在 1.14 版本中实现了非协作的抢占式调度，目前的抢占式调度也只会在垃圾回收扫描任务时触发，我们可以梳理一下抢占式调度过程：</p>
+</div><p>Go 语言在 1.14 版本中实现了非协作的抢占式调度，在unix和其他部分环境下可以使用.我们可以梳理一下抢占式调度过程：</p>
 <ol>
 <li>程序启动时，在 runtime.sighandler 函数中注册 SIGURG 信号的处理函数 runtime.doSigPreempt；</li>
 <li>在触发垃圾回收的栈扫描时会调用 runtime.suspendG 挂起 Goroutine，该函数会执行下面的逻辑：
@@ -10523,14 +10523,6 @@ golang-goroutine-state-transition</li>
 <li>runtime.asyncPreempt2 会调用 runtime.preemptPark；</li>
 <li>runtime.preemptPark 会修改当前 Goroutine 的状态到_Gpreempted 并调用 runtime.schedule 让当前函数陷入休眠并让出线程，调度器会选择其它的 Goroutine 继续执行；</li>
 </ol>
-<p>上述 9 个步骤展示了基于信号的抢占式调度的执行过程。除了分析抢占的过程之外，我们还需要讨论一下抢占信号的选择，提案根据以下的四个原因选择 SIGURG 作为触发异步抢占的信号；</p>
-<ol>
-<li>该信号需要被调试器透传；</li>
-<li>该信号不会被内部的 libc 库使用并拦截；</li>
-<li>该信号可以随意出现并且不触发任何后果；</li>
-<li>我们需要处理多个平台上的不同信号；</li>
-</ol>
-<p>STW 和栈扫描是一个可以抢占的安全点（Safe-points），所以 Go 语言会在这里先加入抢占功能。基于信号的抢占式调度只解决了垃圾回收和栈扫描时存在的问题，它到目前为止没有解决全部问题，但是这种真抢占式调度时调度器走向完备的开始，相信在未来我们可以会更多的地方触发抢占。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -10553,9 +10545,13 @@ golang-goroutine-state-transition</li>
 </span><span class="lnt">18
 </span><span class="lnt">19
 </span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Tell the goroutine running on processor P to stop.
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// unix环境下为true
+</span><span class="c1"></span><span class="kd">const</span> <span class="nx">preemptMSupported</span> <span class="p">=</span> <span class="kc">true</span>
+<span class="c1">// Tell the goroutine running on processor P to stop.
 </span><span class="c1">// This function is purely best-effort. It can incorrectly fail to inform the
 </span><span class="c1">// goroutine. It can send inform the wrong goroutine. Even if it informs the
 </span><span class="c1">// correct goroutine, that goroutine might ignore the request if it is
@@ -10578,6 +10574,13 @@ golang-goroutine-state-transition</li>
 </code></pre></td></tr></table>
 </div>
 </div><h5 id="sigurg">SIGURG</h5>
+<p>除了分析抢占的过程之外，我们还需要讨论一下抢占信号的选择，提案根据以下的四个原因选择 SIGURG 作为触发异步抢占的信号；</p>
+<ol>
+<li>该信号需要被调试器透传；</li>
+<li>该信号不会被内部的 libc 库使用并拦截；</li>
+<li>该信号可以随意出现并且不触发任何后果；</li>
+<li>我们需要处理多个平台上的不同信号；</li>
+</ol>
 <p>preemptM 完成了信号的发送，其实现也非常直接，直接向需要进行抢占的 M 发送 SIGURG 信号 即可。但是真正的重要的问题是，为什么是 SIGURG 信号而不是其他的信号？如何才能保证该信号 不与用户态产生的信号产生冲突？这里面有几个原因：</p>
 <ol>
 <li>默认情况下，SIGURG 已经用于调试器传递信号。</li>
@@ -10585,6 +10588,7 @@ golang-goroutine-state-transition</li>
 <li>需要处理没有实时信号的平台（例如 macOS）</li>
 </ol>
 <p>考虑以上的观点，SIGURG 其实是一个很好的、满足所有这些条件、且极不可能因被用户态代码 进行使用的一种信号。</p>
+<h5 id="preemptm">preemptM</h5>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -10599,6 +10603,32 @@ golang-goroutine-state-transition</li>
 </span><span class="lnt">10
 </span><span class="lnt">11
 </span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
 </span></code></pre></td>
 <td class="lntd">
 <pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="nx">sigPreempt</span> <span class="p">=</span> <span class="nx">_SIGURG</span>
@@ -10606,9 +10636,35 @@ golang-goroutine-state-transition</li>
 <span class="c1">// preemptM 向 mp 发送抢占请求。该请求可以异步处理，也可以与对 M 的其他请求合并。
 </span><span class="c1">// 接收到该请求后，如果正在运行的 G 或 P 被标记为抢占，并且 Goroutine 处于异步安全点，
 </span><span class="c1">// 它将抢占 Goroutine。在处理抢占请求后，它始终以原子方式递增 mp.preemptGen。
+</span><span class="c1">// preemptM sends a preemption request to mp. This request may be
+</span><span class="c1">// handled asynchronously and may be coalesced with other requests to
+</span><span class="c1">// the M. When the request is received, if the running G or P are
+</span><span class="c1">// marked for preemption and the goroutine is at an asynchronous
+</span><span class="c1">// safe-point, it will preempt the goroutine. It always atomically
+</span><span class="c1">// increments mp.preemptGen after handling a preemption request.
 </span><span class="c1"></span><span class="kd">func</span> <span class="nf">preemptM</span><span class="p">(</span><span class="nx">mp</span> <span class="o">*</span><span class="nx">m</span><span class="p">)</span> <span class="p">{</span>
-	<span class="o">...</span>
-	<span class="nf">signalM</span><span class="p">(</span><span class="nx">mp</span><span class="p">,</span> <span class="nx">sigPreempt</span><span class="p">)</span>
+	<span class="c1">// On Darwin, don&#39;t try to preempt threads during exec.
+</span><span class="c1"></span>	<span class="c1">// Issue #41702.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">GOOS</span> <span class="o">==</span> <span class="s">&#34;darwin&#34;</span> <span class="o">||</span> <span class="nx">GOOS</span> <span class="o">==</span> <span class="s">&#34;ios&#34;</span> <span class="p">{</span>
+		<span class="nx">execLock</span><span class="p">.</span><span class="nf">rlock</span><span class="p">()</span>
+	<span class="p">}</span>
+
+	<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">mp</span><span class="p">.</span><span class="nx">signalPending</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">GOOS</span> <span class="o">==</span> <span class="s">&#34;darwin&#34;</span> <span class="o">||</span> <span class="nx">GOOS</span> <span class="o">==</span> <span class="s">&#34;ios&#34;</span> <span class="p">{</span>
+			<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pendingPreemptSignals</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+		<span class="p">}</span>
+
+		<span class="c1">// If multiple threads are preempting the same M, it may send many
+</span><span class="c1"></span>		<span class="c1">// signals to the same M such that it hardly make progress, causing
+</span><span class="c1"></span>		<span class="c1">// live-lock problem. Apparently this could happen on darwin. See
+</span><span class="c1"></span>		<span class="c1">// issue #37741.
+</span><span class="c1"></span>		<span class="c1">// Only send a signal if there isn&#39;t already one pending.
+</span><span class="c1"></span>		<span class="nf">signalM</span><span class="p">(</span><span class="nx">mp</span><span class="p">,</span> <span class="nx">sigPreempt</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="k">if</span> <span class="nx">GOOS</span> <span class="o">==</span> <span class="s">&#34;darwin&#34;</span> <span class="o">||</span> <span class="nx">GOOS</span> <span class="o">==</span> <span class="s">&#34;ios&#34;</span> <span class="p">{</span>
+		<span class="nx">execLock</span><span class="p">.</span><span class="nf">runlock</span><span class="p">()</span>
+	<span class="p">}</span>
 <span class="p">}</span>
 <span class="kd">func</span> <span class="nf">signalM</span><span class="p">(</span><span class="nx">mp</span> <span class="o">*</span><span class="nx">m</span><span class="p">,</span> <span class="nx">sig</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
 	<span class="nf">tgkill</span><span class="p">(</span><span class="nf">getpid</span><span class="p">(),</span> <span class="nb">int</span><span class="p">(</span><span class="nx">mp</span><span class="p">.</span><span class="nx">procid</span><span class="p">),</span> <span class="nx">sig</span><span class="p">)</span>
