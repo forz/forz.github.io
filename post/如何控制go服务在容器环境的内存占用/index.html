@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>如何控制Go服务在容器环境的内存占用 - Forz Blog</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<meta name="author" content="Forz" /><meta name="description" content="现象 为什么个别 Go 业务服务，Memory 总是提示这么高，经常达到容器限额，以至于被动 OOM Kill，是不是有什么安全隐患？ 发现个别业务服务内存占用" /><meta name="keywords" content="Hugo, theme, even" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="/post/%E5%A6%82%E4%BD%95%E6%8E%A7%E5%88%B6go%E6%9C%8D%E5%8A%A1%E5%9C%A8%E5%AE%B9%E5%99%A8%E7%8E%AF%E5%A2%83%E7%9A%84%E5%86%85%E5%AD%98%E5%8D%A0%E7%94%A8/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.98f8e47918247c097fa26317cbb567fe9f05503485bf08d8547f5579543303b1.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="如何控制Go服务在容器环境的内存占用" />
+<meta property="og:description" content="现象 为什么个别 Go 业务服务，Memory 总是提示这么高，经常达到容器限额，以至于被动 OOM Kill，是不是有什么安全隐患？ 发现个别业务服务内存占用" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/post/%E5%A6%82%E4%BD%95%E6%8E%A7%E5%88%B6go%E6%9C%8D%E5%8A%A1%E5%9C%A8%E5%AE%B9%E5%99%A8%E7%8E%AF%E5%A2%83%E7%9A%84%E5%86%85%E5%AD%98%E5%8D%A0%E7%94%A8/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-06-07T18:49:05+00:00" />
+<meta property="article:modified_time" content="2021-06-07T18:49:05+00:00" />
+
+<meta itemprop="name" content="如何控制Go服务在容器环境的内存占用">
+<meta itemprop="description" content="现象 为什么个别 Go 业务服务，Memory 总是提示这么高，经常达到容器限额，以至于被动 OOM Kill，是不是有什么安全隐患？ 发现个别业务服务内存占用"><meta itemprop="datePublished" content="2021-06-07T18:49:05+00:00" />
+<meta itemprop="dateModified" content="2021-06-07T18:49:05+00:00" />
+<meta itemprop="wordCount" content="2995">
+<meta itemprop="keywords" content="Go," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="如何控制Go服务在容器环境的内存占用"/>
+<meta name="twitter:description" content="现象 为什么个别 Go 业务服务，Memory 总是提示这么高，经常达到容器限额，以至于被动 OOM Kill，是不是有什么安全隐患？ 发现个别业务服务内存占用"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.css" />
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">Forz Blog</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">Forz Blog</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+      <a class="menu-item-link" href="/">Home</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/post/">Archives</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/tags/">Tags</a>
+    </li><li class="menu-item">
+      <a class="menu-item-link" href="/categories/">Categories</a>
+    </li>
+  </ul>
+</nav><div class="docsearch-input__container">
+  <input type="search" class="docsearch-input" placeholder="Search" />
+</div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">如何控制Go服务在容器环境的内存占用</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-06-07 </span>
+        <div class="post-category">
+            <a href="/categories/go/"> Go </a>
+            </div>
+          <span class="more-meta"> 约 2995 字 </span>
+          <span class="more-meta"> 预计阅读 6 分钟 </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">文章目录</h2>
+  <div class="post-toc-content always-active">
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#现象">现象</a></li>
+    <li><a href="#容器的内存指标">容器的内存指标</a></li>
+    <li><a href="#cache过高">Cache过高</a>
+      <ul>
+        <li><a href="#手动清理cache">手动清理Cache</a></li>
+        <li><a href="#linux内核参数调整">Linux内核参数调整</a></li>
+      </ul>
+    </li>
+    <li><a href="#rss过高">RSS过高</a>
+      <ul>
+        <li><a href="#madvise-策略变更">madvise 策略变更</a></li>
+      </ul>
+    </li>
+    <li><a href="#参考">参考</a></li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="现象">现象</h2>
+<p>为什么个别 Go 业务服务，Memory 总是提示这么高，经常达到容器限额，以至于被动 OOM Kill，是不是有什么安全隐患？</p>
+<p>发现个别业务服务内存占用挺高，触发告警，且通过 Grafana 发现在凌晨（没有什么流量）的情况下，内存占用量依然拉平，没有打算下降的样子，高峰更是不得了，像是个内存炸弹：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210607185337.png" alt=""></p>
+<p>并且我所观测的这个服务，早年还只是 100MB。现在随着业务迭代和上升，目前已经稳步 4GB，容器限额 Limits 纷纷给它开道，但我想总不能是无休止的增加资源吧，这是一个大问题。</p>
+<p>有的业务服务，业务量小，自然也就没有调整容器限额，因此得不到内存资源，又超过额度，就会进入疯狂的重启怪圈：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210607185352.png" alt=""></p>
+<p>重启将近 300 次，非常不正常了，更不用提所接受到的告警通知。</p>
+<h2 id="容器的内存指标">容器的内存指标</h2>
+<p>容器 OOM 的判别标准是 container_memory_working_set_bytes（当前工作集）。</p>
+<p>而 container_memory_working_set_bytes 是由 cadvisor 提供的，对应下述指标：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210608112917.png" alt=""></p>
+<p>从结论上来讲，Memory 换算过来是 4GB+，石锤。接下来的问题就是 Memory 是怎么计算出来的呢，显然和 RSS 不对标。</p>
+<p>一般系统内存过高的情况下，可以通过 free -m 查看当前系统的内存使用情况：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210608113952.png" alt=""></p>
+<p>container_memory_working_set_bytes 指标的组成实际上是 RSS + Cache。</p>
+<h2 id="cache过高">Cache过高</h2>
+<p>Cache 高的情况，常见于进程有大量文件 IO，占用 Cache 可能就会比较高，猜测也与 Go 版本、Linux 内核版本的 Cache 释放、回收方式有较大关系。</p>
+<p>而各业务模块常见功能，如：</p>
+<ul>
+<li>批量图片解压缩。</li>
+<li>批量二维码生成。</li>
+<li>批量上传渲染后图片。</li>
+<li>批量 PDF 生成。</li>
+<li>…</li>
+</ul>
+<p>只要是涉及有大量文件 IO 的服务，基本上是这个问题的老常客了，写这类服务基本写一个中一个，因为这是一个混合问题，像其它单纯操作为主的业务服务就很 “正常”，不会出现内存居高不下。</p>
+<p>我们肯定是希望知道 Cache 中有什么，为什么占用了那么大的空间，此时我们可以通过 Linux pmap 来查看该容器进程的内存映射情况：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210608113518.png" alt=""></p>
+<p>在上图中，我们发现了大量的 mapping 为 anon 的内存映射，最终 totals 确实达到了容器 Memory 相当的量，那么 anon 又是什么呢。实质上 anon 行表示在磁盘上没有对应的文件，也就是没有实际存在的载体，是 anonymous。</p>
+<p>既然存在如此多的 anon，结合先前的考虑，我们知道出现这种情况的服务都是文件处理型服务，包含大量的批量生成图片、生成 PDF 等资源消耗型的任务，也就是会瞬间申请大量的内存，使得系统的空闲内存触及全局最低水位线（global wmark_min），而在触及全局最低水位线后，会尝试进行回收，实在不行才会触发 cgroup OOM 的行为。</p>
+<p>那么更进一步思考的是两个问题，一个是 cgroup 达到 Limits 前的尝试释放仍然不足以支撑所需申请的连续内存段，而另外一个问题就是为什么 Cache 并没有释放：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210608121829.png" alt=""></p>
+<p>通过上图，可以肯定该服务在凌晨 00：00-06：00 是没有什么流量的，但是 container_memory_working_set_bytes 指标依旧稳定不变，排除 RSS 的原因，那配合指标的查看基本确定是该 cgroup 的 Cache 没有释放。</p>
+<p>而 Cache 的占用高，主要考虑是由于其频繁操作文件导致，因为在 Linux 中，在第一次读取文件时会将一份放到系统 Cache，另外一份则放入进程内存中使用。关键点在于当进程运行完毕关闭后，系统 Cache 是不会马上回收的，需要经过系统的内存管理后再适时释放。</p>
+<p>cache是操作系统内核的机制，同容器/业务/时间点无关，并不会说到了凌晨自动释放。</p>
+<p>另外，如果压力降下来之后，只要系统未处于内存紧缺的状态，这部分cache是不会释放的。类似于拿内存换文件的io性能。毕竟【空闲】的内存放在那里，不用就浪费了。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210608175244.png" alt=""></p>
+<p>可以看到，节点上真正意义上free的内存只有263M，但available的内存有13G.</p>
+<p>available的内存包含了这里的free和部分buff/cache，当需要时，是可以随时用的.</p>
+<h3 id="手动清理cache">手动清理Cache</h3>
+<p>在发现是系统内存占用高后，就会有读者会提到，为什么不 “手动清理 Cache”，因为 Cache 高的话，可以通过 drop_caches 的方式来清理：</p>
+<p>1.清理 page cache：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">echo</span> <span class="m">1</span> <span class="o">&gt;</span> <span class="o">/</span><span class="n">proc</span><span class="o">/</span><span class="n">sys</span><span class="o">/</span><span class="n">vm</span><span class="o">/</span><span class="n">drop_caches</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>2.清理 dentries 和 inodes：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">echo</span> <span class="m">2</span> <span class="o">&gt;</span> <span class="o">/</span><span class="n">proc</span><span class="o">/</span><span class="n">sys</span><span class="o">/</span><span class="n">vm</span><span class="o">/</span><span class="n">drop_caches</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>3.清理 page cache、dentries 和 inodes：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">echo</span> <span class="m">3</span> <span class="o">&gt;</span> <span class="o">/</span><span class="n">proc</span><span class="o">/</span><span class="n">sys</span><span class="o">/</span><span class="n">vm</span><span class="o">/</span><span class="n">drop_caches</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>但新问题又出现了，因为我们的命题是在容器中，在 Kubernetes 中，若执行 drop_caches 相关命令，将会对 Node 节点上的所有其他应用程序产生影响，尤其是那些占用大量 IO 并由于缓冲区高速缓存而获得更好性能的应用程序，可能会产生 “负面” 后果。</p>
+<p>我想这并不是一个好办法。</p>
+<h3 id="linux内核参数调整">Linux内核参数调整</h3>
+<p>memcg 是 Linux 内核中管理 cgroup 内存的模块，但实际上在 Linux 3.10.x 的低内核版本中存在不少实现上的 BUG，其中最具代表性的是 memory cgroup 中 kmem accounting 相关的问题（在低版本中属于 alpha 特性）：</p>
+<ul>
+<li>
+<p>slab 泄露：具体可详见该文章 SLUB: Unable to allocate memory on node -1 中的介绍和说明。</p>
+</li>
+<li>
+<p>memory cgroup 泄露：在删除容器后没有回收完全，而 Linux 内核对 memory cgroup 的总数限制是 65535 个，若频繁创建删除开启了 kmem 的 cgroup，就会导致无法再创建新的 memory cgroup。</p>
+</li>
+</ul>
+<p>当然，为什么出现问题后绝大多数是由 Kubernetes、Docker 的相关使用者发现的呢（从 issues 时间上来看），这与云原生的兴起，这类问题与内部容器化的机制相互影响，最终开发者 “发现” 了这类应用频繁出现 OOM，于是开始进行排查。</p>
+<h4 id="调整内核参数">调整内核参数</h4>
+<p>关闭 kmem accounting：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">cgroup.memory</span><span class="o">=</span><span class="n">nokmem</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>也可以通过 kubelet 的 nokmem Build Tags 来编译解决：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">kubelet</span> <span class="n">GOFLAGS</span><span class="o">=</span><span class="s">&#34;-tags=nokmem&#34;</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>但需要注意，kubelet 版本需要在 v1.14 及以上。</p>
+<h4 id="升级内核版本">升级内核版本</h4>
+<p>升级 Linux 内核至 kernel-3.10.0-1075.el7 及以上就可以修复这个问题，详细可见 slab leak causing a crash when using kmem control group，其在发行版中 CentOS 7.8 已经发布。</p>
+<h2 id="rss过高">RSS过高</h2>
+<p>RSS过高原因有服务创建大量对象,内存泄露,goroutine泄露等,此处不再赘述,主要讲容器环境对服务的影响.</p>
+<h3 id="madvise-策略变更">madvise 策略变更</h3>
+<p>在 Linux 系统中，在 Go Runtime 中通过系统调用 <code>madvise(addr, length, advise)</code> 方法，能够告诉内核如何处理从 addr 开始的 length 字节。</p>
+<p>重点之一就是 ”如何处理“，在 Linux 下 Go 语言中目前支持两种策略，分别是：</p>
+<ul>
+<li>MADV_FREE：内核会在进程的页表中将这些页标记为“未分配”，从而进程的 RSS 就会变小。OS 后续可以将对应的物理页分配给其他进程。</li>
+<li>MADV_DONTNEED：内核只会在页表中将这些进程页面标记为可回收，在需要的时候才回收这些页面。</li>
+</ul>
+<p>Go 语言官方恰好就在 2019 年的 Go1.12 做了如下调整。</p>
+<p>Go1.12 以前,Go Runtime 在 Linux 上默认使用的是 MADV_DONTNEED 策略。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">    <span class="c1">// 没有任何奇奇怪怪的判断
+</span><span class="c1"></span>    <span class="nf">madvise</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">_MADV_DONTNEED</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>从整体效果来看，进程 RSS 可以下降的比较快，但从性能效率上来看差点。</p>
+<p>Go1.12-Go1.15,当前 Linux 内核版本 &gt;=4.5 时，Go Runtime 在 Linux 上默认使用了性能更为高效的 MADV_FREE 策略。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">    <span class="kd">var</span> <span class="nx">advise</span> <span class="kt">uint32</span>
+    <span class="k">if</span> <span class="nx">debug</span><span class="p">.</span><span class="nx">madvdontneed</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nx">advise</span> <span class="p">=</span> <span class="nx">_MADV_DONTNEED</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="nx">advise</span> <span class="p">=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">adviseUnused</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="nx">errno</span> <span class="o">:=</span> <span class="nf">madvise</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">n</span><span class="p">,</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">advise</span><span class="p">));</span> <span class="nx">advise</span> <span class="o">==</span> <span class="nx">_MADV_FREE</span> <span class="o">&amp;&amp;</span> <span class="nx">errno</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="c1">// MADV_FREE was added in Linux 4.5. Fall back to MADV_DONTNEED if it is
+</span><span class="c1"></span>        <span class="c1">// not supported.
+</span><span class="c1"></span>        <span class="nx">atomic</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">adviseUnused</span><span class="p">,</span> <span class="nx">_MADV_DONTNEED</span><span class="p">)</span>
+        <span class="nf">madvise</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">_MADV_DONTNEED</span><span class="p">)</span>
+    <span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>从整体效果来看，进程RSS 不会立刻下降，要等到系统有内存压力了才会释放占用，RSS 才会下降。</p>
+<p>故事往往不是那么的美好，显然在 Go1.12 起针对 madvise 的 MADV_FREE 策略的调整非常 “片面”。</p>
+<p>结合社区里所遇到的案例可得知，该次调整带来了许多问题：</p>
+<ul>
+<li>引发用户体验的问题：Go issues 上总是出现以为内存泄露，但其实只是未满足条件，内存没有马上释放的案例。</li>
+<li>混淆统计信息和监控工具的情况：在 Grafana 等监控上，发现容器进程内存较高，释放很慢，告警了，很慌。</li>
+<li>导致与内存使用有关联的个别管理系统集成不良：例如 Kubernetes HPA ，或者自定义了扩缩容策略这类模式，难以评估。</li>
+<li>挤压同主机上的其他应用资源：并不是所有的 Go 程序都一定独立跑在单一主机中，自然就会导致同一台主机上的其他应用受到挤压，这是难以评估的。</li>
+</ul>
+<p>Go1.16 修改内容如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">parsedebugvars</span><span class="p">()</span> <span class="p">{</span>
+    <span class="c1">// defaults
+</span><span class="c1"></span>    <span class="nx">debug</span><span class="p">.</span><span class="nx">cgocheck</span> <span class="p">=</span> <span class="mi">1</span>
+    <span class="nx">debug</span><span class="p">.</span><span class="nx">invalidptr</span> <span class="p">=</span> <span class="mi">1</span>
+    <span class="k">if</span> <span class="nx">GOOS</span> <span class="o">==</span> <span class="s">&#34;linux&#34;</span> <span class="p">{</span>
+        <span class="nx">debug</span><span class="p">.</span><span class="nx">madvdontneed</span> <span class="p">=</span> <span class="mi">1</span>
+    <span class="p">}</span>
+  <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>直接指定回了 <code>debug.madvdontneed = 1</code>，简单粗暴。</p>
+<h2 id="参考">参考</h2>
+<p><a href="https://eddycjy.com/posts/why-container-memory-exceed/">为什么容器内存占用居高不下，频频 OOM</a></p>
+<p><a href="https://eddycjy.com/posts/why-container-memory-exceed2/">为什么容器内存占用居高不下，频频 OOM（续）</a></p>
+<p><a href="https://eddycjy.com/posts/go/talk/2019-09-24-why-vsz-large/">Go 应用内存占用太多，让排查？（VSZ篇）</a></p>
+
+    </div>
+
+    <div class="post-copyright">
+  <p class="copyright-item">
+    <span class="item-title">文章作者</span>
+    <span class="item-content">Forz</span>
+  </p>
+  <p class="copyright-item">
+    <span class="item-title">上次更新</span>
+    <span class="item-content">
+        2021-06-07
+        
+    </span>
+  </p>
+  
+  
+</div>
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/go/">Go</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/go%E5%BA%94%E7%94%A8%E4%B8%BA%E4%BB%80%E4%B9%88%E8%99%9A%E6%8B%9F%E5%86%85%E5%AD%98%E5%8D%A0%E7%94%A8%E8%BF%87%E9%AB%98/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Go应用为什么虚拟内存占用过高</span>
+            <span class="prev-text nav-mobile">上一篇</span>
+          </a>
+        <a class="next" href="/post/k8s%E7%9A%84%E6%97%A5%E5%BF%97%E9%87%87%E9%9B%86%E5%AE%9E%E8%B7%B5/">
+            <span class="next-text nav-default">K8s的日志采集实践</span>
+            <span class="next-text nav-mobile">下一篇</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+    <script src="https://utteranc.es/client.js"
+            repo="forz/forzblog.talk"
+            issue-term="pathname"
+            theme="github-light"
+            crossorigin="anonymous"
+            async>
+    </script>
+    <noscript>Please enable JavaScript to view the <a href="https://github.com/utterance">comments powered by utterances.</a></noscript>
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    由 <a class="hexo-link" href="https://gohugo.io">Hugo</a> 强力驱动
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    主题 - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2017 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span>Forz</span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/docsearch.js@2/dist/cdn/docsearch.min.js"></script>
+<script>
+docsearch({
+    apiKey: "b4b9da2eba53aa6dabe4b8ac9e8676e1",
+    indexName: "forz.forzvina.com",
+    appId: "IAR2EF5L65",
+    inputSelector: '.docsearch-input',
+    debug: false,
+});
+</script>
+</body>
+</html>

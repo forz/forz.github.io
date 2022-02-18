@@ -49,7 +49,7 @@
 <meta itemprop="name" content="Go的垃圾回收源码剖析">
 <meta itemprop="description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage): 有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引用得到)的对象，"><meta itemprop="datePublished" content="2020-11-30T14:52:24+00:00" />
 <meta itemprop="dateModified" content="2020-11-30T14:52:24+00:00" />
-<meta itemprop="wordCount" content="46842">
+<meta itemprop="wordCount" content="46839">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的垃圾回收源码剖析"/>
 <meta name="twitter:description" content="垃圾分类 垃圾分为以下两类: 语义垃圾(semantic garbage): 有的被称作内存泄露 语义垃圾指的是从语法上可达(可以通过局部、全局变量引用得到)的对象，"/>
@@ -132,7 +132,7 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 46842 字 </span>
+          <span class="more-meta"> 约 46839 字 </span>
           <span class="more-meta"> 预计阅读 94 分钟 </span>
         
       </div>
@@ -161,16 +161,56 @@
       </ul>
     </li>
     <li><a href="#调步算法">调步算法</a></li>
-    <li><a href="#源码分析">源码分析</a>
+    <li><a href="#流程图">流程图</a></li>
+    <li><a href="#全局变量">全局变量</a></li>
+    <li><a href="#根对象">根对象</a></li>
+    <li><a href="#触发时机">触发时机</a>
       <ul>
-        <li><a href="#流程图">流程图</a></li>
-        <li><a href="#全局变量">全局变量</a></li>
-        <li><a href="#根对象">根对象</a></li>
-        <li><a href="#触发时机">触发时机</a></li>
-        <li><a href="#垃圾收集启动gcstart">垃圾收集启动:gcStart</a></li>
-        <li><a href="#并发扫描与标记辅助">并发扫描与标记辅助</a></li>
-        <li><a href="#标记终止-gcmarkdone">标记终止: gcMarkDone</a></li>
-        <li><a href="#内存清理">内存清理</a></li>
+        <li><a href="#gctrigger">gcTrigger</a></li>
+        <li><a href="#后台触发">后台触发</a></li>
+        <li><a href="#手动触发">手动触发</a></li>
+        <li><a href="#申请内存">申请内存</a></li>
+      </ul>
+    </li>
+    <li><a href="#垃圾收集启动gcstart">垃圾收集启动:gcStart</a>
+      <ul>
+        <li><a href="#gcbgmarkstartworkers">gcBgMarkStartWorkers</a></li>
+        <li><a href="#gcresetmarkstate">gcResetMarkState</a></li>
+        <li><a href="#stoptheworldwithsema">stopTheWorldWithSema</a></li>
+        <li><a href="#finishsweep_m">finishsweep_m</a></li>
+        <li><a href="#clearpools">clearpools</a></li>
+        <li><a href="#startcycle">startCycle</a></li>
+        <li><a href="#setgcphase">setGCPhase</a></li>
+        <li><a href="#gcbgmarkprepare">gcBgMarkPrepare</a></li>
+        <li><a href="#gcmarkrootprepare">gcMarkRootPrepare</a></li>
+        <li><a href="#gcmarktinyallocs">gcMarkTinyAllocs</a></li>
+        <li><a href="#starttheworldwithsema">startTheWorldWithSema</a></li>
+      </ul>
+    </li>
+    <li><a href="#并发扫描与标记辅助">并发扫描与标记辅助</a>
+      <ul>
+        <li><a href="#findrunnablegcworker">findRunnableGCWorker</a></li>
+        <li><a href="#findrunnable">findrunnable</a></li>
+        <li><a href="#gcbgmarkworker">gcBgMarkWorker</a></li>
+        <li><a href="#gcdrain">gcDrain</a></li>
+        <li><a href="#scanobject">scanobject</a></li>
+        <li><a href="#gcassistalloc">gcAssistAlloc</a></li>
+      </ul>
+    </li>
+    <li><a href="#标记终止-gcmarkdone">标记终止: gcMarkDone</a>
+      <ul>
+        <li><a href="#gcmarktermination">gcMarkTermination</a></li>
+        <li><a href="#gcmark">gcMark</a></li>
+        <li><a href="#gcsettriggerratio">gcSetTriggerRatio</a></li>
+      </ul>
+    </li>
+    <li><a href="#内存清理">内存清理</a>
+      <ul>
+        <li><a href="#gcsweep">gcSweep</a></li>
+        <li><a href="#bgsweep">bgsweep</a></li>
+        <li><a href="#sweepone">sweepone</a></li>
+        <li><a href="#sweep">sweep</a></li>
+        <li><a href="#freesomewbufs">freeSomeWbufs</a></li>
       </ul>
     </li>
     <li><a href="#参考">参考</a></li>
@@ -557,8 +597,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>意思是分配的大小乘以系数assistWorkPerByte, assistWorkPerByte的计算在函数revise中.</p>
-<h2 id="源码分析">源码分析</h2>
-<h3 id="流程图">流程图</h3>
+<h2 id="流程图">流程图</h2>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201215182726.png" alt=""></p>
 <p>垃圾回收代码流程</p>
 <ul>
@@ -567,7 +606,7 @@
 <li>gcBgMarkWorker -&gt; gcDrain -&gt; scanobject -&gt; greyobject(set mark bit and put to gcw)</li>
 <li>在 gcBgMarkWorker 中调用 gcMarkDone 排空各种 wbBuf 后，使用分布式 termination 检查算法，进入 gcMarkTermination -&gt; gcSweep 唤醒后台沉睡的 sweepg 和 scvg -&gt; sweep -&gt; wake bgsweep &amp;&amp; bgscavenge</li>
 </ul>
-<h3 id="全局变量">全局变量</h3>
+<h2 id="全局变量">全局变量</h2>
 <p>在垃圾收集中有一些比较重要的全局变量，在分析其过程之前，我们会先逐一介绍这些重要的变量，这些变量在垃圾收集的各个阶段中会反复出现，所以理解他们的功能是非常重要的，我们先介绍一些比较简单的变量：</p>
 <ul>
 <li>runtime.gcphase 是垃圾收集器当前处于的阶段，可能处于 _GCoff、_GCmark 和 _GCmarktermination，Goroutine 在读取或者修改该阶段时需要保证原子性；</li>
@@ -813,7 +852,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>该结构体中包含大量垃圾收集的相关字段，例如：表示完成的垃圾收集循环的次数、当前循环时间和 CPU 的利用率、垃圾收集的模式等等，我们会在后面的小节中见到该结构体中的更多的字段。</p>
-<h3 id="根对象">根对象</h3>
+<h2 id="根对象">根对象</h2>
 <p>在GC的标记阶段首先需要标记的就是&quot;根对象&quot;, 从根对象开始可到达的所有对象都会被认为是存活的.</p>
 <p>根对象包含了全局变量, 各个G的栈上的变量等, GC会先扫描根对象然后再扫描根对象可到达的所有对象.</p>
 <ul>
@@ -828,7 +867,8 @@
 </ul>
 <p>标记阶段(Mark)会做其中的&quot;Fixed Roots&quot;, &ldquo;Data Roots&rdquo;, &ldquo;BSS Roots&rdquo;, &ldquo;Span Roots&rdquo;, &ldquo;Stack Roots&rdquo;.</p>
 <p>完成标记阶段(Mark Termination)会做其中的&quot;Fixed Roots&quot;, &ldquo;Flush Cache Roots&rdquo;.</p>
-<h3 id="触发时机">触发时机</h3>
+<h2 id="触发时机">触发时机</h2>
+<h3 id="gctrigger">gcTrigger</h3>
 <p>运行时会通过如下所示的 runtime.gcTrigger.test 方法决定是否需要触发垃圾收集，当满足触发垃圾收集的基本条件时 — 允许垃圾收集、程序没有崩溃并且没有处于垃圾收集循环，该方法会根据三种不同的方式触发进行不同的检查：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -959,7 +999,7 @@
 <li>gc_trigger — 在标记终止阶段调用 runtime.gcSetTriggerRatio 更新触发下一次垃圾收集的堆大小；</li>
 </ol>
 <p>runtime.gcController 会在每个循环结束后计算触发比例并通过 runtime.gcSetTriggerRatio 设置 gc_trigger，它能够决定触发垃圾收集的时间以及用户程序和后台处理的标记任务的多少，利用反馈控制的算法根据堆的增长情况和垃圾收集 CPU 利用率确定触发垃圾收集的时机。</p>
-<h4 id="后台触发">后台触发</h4>
+<h3 id="后台触发">后台触发</h3>
 <p>运行时会在应用程序启动时在后台开启一个用于强制触发垃圾收集的 Goroutine，该 Goroutine 的职责非常简单 — 调用 runtime.gcStart 方法尝试启动新一轮的垃圾收集：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1063,7 +1103,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>系统监控在每个循环中都会主动构建一个 runtime.gcTrigger 并检查垃圾收集的触发条件是否满足，如果满足条件，系统监控会将 runtime.forcegc 状态中持有的 Goroutine 加入全局队列等待调度器的调度。</p>
-<h4 id="手动触发">手动触发</h4>
+<h3 id="手动触发">手动触发</h3>
 <p>用户程序会通过 runtime.GC 函数在程序运行期间主动通知运行时执行，该方法在调用时会阻塞调用方直到当前垃圾收集循环完成，在垃圾收集期间也可能会通过 STW 暂停整个程序：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1232,7 +1272,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>手动触发垃圾收集的过程不是特别常见，一般只会在运行时的测试代码中才会出现，不过如果我们认为触发主动垃圾收集是有必要的，我们也可以直接调用该方法，但是作者并不认为这是一种推荐的做法。</p>
-<h4 id="申请内存">申请内存</h4>
+<h3 id="申请内存">申请内存</h3>
 <p>最后一个可能会触发垃圾收集的就是 runtime.mallocgc 函数了，我们在内存分配器中曾经介绍过运行时会将堆上的对象按大小分成微对象、小对象和大对象三类，这三类对象的创建都可能会触发新的垃圾收集循环：</p>
 <ol>
 <li>当前线程的内存管理单元中不存在空闲空间时，创建微对象和小对象需要调用 <code>runtime.mcache.nextFree</code> 方法从中心缓存或者页堆中获取新的管理单元，在这时就可能触发垃圾收集；</li>
@@ -1308,7 +1348,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="垃圾收集启动gcstart">垃圾收集启动:gcStart</h3>
+</div><h2 id="垃圾收集启动gcstart">垃圾收集启动:gcStart</h2>
 <p>垃圾收集在启动过程一定会调用 runtime.gcStart 函数，虽然该函数的实现比较复杂，但是它的主要职责就是修改全局的垃圾收集状态到 _GCmark 并做一些准备工作，我们会分以下几个阶段介绍该函数的实现：</p>
 <ol>
 <li>两次调用 runtime.gcTrigger.test 方法检查是否满足垃圾收集条件；</li>
@@ -1713,7 +1753,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>在分析垃圾收集的启动过程中，我们省略了几个关键的过程，其中包括暂停和恢复应用程序和后台任务的启动，下面将详细分析这几个过程的实现原理。</p>
-<h4 id="gcbgmarkstartworkers">gcBgMarkStartWorkers</h4>
+<h3 id="gcbgmarkstartworkers">gcBgMarkStartWorkers</h3>
 <p>在垃圾收集启动期间，运行时会调用 <code>runtime.gcBgMarkStartWorkers</code> 为全局每个处理器创建用于执行后台标记任务的 Goroutine，这些 Goroutine 都会运行 <code>runtime.gcBgMarkWorker</code>，所有运行 runtime.gcBgMarkWorker 的 Goroutine 在启动后都会陷入休眠等待调度器的唤醒：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1759,7 +1799,7 @@
 </div>
 </div><p>这些 Goroutine 与处理器是一一对应的关系</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201214175849.png" alt=""></p>
-<h4 id="gcresetmarkstate">gcResetMarkState</h4>
+<h3 id="gcresetmarkstate">gcResetMarkState</h3>
 <p>gcResetMarkState函数会重置标记相关的状态:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -1837,7 +1877,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="stoptheworldwithsema">stopTheWorldWithSema</h4>
+</div><h3 id="stoptheworldwithsema">stopTheWorldWithSema</h3>
 <p>函数会停止整个世界, 这个函数必须在g0中运行:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2184,7 +2224,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>当sched.stopwait为0时,会唤醒notetsleep,继续执行下面的操作.</p>
-<h4 id="finishsweep_m">finishsweep_m</h4>
+<h3 id="finishsweep_m">finishsweep_m</h3>
 <p>finishsweep_m函数会清扫上一轮GC未清扫的span, 确保上一轮GC已完成:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2286,7 +2326,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="clearpools">clearpools</h4>
+</div><h3 id="clearpools">clearpools</h3>
 <p>clearpools函数会清理sched.sudogcache和sched.deferpool, 让它们的内存可以被回收:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2362,7 +2402,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="startcycle">startCycle</h4>
+</div><h3 id="startcycle">startCycle</h3>
 <p>用于并发扫描对象的工作协程 Goroutine 总共有三种不同的模式 runtime.gcMarkWorkerMode，这三种不同模式的 Goroutine 在标记对象时使用完全不同的策略，垃圾收集控制器会按照需要执行不同类型的工作协程：</p>
 <ul>
 <li>gcMarkWorkerDedicatedMode — 处理器专门负责标记对象，不会被调度器抢占；</li>
@@ -2530,7 +2570,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="setgcphase">setGCPhase</h4>
+</div><h3 id="setgcphase">setGCPhase</h3>
 <p>setGCPhase函数会修改表示当前GC阶段的全局变量和是否开启写屏障的全局变量:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2661,7 +2701,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>runtime.mallocgc 会在垃圾收集开始后调用该函数，获取对象对应的内存单元以及标记位 runtime.markBits 并调用 runtime.markBits.setMarked 直接将新的对象涂成黑色。</p>
-<h4 id="gcbgmarkprepare">gcBgMarkPrepare</h4>
+<h3 id="gcbgmarkprepare">gcBgMarkPrepare</h3>
 <p>gcBgMarkPrepare函数会重置后台标记任务的计数:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2699,7 +2739,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="gcmarkrootprepare">gcMarkRootPrepare</h4>
+</div><h3 id="gcmarkrootprepare">gcMarkRootPrepare</h3>
 <p>gcMarkRootPrepare函数会计算扫描根对象的任务数量:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2843,7 +2883,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="gcmarktinyallocs">gcMarkTinyAllocs</h4>
+</div><h3 id="gcmarktinyallocs">gcMarkTinyAllocs</h3>
 <p>gcMarkTinyAllocs函数会标记所有tiny alloc等待合并的对象:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2885,7 +2925,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="starttheworldwithsema">startTheWorldWithSema</h4>
+</div><h3 id="starttheworldwithsema">startTheWorldWithSema</h3>
 <p>startTheWorldWithSema函数会重新启动世界:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -3042,7 +3082,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>重启世界后各个M会重新开始调度, 调度时会优先使用findRunnableGCWorker函数查找任务, 之后就有大约25%的P运行后台标记任务.</p>
-<h3 id="并发扫描与标记辅助">并发扫描与标记辅助</h3>
+<h2 id="并发扫描与标记辅助">并发扫描与标记辅助</h2>
 <p>标记对象从哪里来?</p>
 <ul>
 <li>gcMarkWorker</li>
@@ -3103,7 +3143,7 @@
 <p>gcDrain 这个函数就是从队列里不断获取，处理这些对象，最重要的一个就是调用 scanobject 继续扫描对象。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201227003549.png" alt=""></p>
 <p>markroot 从根(栈)扫描，把扫描到的对象投入扫描队列。gcDrain 等函数从里面不断获取，不断处理，并且扫描这些对象，进一步挖掘引用关系，当扫描结束之后，那些没有扫描到的就是垃圾了。</p>
-<h4 id="findrunnablegcworker">findRunnableGCWorker</h4>
+<h3 id="findrunnablegcworker">findRunnableGCWorker</h3>
 <p>调度器在调度循环 runtime.schedule 中可以通过垃圾收集控制器的 findRunnableGCWorker 方法获取并执行用于后台标记的任务。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -3329,7 +3369,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>控制器通过 dedicatedMarkWorkersNeeded 决定专门执行标记任务的 Goroutine 数量并根据执行标记任务的时间和总时间决定是否启动 gcMarkWorkerFractionalMode 模式的 Goroutine.</p>
-<h4 id="findrunnable">findrunnable</h4>
+<h3 id="findrunnable">findrunnable</h3>
 <p>除了这两种控制器要求的工作协程之外，调度器还会在 findrunnable 函数中利用空闲的处理器执行垃圾收集以加速该过程：</p>
 <p>当垃圾收集处于标记阶段并且当前处理器不需要做任何任务时，runtime.findrunnable 函数会在当前处理器上执行该 Goroutine 辅助并发的对象标记：</p>
 <div class="highlight"><div class="chroma">
@@ -3458,7 +3498,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="gcbgmarkworker">gcBgMarkWorker</h4>
+</div><h3 id="gcbgmarkworker">gcBgMarkWorker</h3>
 <p>runtime.gcBgMarkWorker 是后台的标记任务执行的函数，该函数的循环中执行了对内存中对象图的扫描和标记，我们分三个部分介绍该函数的实现原理：</p>
 <ol>
 <li>获取当前处理器以及 Goroutine 打包成 parkInfo 类型的结构体并主动陷入休眠等待唤醒；</li>
@@ -3880,7 +3920,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>runtime.gcDrain 是用于扫描和标记堆内存中对象的核心方法.</p>
-<h4 id="gcdrain">gcDrain</h4>
+<h3 id="gcdrain">gcDrain</h3>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt">  1
@@ -4183,7 +4223,7 @@
 
 </code></pre></td></tr></table>
 </div>
-</div><h5 id="markroot">markroot</h5>
+</div><h4 id="markroot">markroot</h4>
 <p>扫描以 markroot 开始，从栈，全局变量，寄存器等根对象开始扫描，创建一个有向引用图，把根对象投入到队列中.</p>
 <p>markroot函数用于执行根对象扫描工作:</p>
 <div class="highlight"><div class="chroma">
@@ -4412,7 +4452,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h6 id="suspendg">suspendG</h6>
+</div><h5 id="suspendg">suspendG</h5>
 <p>函数负责扫描G的栈:</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -4793,7 +4833,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>设置preemptscan后, 在抢占G成功时会调用scanstack扫描它自己的栈, 具体代码在这里.</p>
-<h6 id="scanstack">scanstack</h6>
+<h5 id="scanstack">scanstack</h5>
 <p>这个函数是起点函数( 起始最原始的还是 markroot，但是我们这里梳理主线 )，该扫描栈上所有可达对象，因为栈是一个根，因为你做事情总要有个开始的地方，那么“栈”就是 golang 的起点。</p>
 <ol>
 <li>找到这个 goroutine 栈上的内存对象(一个个找，一个个处理)；</li>
@@ -5169,7 +5209,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h6 id="scanblock">scanblock</h6>
+</div><h5 id="scanblock">scanblock</h5>
 <p>scanblock函数是一个通用的扫描函数, 扫描全局变量和栈空间都会用它, 和scanobject不同的是bitmap需要手动传入,他的一切参数都是传入的，这个函数作为一个基础函数被很多地方调用:</p>
 <ol>
 <li>scanblock 这个函数非常简单，只扫描给定的一段内存块；</li>
@@ -5445,7 +5485,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="scanobject">scanobject</h4>
+</div><h3 id="scanobject">scanobject</h3>
 <p>gcDrain函数扫描完根对象, 就会开始消费标记队列, 对从标记队列中取出的对象调用scanobject函数.</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -5673,7 +5713,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="gcassistalloc">gcAssistAlloc</h4>
+</div><h3 id="gcassistalloc">gcAssistAlloc</h3>
 <p>为了保证用户程序分配内存的速度不会超出后台任务的标记速度，运行时还引入了标记辅助技术，它遵循一条非常简单并且朴实的原则，分配多少内存就需要完成多少标记任务。每一个 Goroutine 都持有 gcAssistBytes 字段，这个字段存储了当前 Goroutine 辅助标记的对象字节数。在并发标记阶段期间，当 Goroutine 调用 runtime.mallocgc 分配新的对象时，该函数会检查申请内存的 Goroutine 是否处于入不敷出的状态：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -6306,7 +6346,7 @@
 </div><p>如果辅助队列不为空，上述函数会根据每个 Goroutine 的债务数量和已完成的工作决定是否唤醒这些陷入休眠的 Goroutine；如果唤醒所有的 Goroutine 后，标记任务量仍然有剩余，这些标记任务都会加入全局信用中。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20201214222145.png" alt=""></p>
 <p>用户程序辅助标记的核心目的就是避免用户程序分配内存影响垃圾收集器完成标记工作的期望时间，它通过维护账户体系保证用户程序不会对垃圾收集造成过多的负担，一旦用户程序分配了大量的内存，该用户程序就会通过辅助标记的方式平衡账本，这个过程会在最后达到相对平衡，保证标记任务在到达期望堆大小时完成。</p>
-<h3 id="标记终止-gcmarkdone">标记终止: gcMarkDone</h3>
+<h2 id="标记终止-gcmarkdone">标记终止: gcMarkDone</h2>
 <p>当所有处理器的本地任务都完成并且不存在剩余的工作 Goroutine 时,会执行gcMarkDone函数准备进入完成标记阶段(mark termination):</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -6766,7 +6806,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="gcmarktermination">gcMarkTermination</h4>
+</div><h3 id="gcmarktermination">gcMarkTermination</h3>
 <p>gcMarkTermination函数会进入完成标记阶段:</p>
 <p>函数中很多数据统计的代码，包括正在使用的内存大小、本轮垃圾收集的暂停时间、CPU 的利用率等数据，这些数据能够帮助控制器决定下一轮触发垃圾收集的堆大小.</p>
 <p>除了数据统计之外该函数还会调用 runtime.gcSweep 重置清理阶段的相关状态并在需要时阻塞清理所有的内存管理单元；_GCmarktermination 状态在垃圾收集中并不会持续太久，它会迅速转换至_GCoff 并恢复应用程序</p>
@@ -7212,7 +7252,7 @@
 
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="gcmark">gcMark</h4>
+</div><h3 id="gcmark">gcMark</h3>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -7413,7 +7453,7 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="gcsettriggerratio">gcSetTriggerRatio</h4>
+</div><h3 id="gcsettriggerratio">gcSetTriggerRatio</h3>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt">  1
@@ -7712,8 +7752,8 @@
 <span class="p">}</span>
 </code></pre></td></tr></table>
 </div>
-</div><h3 id="内存清理">内存清理</h3>
-<h4 id="gcsweep">gcSweep</h4>
+</div><h2 id="内存清理">内存清理</h2>
+<h3 id="gcsweep">gcSweep</h3>
 <p>gcSweep实现非常简单，只需要将 mheap_ 相关的标志位清零，并唤醒后台清扫器 Goroutine 即可。</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -7847,7 +7887,7 @@
 
 </code></pre></td></tr></table>
 </div>
-</div><h4 id="bgsweep">bgsweep</h4>
+</div><h3 id="bgsweep">bgsweep</h3>
 <p>后台清扫任务会在程序启动时调用的gcenable函数中启动.</p>
 <p>清扫过程依赖下面的结构：</p>
 <div class="highlight"><div class="chroma">
@@ -8009,7 +8049,7 @@
 <li>对象回收器在内存管理单元中查找并释放未被标记的对象，但是如果 runtime.mspan 中的所有对象都没有被标记，整个单元就会被直接回收，该过程会被 runtime.mcentral.cacheSpan 或者 runtime.sweepone 异步触发；</li>
 <li>内存单元回收器会在内存中查找所有的对象都未被标记的 runtime.mspan，该过程会被 runtime.mheap.reclaim 触发；</li>
 </ul>
-<h4 id="sweepone">sweepone</h4>
+<h3 id="sweepone">sweepone</h3>
 <p>runtime.sweepone 是我们在垃圾收集过程中经常会见到的函数，该函数会在堆内存中查找待清理的内存管理单元：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -8240,7 +8280,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>查找内存管理单元时会通过 state 和 sweepgen 两个字段判断当前单元是否需要处理。如果内存单元的 sweepgen 等于 mheap.sweepgen - 2，那么就意味着当前单元需要被清理，如果等于 mheap.sweepgen - 1，那么当前管理单元就正在被清理。</p>
-<h4 id="sweep">sweep</h4>
+<h3 id="sweep">sweep</h3>
 <p>所有的回收工作最终都是靠 runtime.mspan.sweep 完成的，该函数会根据并发标记阶段回收内存单元中的垃圾并清除标记以免影响下一轮垃圾收集。</p>
 <p>span的sweep函数用于清扫单个span:</p>
 <div class="highlight"><div class="chroma">
@@ -8760,7 +8800,7 @@
 </code></pre></td></tr></table>
 </div>
 </div><p>从bgsweep和前面的分配器可以看出扫描阶段的工作是十分懒惰(lazy)的,实际可能会出现前一阶段的扫描还未完成, 就需要开始新一轮的GC的情况,所以每一轮GC开始之前都需要完成前一轮GC的扫描工作(Sweep Termination阶段).</p>
-<h4 id="freesomewbufs">freeSomeWbufs</h4>
+<h3 id="freesomewbufs">freeSomeWbufs</h3>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
