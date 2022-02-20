@@ -49,7 +49,7 @@
 <meta itemprop="name" content="Go的调度器源码剖析">
 <meta itemprop="description" content="协程 进程时代 最初的计算机上面没有操作系统，更别提进程、线程和协程了。 后来，现代化的计算机有了操作系统，每个程序都是一个进程，但是操作系统在一"><meta itemprop="datePublished" content="2019-07-12T13:29:52+00:00" />
 <meta itemprop="dateModified" content="2019-07-12T13:29:52+00:00" />
-<meta itemprop="wordCount" content="81870">
+<meta itemprop="wordCount" content="82624">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go的调度器源码剖析"/>
 <meta name="twitter:description" content="协程 进程时代 最初的计算机上面没有操作系统，更别提进程、线程和协程了。 后来，现代化的计算机有了操作系统，每个程序都是一个进程，但是操作系统在一"/>
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 81870 字 </span>
-          <span class="more-meta"> 预计阅读 164 分钟 </span>
+          <span class="more-meta"> 约 82624 字 </span>
+          <span class="more-meta"> 预计阅读 165 分钟 </span>
         
       </div>
     </header>
@@ -244,6 +244,7 @@
     </li>
     <li><a href="#模板线程">模板线程</a></li>
     <li><a href="#gomaxprocs">GOMAXPROCS</a></li>
+    <li><a href="#setmaxthreads">SetMaxThreads</a></li>
     <li><a href="#gpm的缺陷">GPM的缺陷</a>
       <ul>
         <li><a href="#创建g无法回收">创建G无法回收</a></li>
@@ -11933,6 +11934,111 @@ golang-goroutine-state-transition</li>
 <pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
 </code></pre></td></tr></table>
 </div>
+</div><h2 id="setmaxthreads">SetMaxThreads</h2>
+<p>Go 对运行时创建的线程数量有一个限制，默认是 10000 个线程。如果超过一万个 G （挂载于 M 上）阻塞于系统调用，那么程序就会被挂掉。</p>
+<p>线程数限制的问题，在官方 issues#4056: &ldquo;runtime: limit number of operating system threads&rdquo; 中，有过讨论，并最终将线程限制数值确定为 10000。</p>
+<p>这个值存在的主要目的是限制可以创建无限数量线程的 Go 程序：在程序把操作系统干爆之前，干掉程序。</p>
+<p>当然，Go 也暴露了 debug.SetMaxThreads() 方法可以让我们修改最大线程数值。</p>
+<p>如程序所示，我们将最大线程数设置为 10，然后通过执行 shell 命令 sleep 3 来模拟同步系统调用过程。那么，执行 sleep 操作的 G 和 M 都会阻塞.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// SetMaxThreads sets the maximum number of operating system
+</span><span class="c1">// threads that the Go program can use. If it attempts to use more than
+</span><span class="c1">// this many, the program crashes.
+</span><span class="c1">// SetMaxThreads returns the previous setting.
+</span><span class="c1">// The initial setting is 10,000 threads.
+</span><span class="c1">//
+</span><span class="c1">// The limit controls the number of operating system threads, not the number
+</span><span class="c1">// of goroutines. A Go program creates a new thread only when a goroutine
+</span><span class="c1">// is ready to run but all the existing threads are blocked in system calls, cgo calls,
+</span><span class="c1">// or are locked to other goroutines due to use of runtime.LockOSThread.
+</span><span class="c1">//
+</span><span class="c1">// SetMaxThreads is useful mainly for limiting the damage done by
+</span><span class="c1">// programs that create an unbounded number of threads. The idea is
+</span><span class="c1">// to take down the program before it takes down the operating system.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">SetMaxThreads</span><span class="p">(</span><span class="nx">threads</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nf">setMaxThreads</span><span class="p">(</span><span class="nx">threads</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+ <span class="s">&#34;os/exec&#34;</span>
+ <span class="s">&#34;runtime/debug&#34;</span>
+ <span class="s">&#34;time&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+ <span class="nx">debug</span><span class="p">.</span><span class="nf">SetMaxThreads</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
+ <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">20</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+  <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+   <span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="s">&#34;bash&#34;</span><span class="p">,</span> <span class="s">&#34;-c&#34;</span><span class="p">,</span> <span class="s">&#34;sleep 3&#34;</span><span class="p">).</span><span class="nf">Output</span><span class="p">()</span>
+   <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+   <span class="p">}</span>
+  <span class="p">}()</span>
+ <span class="p">}</span>
+ <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span> <span class="o">*</span> <span class="mi">5</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>当程序启动的线程 M 超过 10 个时，会得到以下报错。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="n">runtime</span><span class="o">:</span> <span class="n">program</span> <span class="n">exceeds</span> <span class="m">10</span><span class="o">-</span><span class="n">thread</span> <span class="n">limit</span>
+<span class="n">fatal</span> <span class="n">error</span><span class="o">:</span> <span class="n">thread</span> <span class="n">exhaustion</span>
+<span class="o">***</span>
+</code></pre></td></tr></table>
+</div>
 </div><h2 id="gpm的缺陷">GPM的缺陷</h2>
 <h3 id="创建g无法回收">创建G无法回收</h3>
 <p>某团圆节日公司服务到达历史峰值 10w+ QPS，而之前没有预料到营销系统又在峰值期间搞事情，雪上加霜，流量增长到 11w+ QPS，本组服务差点被打挂.</p>
@@ -12228,59 +12334,7 @@ golang-goroutine-state-transition</li>
 </div><p>Go运行时不会回收线程，而是会在需要的时候重用它们。但是你如果创建大量的线程，根本就是不需要的，理论上值保留一小部分线程重用就可以了。</p>
 <p>如果程序设计的不合理，就会导致大量的空闲线程。如果你在http的处理程序中调用了类似的blocking系统调用或者CGO代码，或者微服务服务端调用了类似的代码，都有可能在客户端高并发访问时产生“线程泄露”的情况。</p>
 <p>但是，系统的线程也不是无限创建，一来每个线程都会占用一定的内存资源，大量的线程导致内存枯竭，而来Go运行时其实对运行时创建的线程的数量还是有一个显示的，默认是10000个线程。</p>
-<p>你可以使用debug.SetMaxThreads函数进行设置。比如你可以在上面的例子中将最大线程数设置为100:</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre tabindex="0" class="chroma"><code><span class="lnt">1
-</span><span class="lnt">2
-</span><span class="lnt">3
-</span><span class="lnt">4
-</span><span class="lnt">5
-</span><span class="lnt">6
-</span><span class="lnt">7
-</span></code></pre></td>
-<td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">   <span class="o">......</span>
-   <span class="c1">// 开始前的线程数
-</span><span class="c1"></span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">((</span><span class="s">&#34;threads in starting: %d\n&#34;</span><span class="p">),</span> <span class="nx">threadProfile</span><span class="p">.</span><span class="nf">Count</span><span class="p">())</span>
-<span class="nx">debug</span><span class="p">.</span><span class="nf">SetMaxThreads</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
-<span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
-<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
-   <span class="o">......</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>再运行上面的程序就会crash:</p>
-<div class="highlight"><div class="chroma">
-<table class="lntable"><tr><td class="lntd">
-<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
-</span><span class="lnt"> 2
-</span><span class="lnt"> 3
-</span><span class="lnt"> 4
-</span><span class="lnt"> 5
-</span><span class="lnt"> 6
-</span><span class="lnt"> 7
-</span><span class="lnt"> 8
-</span><span class="lnt"> 9
-</span><span class="lnt">10
-</span><span class="lnt">11
-</span><span class="lnt">12
-</span></code></pre></td>
-<td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"><span class="o">$</span> <span class="n">GODEBUG</span><span class="o">=</span><span class="n">netdns</span><span class="o">=</span><span class="n">cgo</span> <span class="n">go</span> <span class="n">run</span> <span class="n">main.go</span>
-<span class="n">threads</span> <span class="n">in</span> <span class="n">starting</span><span class="o">:</span> <span class="m">7</span>
-<span class="n">runtime</span><span class="o">:</span> <span class="n">program</span> <span class="n">exceeds</span> <span class="m">100</span><span class="o">-</span><span class="n">thread</span> <span class="n">limit</span>
-<span class="n">fatal</span> <span class="n">error</span><span class="o">:</span> <span class="n">thread</span> <span class="n">exhaustion</span>
-<span class="n">runtime</span> <span class="n">stack</span><span class="o">:</span>
-<span class="nf">runtime.throw</span><span class="p">(</span><span class="mh">0x54c3e2</span><span class="p">,</span> <span class="mh">0x11</span><span class="p">)</span>
-        <span class="o">/</span><span class="n">usr</span><span class="o">/</span><span class="n">local</span><span class="o">/</span><span class="n">go</span><span class="o">/</span><span class="n">src</span><span class="o">/</span><span class="n">runtime</span><span class="o">/</span><span class="n">panic.go</span><span class="o">:</span><span class="m">1116</span> <span class="m">+0</span><span class="n">x72</span>
-<span class="nf">runtime.checkmcount</span><span class="p">()</span>
-        <span class="o">/</span><span class="n">usr</span><span class="o">/</span><span class="n">local</span><span class="o">/</span><span class="n">go</span><span class="o">/</span><span class="n">src</span><span class="o">/</span><span class="n">runtime</span><span class="o">/</span><span class="n">proc.go</span><span class="o">:</span><span class="m">622</span> <span class="m">+0</span><span class="n">xac</span>
-<span class="nf">runtime.mReserveID</span><span class="p">(</span><span class="mh">0x62c878</span><span class="p">)</span>
-        <span class="o">/</span><span class="n">usr</span><span class="o">/</span><span class="n">local</span><span class="o">/</span><span class="n">go</span><span class="o">/</span><span class="n">src</span><span class="o">/</span><span class="n">runtime</span><span class="o">/</span><span class="n">proc.go</span><span class="o">:</span><span class="m">636</span> <span class="m">+0</span>
-<span class="n">......</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>官方issue中也有人提供使用LockOSThread杀掉线程的方法：</p>
+<p>官方issue中也有人提供使用LockOSThread杀掉线程的方法：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
 <pre tabindex="0" class="chroma"><code><span class="lnt"> 1
@@ -12311,8 +12365,110 @@ golang-goroutine-state-transition</li>
 </div>
 </div><p>LockOSThread函数会把当前goroutine绑定在当前的系统线程上，这个goroutine总是在这个线程中执行，而且也不会有其它goroutine在这个线程中执行。只有这个goroutine调用了相同次数的UnlockOSThread函数之后，才会进行解绑。</p>
 <p>如果goroutine在退出的时候没有unlock这个线程，那么这个线程会被终止。我们正好可以利用这个特性将线程杀掉。我们可以启动一个goroutine,调用LockOSThread占住一个线程，既然当前有很多空闲的线程，所以正好可以重用一个，goroutine退出的时候不调用UnlockOSThread，也就导致这个线程被终止了。</p>
-<p>当然也有网友在官方issue提供了担心，杀掉一个空闲的线程有可能导致子进程会收到KIll信号。</p>
-<p>你可以扩展这个方法，提供Kill(n int)可以终止多个线程的方法，当然原理都是类似的。从实践上上来看，你可以启动一个值守goroutine,检查到线程数超过某个阈值后就回收一部分线程，或者提供一个接口，可以手工调用某个API终止一部分线程，在官方还没有解决这个问题之前也不失是一种可用的方法。</p>
+<p>那么，我们可以利用第三个特性，在启动 G 时，调用 LockOSThread 来独占一个 M。当 G 退出时，而不调用 UnlockOSThread，那这个 M 将不会被闲置，就被终止了。</p>
+<p>下面，我们来看一个例子</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+ <span class="s">&#34;fmt&#34;</span>
+ <span class="s">&#34;os/exec&#34;</span>
+ <span class="s">&#34;runtime/pprof&#34;</span>
+ <span class="s">&#34;time&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+ <span class="nx">threadProfile</span> <span class="o">:=</span> <span class="nx">pprof</span><span class="p">.</span><span class="nf">Lookup</span><span class="p">(</span><span class="s">&#34;threadcreate&#34;</span><span class="p">)</span>
+ <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34; init threads counts: %d\n&#34;</span><span class="p">,</span> <span class="nx">threadProfile</span><span class="p">.</span><span class="nf">Count</span><span class="p">())</span>
+
+ <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">20</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+  <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+   <span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="s">&#34;bash&#34;</span><span class="p">,</span> <span class="s">&#34;-c&#34;</span><span class="p">,</span> <span class="s">&#34;sleep 3&#34;</span><span class="p">).</span><span class="nf">Output</span><span class="p">()</span>
+   <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+   <span class="p">}</span>
+  <span class="p">}()</span>
+ <span class="p">}</span>
+ <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span> <span class="o">*</span> <span class="mi">5</span><span class="p">)</span>
+ <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34; end threads counts: %d\n&#34;</span><span class="p">,</span> <span class="nx">threadProfile</span><span class="p">.</span><span class="nf">Count</span><span class="p">())</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>通过 <code>threadProfile.Count()</code> 我们可以实时获取当前线程数目，那么在发生了阻塞式系统调用后，该程序的线程数目是多少呢？</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"> <span class="n">init</span> <span class="n">threads</span> <span class="n">counts</span><span class="o">:</span> <span class="m">5</span>
+ <span class="n">end</span> <span class="n">threads</span> <span class="n">counts</span><span class="o">:</span> <span class="m">25</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>根据结果可以看到，G 执行完毕后，闲置线程并没有被释放。</p>
+<p>在程序中添加一行代码 runtime.LockOSThread() 代码</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">  <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+   <span class="nx">runtime</span><span class="p">.</span><span class="nf">LockOSThread</span><span class="p">()</span> <span class="c1">// 增加的一行代码
+</span><span class="c1"></span>   <span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="s">&#34;bash&#34;</span><span class="p">,</span> <span class="s">&#34;-c&#34;</span><span class="p">,</span> <span class="s">&#34;sleep 3&#34;</span><span class="p">).</span><span class="nf">Output</span><span class="p">()</span>
+   <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+   <span class="p">}</span>
+  <span class="p">}()</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>此时，程序的执行结果如下</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-s" data-lang="s"> <span class="n">init</span> <span class="n">threads</span> <span class="n">counts</span><span class="o">:</span> <span class="m">5</span>
+ <span class="n">end</span> <span class="n">threads</span> <span class="n">counts</span><span class="o">:</span> <span class="m">11</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>可以看到，由于调用了 LockOSThread 函数的 G 没有执行 UnlockOSThread 函数，在 G 执行完毕后，M 也被终止了。</p>
+<p>你可以扩展这个方法，提供<code>Kill(n int)</code>可以终止多个线程的方法，当然原理都是类似的。</p>
+<p>从实践上上来看，你可以启动一个值守goroutine,检查到线程数超过某个阈值后就回收一部分线程，或者提供一个接口，可以手工调用某个API终止一部分线程，在官方还没有解决这个问题之前也不失是一种可用的方法。</p>
+<p>当然，这个方法也存在隐患。例如在 issues#14592 有人提到：当子进程由一个带有 PdeathSignal: SIGKILL 的 A 线程创建，A 变为空闲时，如果 A 退出，那么子进程将会收到 KILL 信号，从而引起其他问题。</p>
 <h2 id="参考">参考</h2>
 <p><a href="https://tonybai.com/2017/06/23/an-intro-about-goroutine-scheduler/">也谈goroutine调度器</a></p>
 <p><a href="https://wudaijun.com/2018/01/go-scheduler/">Go 调度模型</a></p>
@@ -12329,6 +12485,7 @@ golang-goroutine-state-transition</li>
 <p><a href="https://xargin.com/cpu-idle-cannot-recover-after-peak-load/">为什么 Go 模块在下游服务抖动恢复后，CPU 占用无法恢复</a></p>
 <p><a href="https://colobu.com/2020/12/20/threads-in-go-runtime/">Go 运行程序中的线程数</a></p>
 <p><a href="https://golang.design/under-the-hood/zh-cn/part2runtime/ch06sched/preemption/#heading">6.8 协作与抢占</a></p>
+<p><a href="https://mp.weixin.qq.com/s/LV0I2Aq6jLj2io52AFgzXw">如何有效控制 Go 线程数？</a></p>
 
     </div>
 
