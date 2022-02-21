@@ -16,7 +16,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
 
 
-<meta name="author" content="Forz" /><meta name="description" content="" /><meta name="keywords" content="Hugo, theme, even" />
+<meta name="author" content="Forz" /><meta name="description" content="背景 我们内部系统全部统一采用gRPC协议和protobuf编解码。统一的好处在于不需要在做任何协议、编解码转换，这样就可以使我们所有业务采用" /><meta name="keywords" content="Hugo, theme, even" />
 
 
 
@@ -40,19 +40,19 @@
 
 
 <meta property="og:title" content="GRPC的错误处理实践" />
-<meta property="og:description" content="" />
+<meta property="og:description" content="背景 我们内部系统全部统一采用gRPC协议和protobuf编解码。统一的好处在于不需要在做任何协议、编解码转换，这样就可以使我们所有业务采用" />
 <meta property="og:type" content="article" />
 <meta property="og:url" content="/post/grpc%E7%9A%84%E9%94%99%E8%AF%AF%E5%A4%84%E7%90%86%E5%AE%9E%E8%B7%B5/" /><meta property="article:section" content="post" />
 <meta property="article:published_time" content="2022-02-21T20:00:48+00:00" />
 <meta property="article:modified_time" content="2022-02-21T20:00:48+00:00" />
 
 <meta itemprop="name" content="GRPC的错误处理实践">
-<meta itemprop="description" content=""><meta itemprop="datePublished" content="2022-02-21T20:00:48+00:00" />
+<meta itemprop="description" content="背景 我们内部系统全部统一采用gRPC协议和protobuf编解码。统一的好处在于不需要在做任何协议、编解码转换，这样就可以使我们所有业务采用"><meta itemprop="datePublished" content="2022-02-21T20:00:48+00:00" />
 <meta itemprop="dateModified" content="2022-02-21T20:00:48+00:00" />
-<meta itemprop="wordCount" content="0">
+<meta itemprop="wordCount" content="2570">
 <meta itemprop="keywords" content="GRPC," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="GRPC的错误处理实践"/>
-<meta name="twitter:description" content=""/>
+<meta name="twitter:description" content="背景 我们内部系统全部统一采用gRPC协议和protobuf编解码。统一的好处在于不需要在做任何协议、编解码转换，这样就可以使我们所有业务采用"/>
 
 <!--[if lte IE 9]>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
@@ -132,8 +132,8 @@
         <div class="post-category">
             <a href="/categories/grpc/"> GRPC </a>
             </div>
-          <span class="more-meta"> 约 0 字 </span>
-          <span class="more-meta"> 预计阅读 0 分钟 </span>
+          <span class="more-meta"> 约 2570 字 </span>
+          <span class="more-meta"> 预计阅读 6 分钟 </span>
         
       </div>
     </header>
@@ -141,11 +141,166 @@
     <div class="post-toc" id="post-toc">
   <h2 class="post-toc-title">文章目录</h2>
   <div class="post-toc-content always-active">
-    <nav id="TableOfContents"></nav>
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#背景">背景</a></li>
+    <li><a href="#判断error的错误原理">判断Error的错误原理</a></li>
+    <li><a href="#grpc网络传输的error">gRPC网络传输的Error</a></li>
+    <li><a href="#检查grpc的error信息第一版本">检查gRPC的error信息第一版本</a></li>
+    <li><a href="#检查grpc的error信息第二版本">检查gRPC的Error信息第二版本</a></li>
+    <li><a href="#演示grpc的error的处理">演示gRPC的Error的处理</a>
+      <ul>
+        <li><a href="#生成errorgrpc的pb文件">生成error、grpc的pb文件</a></li>
+      </ul>
+    </li>
+    <li><a href="#转载">转载</a></li>
+  </ul>
+</nav>
   </div>
 </div>
     <div class="post-content">
-      
+      <h2 id="背景">背景</h2>
+<p>我们内部系统全部统一采用gRPC协议和protobuf编解码。统一的好处在于不需要在做任何协议、编解码转换，这样就可以使我们所有业务采用同一个protobuf仓库，基于CI/CD工具实现许多自动化功能。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202212016755.png" alt=""></p>
+<p>我们要求所有服务提供者提前在独立的路径下定义好接口和错误码的protobuf文件，然后提交到GitLab，我们通过GitLab CI的check阶段对变更的protobuf文件做format、lint、breaking 检查。然后在build阶段，会基于protobuf文件中的注释自动产生文档，并推送至内部的微服务管理系统接口平台中，还会根据protobuf文件自动构建Go/PHP/Node/Java等多种语言的桩代码和错误码，并推送到指定对应的中心化仓库。推送到仓库后，我们就可以通过各语言的包管理工具拉取客户端、服务端的gRPC和错误码的依赖，不需要口头约定对接数据的定义，也不需要通过IM工具传递对接数据的定义文件，极大的简化了对接成本。</p>
+<h2 id="判断error的错误原理">判断Error的错误原理</h2>
+<p>要了解怎么处理gRPC的error之前，我们首先来看下Go普通的error是怎么处理的。</p>
+<p>我们在判断一个error的根因，需要根因error是一个固定地址的指针类型，这样我们才能够使用官方的errors.Is方法判断他是否为根因。以下是一个代码示例：</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202212017839.png" alt=""></p>
+<p>我们先看这个代码<code>errors.Is(wrapNewPointerError(), fmt.Errorf(&quot;i am error&quot;))</code>的执行步骤，首先构造了一个error，然后使用官方<code>%w</code>的方式将error进行了包装，我们在使用<code>errors.Is</code>方法判断的时候，底层函数会将error解包来判断两个error的地址是否一致。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202212025963.png" alt=""></p>
+<p>因此我们第一个errors.Is执行的是个false。在使用这个代码<code>errors.Is(wrapConstantPointerError(), sentinelErr)</code>，因为是固定地址的error，所以判断根因错误的时候，执行的是true。</p>
+<h2 id="grpc网络传输的error">gRPC网络传输的Error</h2>
+<p>我们客户端在获取到gRPC的error的时候，是否可以使用上文说的官方<code>errors.Is</code>进行判断呢。如果我们直接使用该方法，通过判断error地址是否相等，是无法做到的。原因是因为我们在使用gRPC的时候，在远程调用过程中，客户端获取的服务端返回的error，在tcp传递的时候实际上是一串文本。客户端拿到这个文本，是要将其反序列化转换为error，在这个反序列化的过程中，其实是new了一个新的error地址，这样就无法判断error地址是否相等。</p>
+<p>为了更好的解释gRPC网络传输的error，以下描述了整个error的处理流程。</p>
+<ol>
+<li>客户端通过invoker方法将请求发送到服务端。</li>
+<li>服务端通过processUnaryRPC方法，获取到用户代码的error信息。</li>
+<li>服务端通过status.FromError方法，将error转化为status.Status。</li>
+<li>服务端通过WriteStatus方法将status.Status里的数据，写入到grpc-status、grpc-message、grpc-status-details-bin的header头里。</li>
+<li>客户端通过网络获取到这些header头，使用strconv.ParseInt解析到grpc-status信息、decodeGrpcMessage解析到grpc-message信息、decodeGRPCStatusDetails解析为grpc-status-details-bin信息。</li>
+<li>客户端通过a.Status().Err()获取到用户代码的错误。</li>
+</ol>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202212026988.png" alt=""></p>
+<p>为了方便理解，我们抓个包，看下error具体的报文情况。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202212031205.png" alt=""></p>
+<h2 id="检查grpc的error信息第一版本">检查gRPC的error信息第一版本</h2>
+<p>通过上文描述，我们已经了解了gRPC在网络中如何传输error，可以看到new出来的error是无法判等的。所以我们就想到，使用工具提前生成好error，这样error的地址是不会改变的。这样我们就可以使用errors.Is的方法去检查根因error。</p>
+<p>首先我们可以将错误码编写在proto里，注释，如下所示：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-proto" data-lang="proto"><span class="n">syntax</span> <span class="o">=</span> <span class="s">&#34;proto3&#34;</span><span class="p">;</span><span class="err">
+</span><span class="err"></span><span class="kn">package</span> <span class="nn">engineering</span><span class="o">.</span><span class="n">helloworld</span><span class="p">;</span><span class="err">
+</span><span class="err"></span><span class="k">option</span> <span class="n">go_package</span> <span class="o">=</span> <span class="s">&#34;engineering/helloworld;helloworld&#34;</span><span class="p">;</span><span class="err">
+</span><span class="err"></span><span class="c1">// @plugins=protoc-gen-go-errors
+</span><span class="c1">// 错误
+</span><span class="c1"></span><span class="kd">enum</span> <span class="n">Error</span> <span class="p">{</span><span class="err">
+</span><span class="err"></span>  <span class="c1">// 未知类型
+</span><span class="c1"></span>  <span class="c1">// @code=UNKNOWN
+</span><span class="c1"></span>  <span class="n">RESOURCE_ERR_UNKNOWN</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span><span class="err">
+</span><span class="err"></span>  <span class="c1">// 找不到资源
+</span><span class="c1"></span>  <span class="c1">// @code=NOT_FOUND
+</span><span class="c1"></span>  <span class="n">RESOURCE_ERR_NOT_FOUND</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span><span class="err">
+</span><span class="err"></span>  <span class="c1">// 获取列表数据出错
+</span><span class="c1"></span>  <span class="c1">// @code=INTERNAL
+</span><span class="c1"></span>  <span class="n">RESOURCE_ERR_LIST_MYSQL</span> <span class="o">=</span> <span class="mi">2</span><span class="p">;</span><span class="err">
+</span><span class="err"></span>  <span class="c1">// 获取详情数据出错
+</span><span class="c1"></span>  <span class="c1">// @code=INTERNAL
+</span><span class="c1"></span>  <span class="n">RESOURCE_ERR_INFO_MYSQL</span> <span class="o">=</span> <span class="mi">3</span><span class="p">;</span><span class="err">
+</span><span class="err"></span><span class="p">}</span><span class="err">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>然后我们可以通过执行proto错误插件，生成固定地址的error，将error注册到全局map里，同时我们还可以根据@code的注释，生成gRPC的状态码。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">init</span><span class="p">()</span> <span class="p">{</span>
+ <span class="nx">resourceErrUnknown</span> <span class="p">=</span> <span class="nx">eerrors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="nx">codes</span><span class="p">.</span><span class="nx">Unknown</span><span class="p">),</span> <span class="s">&#34;engineering.helloworld.RESOURCE_ERR_UNKNOWN&#34;</span><span class="p">,</span> <span class="nx">Error_RESOURCE_ERR_UNKNOWN</span><span class="p">.</span><span class="nf">String</span><span class="p">())</span>
+ <span class="nx">eerrors</span><span class="p">.</span><span class="nf">Register</span><span class="p">(</span><span class="nx">resourceErrUnknown</span><span class="p">)</span>
+ <span class="nx">resourceErrNotFound</span> <span class="p">=</span> <span class="nx">eerrors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="nx">codes</span><span class="p">.</span><span class="nx">NotFound</span><span class="p">),</span> <span class="s">&#34;engineering.helloworld.RESOURCE_ERR_NOT_FOUND&#34;</span><span class="p">,</span> <span class="nx">Error_RESOURCE_ERR_NOT_FOUND</span><span class="p">.</span><span class="nf">String</span><span class="p">())</span>
+ <span class="nx">eerrors</span><span class="p">.</span><span class="nf">Register</span><span class="p">(</span><span class="nx">resourceErrNotFound</span><span class="p">)</span>
+ <span class="nx">resourceErrListMysql</span> <span class="p">=</span> <span class="nx">eerrors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="nx">codes</span><span class="p">.</span><span class="nx">Internal</span><span class="p">),</span> <span class="s">&#34;engineering.helloworld.RESOURCE_ERR_LIST_MYSQL&#34;</span><span class="p">,</span> <span class="nx">Error_RESOURCE_ERR_LIST_MYSQL</span><span class="p">.</span><span class="nf">String</span><span class="p">())</span>
+ <span class="nx">eerrors</span><span class="p">.</span><span class="nf">Register</span><span class="p">(</span><span class="nx">resourceErrListMysql</span><span class="p">)</span>
+ <span class="nx">resourceErrInfoMysql</span> <span class="p">=</span> <span class="nx">eerrors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="nx">codes</span><span class="p">.</span><span class="nx">Internal</span><span class="p">),</span> <span class="s">&#34;engineering.helloworld.RESOURCE_ERR_INFO_MYSQL&#34;</span><span class="p">,</span> <span class="nx">Error_RESOURCE_ERR_INFO_MYSQL</span><span class="p">.</span><span class="nf">String</span><span class="p">())</span>
+ <span class="nx">eerrors</span><span class="p">.</span><span class="nf">Register</span><span class="p">(</span><span class="nx">resourceErrInfoMysql</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">ResourceErrUnknown</span><span class="p">()</span> <span class="nx">eerrors</span><span class="p">.</span><span class="nx">Error</span> <span class="p">{</span>
+ <span class="k">return</span> <span class="nx">resourceErrUnknown</span>
+<span class="p">}</span>
+<span class="o">...</span><span class="p">.</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>接着我们在获取gRPC error后，需要使用FromError方法，转换为我们proto生成的error。在这个转换过程中，我们会从之前注册的全局error map里，通过reason方法，找到对应的error，返回给用户。用户这个时候就可以通过errors.Is来判断根因。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202212032148.png" alt=""></p>
+<h2 id="检查grpc的error信息第二版本">检查gRPC的Error信息第二版本</h2>
+<p>按以上方案，确实可以解决根因问题，但该error，无法携带message，metadata信息。这就导致我们，很难准确定位一些问题。所以这个时候，我们需要在error里做一些扩展，增加两个方法。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202212033579.png" alt=""></p>
+<p>这种方式可以让我们携带信息，但是他会对原有的error错误做一次克隆，导致了error的地址变化，无法在通过error判等的方式进行校验是否是根因。</p>
+<p>这个时候，我们只能通过errors.Is中的<code>(interface{ Is(error) bool })</code>断言方式，在我们自定义的error中，增加一个Is方法来判断。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202212036894.png" alt="">
+通过这种方式，我们不仅可以判断根因，并且还可以将error里携带更多排查有用的信息。</p>
+<h2 id="演示grpc的error的处理">演示gRPC的Error的处理</h2>
+<h3 id="生成errorgrpc的pb文件">生成error、grpc的pb文件</h3>
+<p>我们在该演示代码目录下执行make gen，可以生成对应的error、grpc的pb文件，如下所示。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202212043877.png" alt="">
+这些error为了防止其他人不小心篡改，获取error的时候，都是用方法来获取，如下所示。</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">ResourceErrUnknown</span><span class="p">()</span> <span class="nx">eerrors</span><span class="p">.</span><span class="nx">Error</span> <span class="p">{</span>
+ <span class="k">return</span> <span class="nx">resourceErrUnknown</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>我们在server里根据客户端发送的error，返回我们proto生成的error信息。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202212043992.png" alt=""></p>
+<p>我们在client里，判断是否是这个error，并记录error里的错误信息。</p>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/202202212044901.png" alt=""></p>
+<h2 id="转载">转载</h2>
+<p><a href="https://mp.weixin.qq.com/s?__biz=MzA4ODg0NDkzOA==&amp;mid=2247493815&amp;idx=1&amp;sn=ab065e894d668330c8ef68600412319a&amp;chksm=90215752a756de44492c48dee7fd27c862edbfc669a4798f410571efc209e7941ef1fcab7f68&amp;scene=21#wechat_redirect">gRPC的错误处理实践</a></p>
+
     </div>
 
     <div class="post-copyright">
