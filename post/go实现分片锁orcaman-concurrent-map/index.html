@@ -23,7 +23,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.92.2 with theme even" />
+<meta name="generator" content="Hugo 0.93.2 with theme even" />
 
 
 <link rel="canonical" href="/post/go%E5%AE%9E%E7%8E%B0%E5%88%86%E7%89%87%E9%94%81orcaman-concurrent-map/" />
@@ -49,8 +49,8 @@
 <meta itemprop="name" content="Go实现分片锁:orcaman-concurrent-map">
 <meta itemprop="description" content="虽然使用读写锁可以提供线程安全的 map,但是在大量并发读写的情况下,锁的竞争会非常激烈。锁是性能下降的万恶之源之一。 在并发编程中,我们的一条"><meta itemprop="datePublished" content="2021-01-19T17:01:41+00:00" />
 <meta itemprop="dateModified" content="2021-01-19T17:01:41+00:00" />
-<meta itemprop="wordCount" content="2271">
-<meta itemprop="keywords" content="Go," /><meta name="twitter:card" content="summary"/>
+<meta itemprop="wordCount" content="2270">
+<meta itemprop="keywords" content="Go三方库," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="Go实现分片锁:orcaman-concurrent-map"/>
 <meta name="twitter:description" content="虽然使用读写锁可以提供线程安全的 map,但是在大量并发读写的情况下,锁的竞争会非常激烈。锁是性能下降的万恶之源之一。 在并发编程中,我们的一条"/>
 
@@ -130,9 +130,9 @@
       <div class="post-meta">
         <span class="post-time"> 2021-01-19 </span>
         <div class="post-category">
-            <a href="/categories/go/"> Go </a>
+            <a href="/categories/go%E4%B8%89%E6%96%B9%E5%BA%93/"> Go三方库 </a>
             </div>
-          <span class="more-meta"> 约 2271 字 </span>
+          <span class="more-meta"> 约 2270 字 </span>
           <span class="more-meta"> 预计阅读 5 分钟 </span>
         
       </div>
@@ -503,362 +503,360 @@
 </span><span class="lnt">349
 </span><span class="lnt">350
 </span><span class="lnt">351
-</span><span class="lnt">352
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">cmap</span>
-
-<span class="kn">import</span> <span class="p">(</span>
-	<span class="s">&#34;encoding/json&#34;</span>
-	<span class="s">&#34;sync&#34;</span>
-<span class="p">)</span>
-
-<span class="kd">var</span> <span class="nx">SHARD_COUNT</span> <span class="p">=</span> <span class="mi">32</span>
-
-<span class="c1">// A &#34;thread&#34; safe map of type string:Anything.
-</span><span class="c1">// To avoid lock bottlenecks this map is dived to several (SHARD_COUNT) map shards.
-</span><span class="c1">// 分成SHARD_COUNT个分片的map
-</span><span class="c1"></span><span class="kd">type</span> <span class="nx">ConcurrentMap</span> <span class="p">[]</span><span class="o">*</span><span class="nx">ConcurrentMapShared</span>
-
-<span class="c1">// A &#34;thread&#34; safe string to anything map.
-</span><span class="c1">// 通过RWMutex保护的线程安全的分片,包含一个map
-</span><span class="c1"></span><span class="kd">type</span> <span class="nx">ConcurrentMapShared</span> <span class="kd">struct</span> <span class="p">{</span>
-	<span class="nx">items</span>        <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{}</span>
-	<span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span> <span class="c1">// Read Write mutex, guards access to internal map.
-</span><span class="c1"></span><span class="p">}</span>
-
-<span class="c1">// Creates a new concurrent map.
-</span><span class="c1">// 创建并发map
-</span><span class="c1"></span><span class="kd">func</span> <span class="nf">New</span><span class="p">()</span> <span class="nx">ConcurrentMap</span> <span class="p">{</span>
-	<span class="nx">m</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="nx">ConcurrentMap</span><span class="p">,</span> <span class="nx">SHARD_COUNT</span><span class="p">)</span>
-	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">SHARD_COUNT</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
-		<span class="nx">m</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">ConcurrentMapShared</span><span class="p">{</span><span class="nx">items</span><span class="p">:</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{})}</span>
-	<span class="p">}</span>
-	<span class="k">return</span> <span class="nx">m</span>
-<span class="p">}</span>
-
-<span class="c1">// GetShard returns shard under given key
-</span><span class="c1">// 根据key计算分片索引
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="o">*</span><span class="nx">ConcurrentMapShared</span> <span class="p">{</span>
-	<span class="k">return</span> <span class="nx">m</span><span class="p">[</span><span class="nb">uint</span><span class="p">(</span><span class="nf">fnv32</span><span class="p">(</span><span class="nx">key</span><span class="p">))</span><span class="o">%</span><span class="nb">uint</span><span class="p">(</span><span class="nx">SHARD_COUNT</span><span class="p">)]</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">MSet</span><span class="p">(</span><span class="nx">data</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
-	<span class="k">for</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">data</span> <span class="p">{</span>
-		<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
-		<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-		<span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">value</span>
-		<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-	<span class="p">}</span>
-<span class="p">}</span>
-
-<span class="c1">// Sets the given value under the specified key.
-</span><span class="c1">//增加或者查询的时候,首先根据分片索引得到分片对象,然后对分片对象加锁进行操作:
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Set</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
-    <span class="c1">// Get map shard.
-</span><span class="c1"></span>    <span class="c1">// 根据key计算出对应的分片
-</span><span class="c1"></span>    <span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
-    <span class="c1">//对这个分片加锁,执行业务操作
-</span><span class="c1"></span>	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">value</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-<span class="p">}</span>
-
-<span class="c1">// Callback to return new element to be inserted into the map
-</span><span class="c1">// It is called while lock is held, therefore it MUST NOT
-</span><span class="c1">// try to access other keys in same map, as it can lead to deadlock since
-</span><span class="c1">// Go sync.RWLock is not reentrant
-</span><span class="c1"></span><span class="kd">type</span> <span class="nx">UpsertCb</span> <span class="kd">func</span><span class="p">(</span><span class="nx">exist</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">valueInMap</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">newValue</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{}</span>
-
-<span class="c1">// Insert or Update - updates existing element or inserts a new one using UpsertCb
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Upsert</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">cb</span> <span class="nx">UpsertCb</span><span class="p">)</span> <span class="p">(</span><span class="nx">res</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
-	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-	<span class="nx">v</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
-	<span class="nx">res</span> <span class="p">=</span> <span class="nf">cb</span><span class="p">(</span><span class="nx">ok</span><span class="p">,</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">value</span><span class="p">)</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">res</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-	<span class="k">return</span> <span class="nx">res</span>
-<span class="p">}</span>
-
-<span class="c1">// Sets the given value under the specified key if no value was associated with it.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">SetIfAbsent</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kt">bool</span> <span class="p">{</span>
-	<span class="c1">// Get map shard.
-</span><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-	<span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
-	<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
-		<span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">value</span>
-	<span class="p">}</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-	<span class="k">return</span> <span class="p">!</span><span class="nx">ok</span>
-<span class="p">}</span>
-
-<span class="c1">// Get retrieves an element from map under given key.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="kd">interface</span><span class="p">{},</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
-    <span class="c1">// Get shard
-</span><span class="c1"></span>    <span class="c1">// 根据key计算出对应的分片
-</span><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
-    <span class="c1">// Get item from shard.
-</span><span class="c1"></span>    <span class="c1">// 从这个分片读取key的值
-</span><span class="c1"></span>	<span class="nx">val</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
-	<span class="k">return</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">ok</span>
-<span class="p">}</span>
-
-<span class="c1">// Count returns the number of elements within the map.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Count</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
-	<span class="nx">count</span> <span class="o">:=</span> <span class="mi">0</span>
-	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">SHARD_COUNT</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
-		<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
-		<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
-		<span class="nx">count</span> <span class="o">+=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">)</span>
-		<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
-	<span class="p">}</span>
-	<span class="k">return</span> <span class="nx">count</span>
-<span class="p">}</span>
-
-<span class="c1">// Looks up an item under specified key
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Has</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
-	<span class="c1">// Get shard
-</span><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
-	<span class="c1">// See if element is within shard.
-</span><span class="c1"></span>	<span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
-	<span class="k">return</span> <span class="nx">ok</span>
-<span class="p">}</span>
-
-<span class="c1">// Remove removes an element from the map.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Remove</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
-	<span class="c1">// Try to get shard.
-</span><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-	<span class="nb">delete</span><span class="p">(</span><span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-<span class="p">}</span>
-
-<span class="c1">// RemoveCb is a callback executed in a map.RemoveCb() call, while Lock is held
-</span><span class="c1">// If returns true, the element will be removed from the map
-</span><span class="c1"></span><span class="kd">type</span> <span class="nx">RemoveCb</span> <span class="kd">func</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">v</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">exists</span> <span class="kt">bool</span><span class="p">)</span> <span class="kt">bool</span>
-
-<span class="c1">// RemoveCb locks the shard containing the key, retrieves its current value and calls the callback with those params
-</span><span class="c1">// If callback returns true and element exists, it will remove it from the map
-</span><span class="c1">// Returns the value returned by the callback (even if element was not present in the map)
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">RemoveCb</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">cb</span> <span class="nx">RemoveCb</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
-	<span class="c1">// Try to get shard.
-</span><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-	<span class="nx">v</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
-	<span class="nx">remove</span> <span class="o">:=</span> <span class="nf">cb</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">ok</span><span class="p">)</span>
-	<span class="k">if</span> <span class="nx">remove</span> <span class="o">&amp;&amp;</span> <span class="nx">ok</span> <span class="p">{</span>
-		<span class="nb">delete</span><span class="p">(</span><span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
-	<span class="p">}</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-	<span class="k">return</span> <span class="nx">remove</span>
-<span class="p">}</span>
-
-<span class="c1">// Pop removes an element from the map and returns it
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Pop</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">v</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">exists</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
-	<span class="c1">// Try to get shard.
-</span><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-	<span class="nx">v</span><span class="p">,</span> <span class="nx">exists</span> <span class="p">=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
-	<span class="nb">delete</span><span class="p">(</span><span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
-	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-	<span class="k">return</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">exists</span>
-<span class="p">}</span>
-
-<span class="c1">// IsEmpty checks if map is empty.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">IsEmpty</span><span class="p">()</span> <span class="kt">bool</span> <span class="p">{</span>
-	<span class="k">return</span> <span class="nx">m</span><span class="p">.</span><span class="nf">Count</span><span class="p">()</span> <span class="o">==</span> <span class="mi">0</span>
-<span class="p">}</span>
-
-<span class="c1">// Used by the Iter &amp; IterBuffered functions to wrap two variables together over a channel,
-</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Tuple</span> <span class="kd">struct</span> <span class="p">{</span>
-	<span class="nx">Key</span> <span class="kt">string</span>
-	<span class="nx">Val</span> <span class="kd">interface</span><span class="p">{}</span>
-<span class="p">}</span>
-
-<span class="c1">// Iter returns an iterator which could be used in a for range loop.
-</span><span class="c1">//
-</span><span class="c1">// Deprecated: using IterBuffered() will get a better performence
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Iter</span><span class="p">()</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">Tuple</span> <span class="p">{</span>
-	<span class="nx">chans</span> <span class="o">:=</span> <span class="nf">snapshot</span><span class="p">(</span><span class="nx">m</span><span class="p">)</span>
-	<span class="nx">ch</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">)</span>
-	<span class="k">go</span> <span class="nf">fanIn</span><span class="p">(</span><span class="nx">chans</span><span class="p">,</span> <span class="nx">ch</span><span class="p">)</span>
-	<span class="k">return</span> <span class="nx">ch</span>
-<span class="p">}</span>
-
-<span class="c1">// IterBuffered returns a buffered iterator which could be used in a for range loop.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">IterBuffered</span><span class="p">()</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">Tuple</span> <span class="p">{</span>
-	<span class="nx">chans</span> <span class="o">:=</span> <span class="nf">snapshot</span><span class="p">(</span><span class="nx">m</span><span class="p">)</span>
-	<span class="nx">total</span> <span class="o">:=</span> <span class="mi">0</span>
-	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">c</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">chans</span> <span class="p">{</span>
-		<span class="nx">total</span> <span class="o">+=</span> <span class="nb">cap</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
-	<span class="p">}</span>
-	<span class="nx">ch</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">,</span> <span class="nx">total</span><span class="p">)</span>
-	<span class="k">go</span> <span class="nf">fanIn</span><span class="p">(</span><span class="nx">chans</span><span class="p">,</span> <span class="nx">ch</span><span class="p">)</span>
-	<span class="k">return</span> <span class="nx">ch</span>
-<span class="p">}</span>
-
-<span class="c1">// Clear removes all items from map.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Clear</span><span class="p">()</span> <span class="p">{</span>
-	<span class="k">for</span> <span class="nx">item</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span><span class="p">.</span><span class="nf">IterBuffered</span><span class="p">()</span> <span class="p">{</span>
-		<span class="nx">m</span><span class="p">.</span><span class="nf">Remove</span><span class="p">(</span><span class="nx">item</span><span class="p">.</span><span class="nx">Key</span><span class="p">)</span>
-	<span class="p">}</span>
-<span class="p">}</span>
-
-<span class="c1">// Returns a array of channels that contains elements in each shard,
-</span><span class="c1">// which likely takes a snapshot of `m`.
-</span><span class="c1">// It returns once the size of each buffered channel is determined,
-</span><span class="c1">// before all the channels are populated using goroutines.
-</span><span class="c1"></span><span class="kd">func</span> <span class="nf">snapshot</span><span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="p">(</span><span class="nx">chans</span> <span class="p">[]</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">chans</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">,</span> <span class="nx">SHARD_COUNT</span><span class="p">)</span>
-	<span class="nx">wg</span> <span class="o">:=</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">{}</span>
-	<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">SHARD_COUNT</span><span class="p">)</span>
-	<span class="c1">// Foreach shard.
-</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">index</span><span class="p">,</span> <span class="nx">shard</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span> <span class="p">{</span>
-		<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">index</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">shard</span> <span class="o">*</span><span class="nx">ConcurrentMapShared</span><span class="p">)</span> <span class="p">{</span>
-			<span class="c1">// Foreach key, value pair.
-</span><span class="c1"></span>			<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
-			<span class="nx">chans</span><span class="p">[</span><span class="nx">index</span><span class="p">]</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">))</span>
-			<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
-			<span class="k">for</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">val</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span> <span class="p">{</span>
-				<span class="nx">chans</span><span class="p">[</span><span class="nx">index</span><span class="p">]</span> <span class="o">&lt;-</span> <span class="nx">Tuple</span><span class="p">{</span><span class="nx">key</span><span class="p">,</span> <span class="nx">val</span><span class="p">}</span>
-			<span class="p">}</span>
-			<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
-			<span class="nb">close</span><span class="p">(</span><span class="nx">chans</span><span class="p">[</span><span class="nx">index</span><span class="p">])</span>
-		<span class="p">}(</span><span class="nx">index</span><span class="p">,</span> <span class="nx">shard</span><span class="p">)</span>
-	<span class="p">}</span>
-	<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
-	<span class="k">return</span> <span class="nx">chans</span>
-<span class="p">}</span>
-
-<span class="c1">// fanIn reads elements from channels `chans` into channel `out`
-</span><span class="c1"></span><span class="kd">func</span> <span class="nf">fanIn</span><span class="p">(</span><span class="nx">chans</span> <span class="p">[]</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">,</span> <span class="nx">out</span> <span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">wg</span> <span class="o">:=</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">{}</span>
-	<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">chans</span><span class="p">))</span>
-	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ch</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">chans</span> <span class="p">{</span>
-		<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">ch</span> <span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">)</span> <span class="p">{</span>
-			<span class="k">for</span> <span class="nx">t</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">ch</span> <span class="p">{</span>
-				<span class="nx">out</span> <span class="o">&lt;-</span> <span class="nx">t</span>
-			<span class="p">}</span>
-			<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
-		<span class="p">}(</span><span class="nx">ch</span><span class="p">)</span>
-	<span class="p">}</span>
-	<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
-	<span class="nb">close</span><span class="p">(</span><span class="nx">out</span><span class="p">)</span>
-<span class="p">}</span>
-
-<span class="c1">// Items returns all items as map[string]interface{}
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Items</span><span class="p">()</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
-	<span class="nx">tmp</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{})</span>
-
-	<span class="c1">// Insert items to temporary map.
-</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">item</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span><span class="p">.</span><span class="nf">IterBuffered</span><span class="p">()</span> <span class="p">{</span>
-		<span class="nx">tmp</span><span class="p">[</span><span class="nx">item</span><span class="p">.</span><span class="nx">Key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">item</span><span class="p">.</span><span class="nx">Val</span>
-	<span class="p">}</span>
-
-	<span class="k">return</span> <span class="nx">tmp</span>
-<span class="p">}</span>
-
-<span class="c1">// Iterator callback,called for every key,value found in
-</span><span class="c1">// maps. RLock is held for all calls for a given shard
-</span><span class="c1">// therefore callback sess consistent view of a shard,
-</span><span class="c1">// but not across the shards
-</span><span class="c1"></span><span class="kd">type</span> <span class="nx">IterCb</span> <span class="kd">func</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span>
-
-<span class="c1">// Callback based iterator, cheapest way to read
-</span><span class="c1">// all elements in a map.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">IterCb</span><span class="p">(</span><span class="nx">fn</span> <span class="nx">IterCb</span><span class="p">)</span> <span class="p">{</span>
-	<span class="k">for</span> <span class="nx">idx</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span> <span class="p">{</span>
-		<span class="nx">shard</span> <span class="o">:=</span> <span class="p">(</span><span class="nx">m</span><span class="p">)[</span><span class="nx">idx</span><span class="p">]</span>
-		<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
-		<span class="k">for</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span> <span class="p">{</span>
-			<span class="nf">fn</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span><span class="p">)</span>
-		<span class="p">}</span>
-		<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
-	<span class="p">}</span>
-<span class="p">}</span>
-
-<span class="c1">// Keys returns all keys as []string
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Keys</span><span class="p">()</span> <span class="p">[]</span><span class="kt">string</span> <span class="p">{</span>
-	<span class="nx">count</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">Count</span><span class="p">()</span>
-	<span class="nx">ch</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">count</span><span class="p">)</span>
-	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
-		<span class="c1">// Foreach shard.
-</span><span class="c1"></span>		<span class="nx">wg</span> <span class="o">:=</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">{}</span>
-		<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">SHARD_COUNT</span><span class="p">)</span>
-		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">shard</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span> <span class="p">{</span>
-			<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">shard</span> <span class="o">*</span><span class="nx">ConcurrentMapShared</span><span class="p">)</span> <span class="p">{</span>
-				<span class="c1">// Foreach key, value pair.
-</span><span class="c1"></span>				<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
-				<span class="k">for</span> <span class="nx">key</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span> <span class="p">{</span>
-					<span class="nx">ch</span> <span class="o">&lt;-</span> <span class="nx">key</span>
-				<span class="p">}</span>
-				<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
-				<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
-			<span class="p">}(</span><span class="nx">shard</span><span class="p">)</span>
-		<span class="p">}</span>
-		<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
-		<span class="nb">close</span><span class="p">(</span><span class="nx">ch</span><span class="p">)</span>
-	<span class="p">}()</span>
-
-	<span class="c1">// Generate keys
-</span><span class="c1"></span>	<span class="nx">keys</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">string</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">count</span><span class="p">)</span>
-	<span class="k">for</span> <span class="nx">k</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">ch</span> <span class="p">{</span>
-		<span class="nx">keys</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">keys</span><span class="p">,</span> <span class="nx">k</span><span class="p">)</span>
-	<span class="p">}</span>
-	<span class="k">return</span> <span class="nx">keys</span>
-<span class="p">}</span>
-
-<span class="c1">//Reviles ConcurrentMap &#34;private&#34; variables to json marshal.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">MarshalJSON</span><span class="p">()</span> <span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
-	<span class="c1">// Create a temporary map, which will hold all item spread across shards.
-</span><span class="c1"></span>	<span class="nx">tmp</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{})</span>
-
-	<span class="c1">// Insert items to temporary map.
-</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">item</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span><span class="p">.</span><span class="nf">IterBuffered</span><span class="p">()</span> <span class="p">{</span>
-		<span class="nx">tmp</span><span class="p">[</span><span class="nx">item</span><span class="p">.</span><span class="nx">Key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">item</span><span class="p">.</span><span class="nx">Val</span>
-	<span class="p">}</span>
-	<span class="k">return</span> <span class="nx">json</span><span class="p">.</span><span class="nf">Marshal</span><span class="p">(</span><span class="nx">tmp</span><span class="p">)</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="nf">fnv32</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">uint32</span> <span class="p">{</span>
-	<span class="nx">hash</span> <span class="o">:=</span> <span class="nb">uint32</span><span class="p">(</span><span class="mi">2166136261</span><span class="p">)</span>
-	<span class="kd">const</span> <span class="nx">prime32</span> <span class="p">=</span> <span class="nb">uint32</span><span class="p">(</span><span class="mi">16777619</span><span class="p">)</span>
-	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">key</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
-		<span class="nx">hash</span> <span class="o">*=</span> <span class="nx">prime32</span>
-		<span class="nx">hash</span> <span class="p">^=</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">key</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
-	<span class="p">}</span>
-	<span class="k">return</span> <span class="nx">hash</span>
-<span class="p">}</span>
-
-<span class="c1">// Concurrent map uses Interface{} as its value, therefor JSON Unmarshal
-</span><span class="c1">// will probably won&#39;t know which to type to unmarshal into, in such case
-</span><span class="c1">// we&#39;ll end up with a value of type map[string]interface{}, In most cases this isn&#39;t
-</span><span class="c1">// out value type, this is why we&#39;ve decided to remove this functionality.
-</span><span class="c1"></span>
-<span class="c1">// func (m *ConcurrentMap) UnmarshalJSON(b []byte) (err error) {
-</span><span class="c1">// 	// Reverse process of Marshal.
-</span><span class="c1"></span>
-<span class="c1">// 	tmp := make(map[string]interface{})
-</span><span class="c1"></span>
-<span class="c1">// 	// Unmarshal into a single map.
-</span><span class="c1">// 	if err := json.Unmarshal(b, &amp;tmp); err != nil {
-</span><span class="c1">// 		return nil
-</span><span class="c1">// 	}
-</span><span class="c1"></span>
-<span class="c1">// 	// foreach key,value pair in temporary map insert into our concurrent map.
-</span><span class="c1">// 	for key, val := range tmp {
-</span><span class="c1">// 		m.Set(key, val)
-</span><span class="c1">// 	}
-</span><span class="c1">// 	return nil
-</span><span class="c1">// }
-</span><span class="c1"></span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kn">package</span> <span class="nx">cmap</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="p">(</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;encoding/json&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;sync&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">var</span> <span class="nx">SHARD_COUNT</span> <span class="p">=</span> <span class="mi">32</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// A &#34;thread&#34; safe map of type string:Anything.
+</span></span></span><span class="line"><span class="cl"><span class="c1">// To avoid lock bottlenecks this map is dived to several (SHARD_COUNT) map shards.
+</span></span></span><span class="line"><span class="cl"><span class="c1">// 分成SHARD_COUNT个分片的map
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">type</span> <span class="nx">ConcurrentMap</span> <span class="p">[]</span><span class="o">*</span><span class="nx">ConcurrentMapShared</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// A &#34;thread&#34; safe string to anything map.
+</span></span></span><span class="line"><span class="cl"><span class="c1">// 通过RWMutex保护的线程安全的分片,包含一个map
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">type</span> <span class="nx">ConcurrentMapShared</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">items</span>        <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span> <span class="c1">// Read Write mutex, guards access to internal map.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Creates a new concurrent map.
+</span></span></span><span class="line"><span class="cl"><span class="c1">// 创建并发map
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="nf">New</span><span class="p">()</span> <span class="nx">ConcurrentMap</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">m</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="nx">ConcurrentMap</span><span class="p">,</span> <span class="nx">SHARD_COUNT</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">SHARD_COUNT</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">m</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">ConcurrentMapShared</span><span class="p">{</span><span class="nx">items</span><span class="p">:</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{})}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">m</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// GetShard returns shard under given key
+</span></span></span><span class="line"><span class="cl"><span class="c1">// 根据key计算分片索引
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="o">*</span><span class="nx">ConcurrentMapShared</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">m</span><span class="p">[</span><span class="nb">uint</span><span class="p">(</span><span class="nf">fnv32</span><span class="p">(</span><span class="nx">key</span><span class="p">))</span><span class="o">%</span><span class="nb">uint</span><span class="p">(</span><span class="nx">SHARD_COUNT</span><span class="p">)]</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">MSet</span><span class="p">(</span><span class="nx">data</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">data</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">value</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Sets the given value under the specified key.
+</span></span></span><span class="line"><span class="cl"><span class="c1">//增加或者查询的时候,首先根据分片索引得到分片对象,然后对分片对象加锁进行操作:
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Set</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// Get map shard.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// 根据key计算出对应的分片
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">//对这个分片加锁,执行业务操作
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">value</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Callback to return new element to be inserted into the map
+</span></span></span><span class="line"><span class="cl"><span class="c1">// It is called while lock is held, therefore it MUST NOT
+</span></span></span><span class="line"><span class="cl"><span class="c1">// try to access other keys in same map, as it can lead to deadlock since
+</span></span></span><span class="line"><span class="cl"><span class="c1">// Go sync.RWLock is not reentrant
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">type</span> <span class="nx">UpsertCb</span> <span class="kd">func</span><span class="p">(</span><span class="nx">exist</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">valueInMap</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">newValue</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kd">interface</span><span class="p">{}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Insert or Update - updates existing element or inserts a new one using UpsertCb
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Upsert</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">cb</span> <span class="nx">UpsertCb</span><span class="p">)</span> <span class="p">(</span><span class="nx">res</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">v</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">res</span> <span class="p">=</span> <span class="nf">cb</span><span class="p">(</span><span class="nx">ok</span><span class="p">,</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">value</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">res</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">res</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Sets the given value under the specified key if no value was associated with it.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">SetIfAbsent</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">value</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kt">bool</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">// Get map shard.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">value</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="p">!</span><span class="nx">ok</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Get retrieves an element from map under given key.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="kd">interface</span><span class="p">{},</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// Get shard
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// 根据key计算出对应的分片
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// Get item from shard.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// 从这个分片读取key的值
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">val</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">ok</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Count returns the number of elements within the map.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Count</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">count</span> <span class="o">:=</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">SHARD_COUNT</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">count</span> <span class="o">+=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">count</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Looks up an item under specified key
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Has</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">// Get shard
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">// See if element is within shard.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">ok</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Remove removes an element from the map.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Remove</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">// Try to get shard.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="nb">delete</span><span class="p">(</span><span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// RemoveCb is a callback executed in a map.RemoveCb() call, while Lock is held
+</span></span></span><span class="line"><span class="cl"><span class="c1">// If returns true, the element will be removed from the map
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">type</span> <span class="nx">RemoveCb</span> <span class="kd">func</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">v</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">exists</span> <span class="kt">bool</span><span class="p">)</span> <span class="kt">bool</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// RemoveCb locks the shard containing the key, retrieves its current value and calls the callback with those params
+</span></span></span><span class="line"><span class="cl"><span class="c1">// If callback returns true and element exists, it will remove it from the map
+</span></span></span><span class="line"><span class="cl"><span class="c1">// Returns the value returned by the callback (even if element was not present in the map)
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">RemoveCb</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">cb</span> <span class="nx">RemoveCb</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">// Try to get shard.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">v</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">remove</span> <span class="o">:=</span> <span class="nf">cb</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">ok</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">remove</span> <span class="o">&amp;&amp;</span> <span class="nx">ok</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nb">delete</span><span class="p">(</span><span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">remove</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Pop removes an element from the map and returns it
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Pop</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">v</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">exists</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">// Try to get shard.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">shard</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">GetShard</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">v</span><span class="p">,</span> <span class="nx">exists</span> <span class="p">=</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">	<span class="nb">delete</span><span class="p">(</span><span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">,</span> <span class="nx">key</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">shard</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">exists</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// IsEmpty checks if map is empty.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">IsEmpty</span><span class="p">()</span> <span class="kt">bool</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">m</span><span class="p">.</span><span class="nf">Count</span><span class="p">()</span> <span class="o">==</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Used by the Iter &amp; IterBuffered functions to wrap two variables together over a channel,
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">type</span> <span class="nx">Tuple</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">Key</span> <span class="kt">string</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">Val</span> <span class="kd">interface</span><span class="p">{}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Iter returns an iterator which could be used in a for range loop.
+</span></span></span><span class="line"><span class="cl"><span class="c1">//
+</span></span></span><span class="line"><span class="cl"><span class="c1">// Deprecated: using IterBuffered() will get a better performence
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Iter</span><span class="p">()</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">Tuple</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">chans</span> <span class="o">:=</span> <span class="nf">snapshot</span><span class="p">(</span><span class="nx">m</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">ch</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">go</span> <span class="nf">fanIn</span><span class="p">(</span><span class="nx">chans</span><span class="p">,</span> <span class="nx">ch</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">ch</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// IterBuffered returns a buffered iterator which could be used in a for range loop.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">IterBuffered</span><span class="p">()</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">Tuple</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">chans</span> <span class="o">:=</span> <span class="nf">snapshot</span><span class="p">(</span><span class="nx">m</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">total</span> <span class="o">:=</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">c</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">chans</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">total</span> <span class="o">+=</span> <span class="nb">cap</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">ch</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">,</span> <span class="nx">total</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">go</span> <span class="nf">fanIn</span><span class="p">(</span><span class="nx">chans</span><span class="p">,</span> <span class="nx">ch</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">ch</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Clear removes all items from map.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Clear</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">item</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span><span class="p">.</span><span class="nf">IterBuffered</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">m</span><span class="p">.</span><span class="nf">Remove</span><span class="p">(</span><span class="nx">item</span><span class="p">.</span><span class="nx">Key</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Returns a array of channels that contains elements in each shard,
+</span></span></span><span class="line"><span class="cl"><span class="c1">// which likely takes a snapshot of `m`.
+</span></span></span><span class="line"><span class="cl"><span class="c1">// It returns once the size of each buffered channel is determined,
+</span></span></span><span class="line"><span class="cl"><span class="c1">// before all the channels are populated using goroutines.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="nf">snapshot</span><span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="p">(</span><span class="nx">chans</span> <span class="p">[]</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">chans</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">,</span> <span class="nx">SHARD_COUNT</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">wg</span> <span class="o">:=</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">{}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">SHARD_COUNT</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">// Foreach shard.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">for</span> <span class="nx">index</span><span class="p">,</span> <span class="nx">shard</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">index</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">shard</span> <span class="o">*</span><span class="nx">ConcurrentMapShared</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="c1">// Foreach key, value pair.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>			<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">chans</span><span class="p">[</span><span class="nx">index</span><span class="p">]</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">shard</span><span class="p">.</span><span class="nx">items</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">			<span class="k">for</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">val</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="nx">chans</span><span class="p">[</span><span class="nx">index</span><span class="p">]</span> <span class="o">&lt;-</span> <span class="nx">Tuple</span><span class="p">{</span><span class="nx">key</span><span class="p">,</span> <span class="nx">val</span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">			<span class="nb">close</span><span class="p">(</span><span class="nx">chans</span><span class="p">[</span><span class="nx">index</span><span class="p">])</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}(</span><span class="nx">index</span><span class="p">,</span> <span class="nx">shard</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">chans</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// fanIn reads elements from channels `chans` into channel `out`
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="nf">fanIn</span><span class="p">(</span><span class="nx">chans</span> <span class="p">[]</span><span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">,</span> <span class="nx">out</span> <span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">wg</span> <span class="o">:=</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">{}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">chans</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ch</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">chans</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">ch</span> <span class="kd">chan</span> <span class="nx">Tuple</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">for</span> <span class="nx">t</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">ch</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="nx">out</span> <span class="o">&lt;-</span> <span class="nx">t</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}(</span><span class="nx">ch</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="nb">close</span><span class="p">(</span><span class="nx">out</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Items returns all items as map[string]interface{}
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Items</span><span class="p">()</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">tmp</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{})</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="c1">// Insert items to temporary map.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">for</span> <span class="nx">item</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span><span class="p">.</span><span class="nf">IterBuffered</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">tmp</span><span class="p">[</span><span class="nx">item</span><span class="p">.</span><span class="nx">Key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">item</span><span class="p">.</span><span class="nx">Val</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">tmp</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Iterator callback,called for every key,value found in
+</span></span></span><span class="line"><span class="cl"><span class="c1">// maps. RLock is held for all calls for a given shard
+</span></span></span><span class="line"><span class="cl"><span class="c1">// therefore callback sess consistent view of a shard,
+</span></span></span><span class="line"><span class="cl"><span class="c1">// but not across the shards
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">type</span> <span class="nx">IterCb</span> <span class="kd">func</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Callback based iterator, cheapest way to read
+</span></span></span><span class="line"><span class="cl"><span class="c1">// all elements in a map.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">IterCb</span><span class="p">(</span><span class="nx">fn</span> <span class="nx">IterCb</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">idx</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">shard</span> <span class="o">:=</span> <span class="p">(</span><span class="nx">m</span><span class="p">)[</span><span class="nx">idx</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">		<span class="k">for</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nf">fn</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Keys returns all keys as []string
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">Keys</span><span class="p">()</span> <span class="p">[]</span><span class="kt">string</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">count</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">Count</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">ch</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">count</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="c1">// Foreach shard.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="nx">wg</span> <span class="o">:=</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">{}</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">SHARD_COUNT</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">shard</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">shard</span> <span class="o">*</span><span class="nx">ConcurrentMapShared</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="c1">// Foreach key, value pair.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>				<span class="nx">shard</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">				<span class="k">for</span> <span class="nx">key</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">shard</span><span class="p">.</span><span class="nx">items</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">					<span class="nx">ch</span> <span class="o">&lt;-</span> <span class="nx">key</span>
+</span></span><span class="line"><span class="cl">				<span class="p">}</span>
+</span></span><span class="line"><span class="cl">				<span class="nx">shard</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">				<span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}(</span><span class="nx">shard</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">		<span class="nb">close</span><span class="p">(</span><span class="nx">ch</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="c1">// Generate keys
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">keys</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">string</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">count</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">k</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">ch</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">keys</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">keys</span><span class="p">,</span> <span class="nx">k</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">keys</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">//Reviles ConcurrentMap &#34;private&#34; variables to json marshal.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="nx">ConcurrentMap</span><span class="p">)</span> <span class="nf">MarshalJSON</span><span class="p">()</span> <span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">// Create a temporary map, which will hold all item spread across shards.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">tmp</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{})</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="c1">// Insert items to temporary map.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">for</span> <span class="nx">item</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span><span class="p">.</span><span class="nf">IterBuffered</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">tmp</span><span class="p">[</span><span class="nx">item</span><span class="p">.</span><span class="nx">Key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">item</span><span class="p">.</span><span class="nx">Val</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">json</span><span class="p">.</span><span class="nf">Marshal</span><span class="p">(</span><span class="nx">tmp</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">fnv32</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">uint32</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">hash</span> <span class="o">:=</span> <span class="nb">uint32</span><span class="p">(</span><span class="mi">2166136261</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="kd">const</span> <span class="nx">prime32</span> <span class="p">=</span> <span class="nb">uint32</span><span class="p">(</span><span class="mi">16777619</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">key</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">hash</span> <span class="o">*=</span> <span class="nx">prime32</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">hash</span> <span class="p">^=</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">key</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">hash</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Concurrent map uses Interface{} as its value, therefor JSON Unmarshal
+</span></span></span><span class="line"><span class="cl"><span class="c1">// will probably won&#39;t know which to type to unmarshal into, in such case
+</span></span></span><span class="line"><span class="cl"><span class="c1">// we&#39;ll end up with a value of type map[string]interface{}, In most cases this isn&#39;t
+</span></span></span><span class="line"><span class="cl"><span class="c1">// out value type, this is why we&#39;ve decided to remove this functionality.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl"><span class="c1">// func (m *ConcurrentMap) UnmarshalJSON(b []byte) (err error) {
+</span></span></span><span class="line"><span class="cl"><span class="c1">// 	// Reverse process of Marshal.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl"><span class="c1">// 	tmp := make(map[string]interface{})
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl"><span class="c1">// 	// Unmarshal into a single map.
+</span></span></span><span class="line"><span class="cl"><span class="c1">// 	if err := json.Unmarshal(b, &amp;tmp); err != nil {
+</span></span></span><span class="line"><span class="cl"><span class="c1">// 		return nil
+</span></span></span><span class="line"><span class="cl"><span class="c1">// 	}
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl"><span class="c1">// 	// foreach key,value pair in temporary map insert into our concurrent map.
+</span></span></span><span class="line"><span class="cl"><span class="c1">// 	for key, val := range tmp {
+</span></span></span><span class="line"><span class="cl"><span class="c1">// 		m.Set(key, val)
+</span></span></span><span class="line"><span class="cl"><span class="c1">// 	}
+</span></span></span><span class="line"><span class="cl"><span class="c1">// 	return nil
+</span></span></span><span class="line"><span class="cl"><span class="c1">// }
+</span></span></span></code></pre></td></tr></table>
 </div>
 </div>
     </div>
@@ -880,7 +878,7 @@
 </div>
 <footer class="post-footer">
       <div class="post-tags">
-          <a href="/tags/go/">Go</a>
+          <a href="/tags/go%E4%B8%89%E6%96%B9%E5%BA%93/">Go三方库</a>
           </div>
       <nav class="post-nav">
         <a class="prev" href="/post/grpc%E7%9A%84clientconn%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/">
@@ -951,7 +949,7 @@
 
 
 
-<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
   <script type="text/javascript">
     window.MathJax = {
       tex: {

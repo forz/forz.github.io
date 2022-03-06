@@ -23,7 +23,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.92.2 with theme even" />
+<meta name="generator" content="Hugo 0.93.2 with theme even" />
 
 
 <link rel="canonical" href="/post/%E4%BD%BF%E7%94%A8%E4%BA%92%E6%96%A5%E9%94%81%E6%9D%A1%E4%BB%B6%E5%8F%98%E9%87%8F%E5%AE%9E%E7%8E%B0%E8%AF%BB%E5%86%99%E9%94%81/" />
@@ -247,89 +247,89 @@
 </span><span class="lnt">82
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="k">typedef</span> <span class="k">struct</span>
-<span class="p">{</span>
-   <span class="n">pthread_mutex_t</span> <span class="n">rw_mutex</span><span class="p">;</span> <span class="c1">//对整个结构体提供互斥访问
-</span><span class="c1"></span>   <span class="n">pthread_cond_t</span> <span class="n">rw_condreaders</span><span class="p">;</span><span class="c1">//用于通知申请读锁的线程
-</span><span class="c1"></span>   <span class="n">pthread_cond_t</span> <span class="n">rw_condwriters</span><span class="p">;</span><span class="c1">//用于通知申请写锁的线程
-</span><span class="c1"></span>   <span class="kt">int</span> <span class="n">rw_waitreaders</span><span class="p">;</span> <span class="c1">//等待申请读锁的线程数
-</span><span class="c1"></span>   <span class="kt">int</span> <span class="n">rw_waitwriters</span><span class="p">;</span> <span class="c1">//等待申请写锁的线程数
-</span><span class="c1"></span>   <span class="kt">int</span> <span class="n">rw_refcount</span><span class="p">;</span> <span class="c1">//表示读写锁的状态，如果是-1表示它是一个写锁
-</span><span class="c1"></span> <span class="p">}</span><span class="n">pthread_rwlock_t</span><span class="p">;</span> <span class="c1">//0表示它是可用的，大于0表示当前容纳的读锁数量
-</span><span class="c1"></span>
-
-<span class="kt">int</span> <span class="nf">pthread_rwlock_rdlock</span><span class="p">(</span><span class="n">pthread_rwlock_t</span> <span class="o">*</span><span class="n">rw</span><span class="p">)</span> <span class="c1">//申请读锁
-</span><span class="c1"></span><span class="p">{</span>
-  <span class="kt">int</span> <span class="n">result</span><span class="p">;</span> <span class="c1">//返回值（出错状态）
-</span><span class="c1"></span>
-  <span class="n">pthread_mutex_lock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span>
-  <span class="c1">//当写锁正在使用时不能上读锁，当锁可用但有线程等待申请写锁时一样也不能上读锁,这一点体现出来“写者优先”
-</span><span class="c1"></span>  <span class="k">while</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_refcount</span><span class="o">&lt;</span><span class="mi">0</span><span class="o">||</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_waitwriters</span><span class="o">&gt;</span><span class="mi">0</span><span class="p">)</span>
-  <span class="p">{</span>
-    <span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_waitreaders</span><span class="o">++</span><span class="p">;</span>
-    <span class="n">result</span><span class="o">=</span><span class="n">pthread_cond_wait</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_condreaders</span><span class="p">,</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span><span class="c1">//等待读条件就绪
-</span><span class="c1"></span>    <span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_waitreaders</span><span class="o">--</span><span class="p">;</span>
-    <span class="k">if</span><span class="p">(</span><span class="n">result</span><span class="o">!=</span><span class="mi">0</span><span class="p">)</span>
-       <span class="k">break</span><span class="p">;</span>
-  <span class="p">}</span>
-  <span class="k">if</span><span class="p">(</span><span class="n">result</span><span class="o">==</span><span class="mi">0</span><span class="p">)</span>
-       <span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_refcount</span><span class="o">++</span><span class="p">;</span> <span class="c1">//又有一个新的线程获取了读锁
-</span><span class="c1"></span>
-  <span class="n">pthread_mutex_unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span>
-  <span class="k">return</span> <span class="p">(</span><span class="n">result</span><span class="p">);</span>
-<span class="p">}</span>
-
-
-<span class="kt">int</span> <span class="nf">pthread_rwlock_wrlock</span><span class="p">(</span><span class="n">pthread_rwlock_t</span> <span class="o">*</span><span class="n">rw</span><span class="p">)</span> <span class="c1">//申请写锁
-</span><span class="c1"></span><span class="p">{</span>
-  <span class="kt">int</span> <span class="n">result</span><span class="p">;</span> <span class="c1">//返回值（出错状态）
-</span><span class="c1"></span>
-  <span class="n">pthread_mutex_lock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span>
-    <span class="c1">//这里只检查锁是否可用
-</span><span class="c1"></span>  <span class="k">while</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_refcount</span><span class="o">!=</span><span class="mi">0</span><span class="p">)</span>
- <span class="p">{</span>
-   <span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_waitwriters</span><span class="o">++</span><span class="p">;</span>
-   <span class="n">result</span><span class="o">=</span><span class="n">pthread_cond_wait</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_condwriters</span><span class="p">,</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span><span class="c1">//等待写条件就绪
-</span><span class="c1"></span>   <span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_waitwriters</span><span class="o">--</span><span class="p">;</span>
-   <span class="k">if</span><span class="p">(</span><span class="n">result</span><span class="o">!=</span><span class="mi">0</span><span class="p">)</span>
-     <span class="k">break</span><span class="p">;</span>
- <span class="p">}</span>
-  <span class="k">if</span><span class="p">(</span><span class="n">result</span><span class="o">==</span><span class="mi">0</span><span class="p">)</span>
-    <span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_refcount</span><span class="o">=-</span><span class="mi">1</span><span class="p">;</span> <span class="c1">//线程获取了写锁
-</span><span class="c1"></span>
-  <span class="n">pthread_mutex_unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span>
-  <span class="k">return</span> <span class="p">(</span><span class="n">result</span><span class="p">);</span>
-<span class="p">}</span>
-
-
-
-
-<span class="kt">int</span> <span class="nf">pthread_rwlock_unlock</span><span class="p">(</span><span class="n">pthread_rwlock_t</span> <span class="o">*</span><span class="n">rw</span><span class="p">)</span><span class="c1">//释放锁(读锁、写锁)
-</span><span class="c1"></span><span class="p">{</span>
-   <span class="kt">int</span> <span class="n">result</span><span class="p">;</span>
-
-
-  <span class="n">pthread_mutex_lock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span>
-  <span class="k">if</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">refcount</span><span class="o">&gt;</span><span class="mi">0</span><span class="p">)</span>
-     <span class="n">rw</span><span class="o">-&gt;</span><span class="n">refcount</span><span class="o">--</span><span class="p">;</span>
-  <span class="k">else</span> <span class="k">if</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">refcount</span><span class="o">==-</span><span class="mi">1</span><span class="p">)</span>
-     <span class="n">rw</span><span class="o">-&gt;</span><span class="n">refcount</span><span class="o">=</span><span class="mi">0</span><span class="p">;</span>
-  <span class="k">else</span>
-     <span class="n">printf</span><span class="p">(</span><span class="s">&#34;rw-&gt;refcount=%d</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">refcount</span><span class="p">);</span>
-    <span class="c1">//先看是否有写者在等待，如果有的话先唤醒写者，这是“写者优先”的另一体现
-</span><span class="c1"></span> <span class="k">if</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_waitwriters</span><span class="o">&gt;</span><span class="mi">0</span><span class="p">)</span>
- <span class="p">{</span><span class="c1">//不能写成if(rw-&gt;rw_waitwriters&gt;0&amp;&amp;rw-&gt;refcount==0)
-</span><span class="c1"></span>   <span class="k">if</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">refcount</span><span class="o">==</span><span class="mi">0</span><span class="p">)</span>
-      <span class="n">result</span><span class="o">=</span><span class="n">pthread_cond_signal</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_condwriters</span><span class="p">);</span>
- <span class="p">}</span>
- <span class="k">else</span> <span class="k">if</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_waitreaders</span><span class="o">&gt;</span><span class="mi">0</span><span class="p">)</span>
-   <span class="n">result</span><span class="o">=</span><span class="n">pthread_cond_signal</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_condreaders</span><span class="p">);</span>
-
-
-  <span class="n">pthread_mutex_unlock</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span>
-  <span class="k">return</span> <span class="n">result</span><span class="p">;</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">typedef</span> <span class="k">struct</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">   <span class="n">pthread_mutex_t</span> <span class="n">rw_mutex</span><span class="p">;</span> <span class="c1">//对整个结构体提供互斥访问
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>   <span class="n">pthread_cond_t</span> <span class="n">rw_condreaders</span><span class="p">;</span><span class="c1">//用于通知申请读锁的线程
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>   <span class="n">pthread_cond_t</span> <span class="n">rw_condwriters</span><span class="p">;</span><span class="c1">//用于通知申请写锁的线程
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>   <span class="kt">int</span> <span class="n">rw_waitreaders</span><span class="p">;</span> <span class="c1">//等待申请读锁的线程数
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>   <span class="kt">int</span> <span class="n">rw_waitwriters</span><span class="p">;</span> <span class="c1">//等待申请写锁的线程数
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>   <span class="kt">int</span> <span class="n">rw_refcount</span><span class="p">;</span> <span class="c1">//表示读写锁的状态，如果是-1表示它是一个写锁
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span> <span class="p">}</span><span class="n">pthread_rwlock_t</span><span class="p">;</span> <span class="c1">//0表示它是可用的，大于0表示当前容纳的读锁数量
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">pthread_rwlock_rdlock</span><span class="p">(</span><span class="n">pthread_rwlock_t</span> <span class="o">*</span><span class="n">rw</span><span class="p">)</span> <span class="c1">//申请读锁
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="kt">int</span> <span class="n">result</span><span class="p">;</span> <span class="c1">//返回值（出错状态）
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl">  <span class="n">pthread_mutex_lock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="c1">//当写锁正在使用时不能上读锁，当锁可用但有线程等待申请写锁时一样也不能上读锁,这一点体现出来“写者优先”
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="k">while</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_refcount</span><span class="o">&lt;</span><span class="mi">0</span><span class="o">||</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_waitwriters</span><span class="o">&gt;</span><span class="mi">0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_waitreaders</span><span class="o">++</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="n">result</span><span class="o">=</span><span class="n">pthread_cond_wait</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_condreaders</span><span class="p">,</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span><span class="c1">//等待读条件就绪
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_waitreaders</span><span class="o">--</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span><span class="p">(</span><span class="n">result</span><span class="o">!=</span><span class="mi">0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">       <span class="k">break</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">}</span>
+</span></span><span class="line"><span class="cl">  <span class="k">if</span><span class="p">(</span><span class="n">result</span><span class="o">==</span><span class="mi">0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">       <span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_refcount</span><span class="o">++</span><span class="p">;</span> <span class="c1">//又有一个新的线程获取了读锁
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl">  <span class="n">pthread_mutex_unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="k">return</span> <span class="p">(</span><span class="n">result</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">pthread_rwlock_wrlock</span><span class="p">(</span><span class="n">pthread_rwlock_t</span> <span class="o">*</span><span class="n">rw</span><span class="p">)</span> <span class="c1">//申请写锁
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="kt">int</span> <span class="n">result</span><span class="p">;</span> <span class="c1">//返回值（出错状态）
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl">  <span class="n">pthread_mutex_lock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">//这里只检查锁是否可用
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="k">while</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_refcount</span><span class="o">!=</span><span class="mi">0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">   <span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_waitwriters</span><span class="o">++</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="n">result</span><span class="o">=</span><span class="n">pthread_cond_wait</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_condwriters</span><span class="p">,</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span><span class="c1">//等待写条件就绪
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>   <span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_waitwriters</span><span class="o">--</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="k">if</span><span class="p">(</span><span class="n">result</span><span class="o">!=</span><span class="mi">0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">     <span class="k">break</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"> <span class="p">}</span>
+</span></span><span class="line"><span class="cl">  <span class="k">if</span><span class="p">(</span><span class="n">result</span><span class="o">==</span><span class="mi">0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_refcount</span><span class="o">=-</span><span class="mi">1</span><span class="p">;</span> <span class="c1">//线程获取了写锁
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl">  <span class="n">pthread_mutex_unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="k">return</span> <span class="p">(</span><span class="n">result</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">pthread_rwlock_unlock</span><span class="p">(</span><span class="n">pthread_rwlock_t</span> <span class="o">*</span><span class="n">rw</span><span class="p">)</span><span class="c1">//释放锁(读锁、写锁)
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">   <span class="kt">int</span> <span class="n">result</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="n">pthread_mutex_lock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="k">if</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">refcount</span><span class="o">&gt;</span><span class="mi">0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">     <span class="n">rw</span><span class="o">-&gt;</span><span class="n">refcount</span><span class="o">--</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="k">else</span> <span class="k">if</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">refcount</span><span class="o">==-</span><span class="mi">1</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">     <span class="n">rw</span><span class="o">-&gt;</span><span class="n">refcount</span><span class="o">=</span><span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="k">else</span>
+</span></span><span class="line"><span class="cl">     <span class="n">printf</span><span class="p">(</span><span class="s">&#34;rw-&gt;refcount=%d</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">refcount</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">//先看是否有写者在等待，如果有的话先唤醒写者，这是“写者优先”的另一体现
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span> <span class="k">if</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_waitwriters</span><span class="o">&gt;</span><span class="mi">0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="p">{</span><span class="c1">//不能写成if(rw-&gt;rw_waitwriters&gt;0&amp;&amp;rw-&gt;refcount==0)
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>   <span class="k">if</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">refcount</span><span class="o">==</span><span class="mi">0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="n">result</span><span class="o">=</span><span class="n">pthread_cond_signal</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_condwriters</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"> <span class="p">}</span>
+</span></span><span class="line"><span class="cl"> <span class="k">else</span> <span class="k">if</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_waitreaders</span><span class="o">&gt;</span><span class="mi">0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">   <span class="n">result</span><span class="o">=</span><span class="n">pthread_cond_signal</span><span class="p">(</span><span class="o">&amp;</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_condreaders</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="n">pthread_mutex_unlock</span><span class="p">(</span><span class="n">rw</span><span class="o">-&gt;</span><span class="n">rw_mutex</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="k">return</span> <span class="n">result</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>不能写成if(rw-&gt;rw_waitwriters&gt;0&amp;&amp;rw-&gt;refcount==0)的原因是：
 这样会造成写者&quot;饥饿&quot;,也就是应当保证，当有写者在等待申请锁的时候，不能在让读者来申请锁，否则由于读者可以多次加锁，一个持续的读请求流可能永远阻塞某个等待的写者。写成if(rw-&gt;rw_waitwriters&gt;0&amp;&amp;rw-&gt;refcount==0)，当第一个条件满足而第二个条件不满足，也就是有写者在等待，而还有读者在使用锁的情况，我们应该仅仅释放一个读锁，别的什么也不做，而这里却会执行else if，导致唤醒等待的读者，使读者获取到锁。</p>
@@ -422,7 +422,7 @@
 
 
 
-<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
   <script type="text/javascript">
     window.MathJax = {
       tex: {

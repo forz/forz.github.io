@@ -23,7 +23,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.92.2 with theme even" />
+<meta name="generator" content="Hugo 0.93.2 with theme even" />
 
 
 <link rel="canonical" href="/post/%E4%B8%80%E8%87%B4%E6%80%A7%E5%93%88%E5%B8%8C%E7%AE%97%E6%B3%95%E5%AE%9E%E7%8E%B0/" />
@@ -642,279 +642,279 @@ z相近的槽位， 我们把环拉开成一个自然数轴， 所有的槽位�
 </span><span class="lnt">272
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// An implementation of Consistent Hashing and
-</span><span class="c1">// Consistent Hashing With Bounded Loads.
-</span><span class="c1">//
-</span><span class="c1">// https://en.wikipedia.org/wiki/Consistent_hashing
-</span><span class="c1">//
-</span><span class="c1">// https://research.googleblog.com/2017/04/consistent-hashing-with-bounded-loads.html
-</span><span class="c1"></span><span class="kn">package</span> <span class="nx">consistent</span>
-
-<span class="kn">import</span> <span class="p">(</span>
-	<span class="s">&#34;encoding/binary&#34;</span>
-	<span class="s">&#34;errors&#34;</span>
-	<span class="s">&#34;fmt&#34;</span>
-	<span class="s">&#34;math&#34;</span>
-	<span class="s">&#34;sort&#34;</span>
-	<span class="s">&#34;sync&#34;</span>
-	<span class="s">&#34;sync/atomic&#34;</span>
-
-	<span class="nx">blake2b</span> <span class="s">&#34;github.com/minio/blake2b-simd&#34;</span>
-<span class="p">)</span>
-
-<span class="kd">const</span> <span class="nx">replicationFactor</span> <span class="p">=</span> <span class="mi">10</span>
-
-<span class="kd">var</span> <span class="nx">ErrNoHosts</span> <span class="p">=</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="s">&#34;no hosts added&#34;</span><span class="p">)</span>
-
-<span class="kd">type</span> <span class="nx">Host</span> <span class="kd">struct</span> <span class="p">{</span>
-	<span class="nx">Name</span> <span class="kt">string</span>
-	<span class="nx">Load</span> <span class="kt">int64</span>
-<span class="p">}</span>
-<span class="c1">// Consistent为一致性哈希算法的核心数据结构，如下：
-</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Consistent</span> <span class="kd">struct</span> <span class="p">{</span>
-	<span class="nx">hosts</span>     <span class="kd">map</span><span class="p">[</span><span class="kt">uint64</span><span class="p">]</span><span class="kt">string</span>   <span class="c1">// 存储表格散列值-表格名kv对或主机散列值-主机名kv对等，
-</span><span class="c1"></span>	<span class="nx">sortedSet</span> <span class="p">[]</span><span class="kt">uint64</span>            <span class="c1">// 表的哈希值列表，已经有序，当给一定key的哈希值，能直接用二分查找法快速检索出这个key所属表、主机的哈希值
-</span><span class="c1"></span>	<span class="nx">loadMap</span>   <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="o">*</span><span class="nx">Host</span>    <span class="c1">// 存储表名-表的kv对、主机ip地址-Host的kv对等等
-</span><span class="c1"></span>	<span class="nx">totalLoad</span> <span class="kt">int64</span>               <span class="c1">// 记录所有机器的负载
-</span><span class="c1"></span>
-	<span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>                 <span class="c1">// 避免有多个goroutine同时修改Consistent导致冲突
-</span><span class="c1"></span><span class="p">}</span>
-
-<span class="kd">func</span> <span class="nf">New</span><span class="p">()</span> <span class="o">*</span><span class="nx">Consistent</span> <span class="p">{</span>
-	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">Consistent</span><span class="p">{</span>
-		<span class="nx">hosts</span><span class="p">:</span>     <span class="kd">map</span><span class="p">[</span><span class="kt">uint64</span><span class="p">]</span><span class="kt">string</span><span class="p">{},</span>
-		<span class="nx">sortedSet</span><span class="p">:</span> <span class="p">[]</span><span class="kt">uint64</span><span class="p">{},</span>
-		<span class="nx">loadMap</span><span class="p">:</span>   <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="o">*</span><span class="nx">Host</span><span class="p">{},</span>
-	<span class="p">}</span>
-<span class="p">}</span>
-<span class="c1">// 下面是往集群添加一台机器的代码：
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">Add</span><span class="p">(</span><span class="nx">host</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span> <span class="c1">// host可以表示任意对象，如主机ip地址127.0.0.1:8000或者表名1024
-</span><span class="c1"></span>	<span class="nx">c</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>                 <span class="c1">// 加锁，避免并发修改导致的冲突
-</span><span class="c1"></span>	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-
-	<span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">];</span> <span class="nx">ok</span> <span class="p">{</span>    <span class="c1">// 如果主机或表已经存在，直接返回
-</span><span class="c1"></span>		<span class="k">return</span>
-	<span class="p">}</span>
-
-	<span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">]</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">Host</span><span class="p">{</span><span class="nx">Name</span><span class="p">:</span> <span class="nx">host</span><span class="p">,</span> <span class="nx">Load</span><span class="p">:</span> <span class="mi">0</span><span class="p">}</span>   <span class="c1">// 初始化host主机或表的负载
-</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">replicationFactor</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>       <span class="c1">// 这里replicationFactor默认为10，也就是说1个表对应10个虚表、1台机器对应10台虚拟机器，提高机器负载的均衡性
-</span><span class="c1"></span>		<span class="nx">h</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">hash</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%s%d&#34;</span><span class="p">,</span> <span class="nx">host</span><span class="p">,</span> <span class="nx">i</span><span class="p">))</span>  <span class="c1">// 求出每台虚拟机的地址或虚拟表的hash值，为uint64类型
-</span><span class="c1"></span>		<span class="nx">c</span><span class="p">.</span><span class="nx">hosts</span><span class="p">[</span><span class="nx">h</span><span class="p">]</span> <span class="p">=</span> <span class="nx">host</span>                          <span class="c1">// uint64的哈希值-主机ip地址
-</span><span class="c1"></span>		<span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">,</span> <span class="nx">h</span><span class="p">)</span>       <span class="c1">// 把计算的哈希值添加到列表
-</span><span class="c1"></span>
-	<span class="p">}</span>
-	<span class="c1">// sort hashes ascendingly
-</span><span class="c1"></span>	<span class="nx">sort</span><span class="p">.</span><span class="nf">Slice</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">j</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>   <span class="c1">// 对更新后的主机hash值列表进行排序
-</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">&lt;</span> <span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">j</span><span class="p">]</span> <span class="p">{</span>
-			<span class="k">return</span> <span class="kc">true</span>
-		<span class="p">}</span>
-		<span class="k">return</span> <span class="kc">false</span>
-	<span class="p">})</span>
-<span class="p">}</span>
-
-<span class="c1">// Returns the host that owns `key`.
-</span><span class="c1">//
-</span><span class="c1">// As described in https://en.wikipedia.org/wiki/Consistent_hashing
-</span><span class="c1">//
-</span><span class="c1">// It returns ErrNoHosts if the ring has no hosts in it.
-</span><span class="c1">// 下面是检索某个key对应的主机ip地址代码：
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="kt">string</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span> <span class="c1">// 计算某个key对应的表名或主机ip地址
-</span><span class="c1"></span>	<span class="nx">c</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
-	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
-
-	<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">hosts</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">ErrNoHosts</span>
-	<span class="p">}</span>
-
-	<span class="nx">h</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">hash</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>       <span class="c1">// 先算出key的哈希值
-</span><span class="c1"></span>	<span class="nx">idx</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">search</span><span class="p">(</span><span class="nx">h</span><span class="p">)</span>     <span class="c1">// 通过二分查找出第一个等于或比key大的主机ip地址在列表的索引值，如果找不到，就用列表第1个主机，因为有序列表可以看作是一个环，列表尾部与头部是相接的
-</span><span class="c1"></span>	<span class="k">return</span> <span class="nx">c</span><span class="p">.</span><span class="nx">hosts</span><span class="p">[</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">idx</span><span class="p">]],</span> <span class="kc">nil</span>
-<span class="p">}</span>
-
-<span class="c1">// It uses Consistent Hashing With Bounded loads
-</span><span class="c1">//
-</span><span class="c1">// https://research.googleblog.com/2017/04/consistent-hashing-with-bounded-loads.html
-</span><span class="c1">//
-</span><span class="c1">// to pick the least loaded host that can serve the key
-</span><span class="c1">//
-</span><span class="c1">// It returns ErrNoHosts if the ring has no hosts in it.
-</span><span class="c1">//
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">GetLeast</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="kt">string</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">c</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
-	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
-
-	<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">hosts</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">ErrNoHosts</span>
-	<span class="p">}</span>
-
-	<span class="nx">h</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">hash</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
-	<span class="nx">idx</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">search</span><span class="p">(</span><span class="nx">h</span><span class="p">)</span>
-
-	<span class="nx">i</span> <span class="o">:=</span> <span class="nx">idx</span>
-	<span class="k">for</span> <span class="p">{</span>
-		<span class="nx">host</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">hosts</span><span class="p">[</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">i</span><span class="p">]]</span>
-		<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nf">loadOK</span><span class="p">(</span><span class="nx">host</span><span class="p">)</span> <span class="p">{</span>
-			<span class="k">return</span> <span class="nx">host</span><span class="p">,</span> <span class="kc">nil</span>
-		<span class="p">}</span>
-		<span class="nx">i</span><span class="o">++</span>
-		<span class="k">if</span> <span class="nx">i</span> <span class="o">&gt;=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">hosts</span><span class="p">)</span> <span class="p">{</span>
-			<span class="nx">i</span> <span class="p">=</span> <span class="mi">0</span>
-		<span class="p">}</span>
-	<span class="p">}</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">search</span><span class="p">(</span><span class="nx">key</span> <span class="kt">uint64</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
-	<span class="nx">idx</span> <span class="o">:=</span> <span class="nx">sort</span><span class="p">.</span><span class="nf">Search</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">),</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>   <span class="c1">// 使用sort包查找出第一个大于或等于key值的表或主机ip
-</span><span class="c1"></span>		<span class="k">return</span> <span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="nx">key</span>
-	<span class="p">})</span>
-
-	<span class="k">if</span> <span class="nx">idx</span> <span class="o">&gt;=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">)</span> <span class="p">{</span>  <span class="c1">// 如果找不到，那么就用列表第1个元素
-</span><span class="c1"></span>		<span class="nx">idx</span> <span class="p">=</span> <span class="mi">0</span>
-	<span class="p">}</span>
-	<span class="k">return</span> <span class="nx">idx</span>
-<span class="p">}</span>
-
-<span class="c1">// Sets the load of `host` to the given `load`
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">UpdateLoad</span><span class="p">(</span><span class="nx">host</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">load</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">c</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-
-	<span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">];</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
-		<span class="k">return</span>
-	<span class="p">}</span>
-	<span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="o">-=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">].</span><span class="nx">Load</span>
-	<span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">].</span><span class="nx">Load</span> <span class="p">=</span> <span class="nx">load</span>
-	<span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="o">+=</span> <span class="nx">load</span>
-<span class="p">}</span>
-
-<span class="c1">// Increments the load of host by 1
-</span><span class="c1">//
-</span><span class="c1">// should only be used with if you obtained a host with GetLeast
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">Inc</span><span class="p">(</span><span class="nx">host</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">c</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-
-	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">].</span><span class="nx">Load</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
-	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
-<span class="p">}</span>
-
-<span class="c1">// Decrements the load of host by 1
-</span><span class="c1">//
-</span><span class="c1">// should only be used with if you obtained a host with GetLeast
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">Done</span><span class="p">(</span><span class="nx">host</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">c</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-
-	<span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">];</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
-		<span class="k">return</span>
-	<span class="p">}</span>
-	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">].</span><span class="nx">Load</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
-	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
-<span class="p">}</span>
-
-<span class="c1">// Deletes host from the ring
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">Remove</span><span class="p">(</span><span class="nx">host</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
-	<span class="nx">c</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
-	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
-
-	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">replicationFactor</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>           <span class="c1">// 把表对应的10张虚拟表或主机对应的10台虚拟机器从列表中删除
-</span><span class="c1"></span>		<span class="nx">h</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">hash</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%s%d&#34;</span><span class="p">,</span> <span class="nx">host</span><span class="p">,</span> <span class="nx">i</span><span class="p">))</span>
-		<span class="nb">delete</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">hosts</span><span class="p">,</span> <span class="nx">h</span><span class="p">)</span>
-		<span class="nx">c</span><span class="p">.</span><span class="nf">delSlice</span><span class="p">(</span><span class="nx">h</span><span class="p">)</span>
-	<span class="p">}</span>
-	<span class="nb">delete</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">,</span> <span class="nx">host</span><span class="p">)</span>                           <span class="c1">// 同时把主机的负载信息删除
-</span><span class="c1"></span>	<span class="k">return</span> <span class="kc">true</span>
-<span class="p">}</span>
-
-<span class="c1">// Return the list of hosts in the ring
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">Hosts</span><span class="p">()</span> <span class="p">(</span><span class="nx">hosts</span> <span class="p">[]</span><span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">c</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
-	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
-	<span class="k">for</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span> <span class="p">{</span>
-		<span class="nx">hosts</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">hosts</span><span class="p">,</span> <span class="nx">k</span><span class="p">)</span>
-	<span class="p">}</span>
-	<span class="k">return</span> <span class="nx">hosts</span>
-<span class="p">}</span>
-
-<span class="c1">// Returns the loads of all the hosts
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">GetLoads</span><span class="p">()</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">int64</span> <span class="p">{</span>
-	<span class="nx">loads</span> <span class="o">:=</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">int64</span><span class="p">{}</span>
-
-	<span class="k">for</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span> <span class="p">{</span>
-		<span class="nx">loads</span><span class="p">[</span><span class="nx">k</span><span class="p">]</span> <span class="p">=</span> <span class="nx">v</span><span class="p">.</span><span class="nx">Load</span>
-	<span class="p">}</span>
-	<span class="k">return</span> <span class="nx">loads</span>
-<span class="p">}</span>
-
-<span class="c1">// Returns the maximum load of the single host
-</span><span class="c1">// which is:
-</span><span class="c1">// (total_load/number_of_hosts)*1.25
-</span><span class="c1">// total_load = is the total number of active requests served by hosts
-</span><span class="c1">// for more info:
-</span><span class="c1">// https://research.googleblog.com/2017/04/consistent-hashing-with-bounded-loads.html
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">MaxLoad</span><span class="p">()</span> <span class="kt">int64</span> <span class="p">{</span>
-	<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="p">=</span> <span class="mi">1</span>
-	<span class="p">}</span>
-	<span class="kd">var</span> <span class="nx">avgLoadPerNode</span> <span class="kt">float64</span>
-	<span class="nx">avgLoadPerNode</span> <span class="p">=</span> <span class="nb">float64</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="o">/</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">)))</span>
-	<span class="k">if</span> <span class="nx">avgLoadPerNode</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="nx">avgLoadPerNode</span> <span class="p">=</span> <span class="mi">1</span>
-	<span class="p">}</span>
-	<span class="nx">avgLoadPerNode</span> <span class="p">=</span> <span class="nx">math</span><span class="p">.</span><span class="nf">Ceil</span><span class="p">(</span><span class="nx">avgLoadPerNode</span> <span class="o">*</span> <span class="mf">1.25</span><span class="p">)</span>
-	<span class="k">return</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">avgLoadPerNode</span><span class="p">)</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">loadOK</span><span class="p">(</span><span class="nx">host</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
-	<span class="c1">// a safety check if someone performed c.Done more than needed
-</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="p">=</span> <span class="mi">0</span>
-	<span class="p">}</span>
-
-	<span class="kd">var</span> <span class="nx">avgLoadPerNode</span> <span class="kt">float64</span>
-	<span class="nx">avgLoadPerNode</span> <span class="p">=</span> <span class="nb">float64</span><span class="p">((</span><span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">)))</span>
-	<span class="k">if</span> <span class="nx">avgLoadPerNode</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="nx">avgLoadPerNode</span> <span class="p">=</span> <span class="mi">1</span>
-	<span class="p">}</span>
-	<span class="nx">avgLoadPerNode</span> <span class="p">=</span> <span class="nx">math</span><span class="p">.</span><span class="nf">Ceil</span><span class="p">(</span><span class="nx">avgLoadPerNode</span> <span class="o">*</span> <span class="mf">1.25</span><span class="p">)</span>
-
-	<span class="nx">bhost</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">]</span>
-	<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
-		<span class="nb">panic</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;given host(%s) not in loadsMap&#34;</span><span class="p">,</span> <span class="nx">bhost</span><span class="p">.</span><span class="nx">Name</span><span class="p">))</span>
-	<span class="p">}</span>
-
-	<span class="k">if</span> <span class="nb">float64</span><span class="p">(</span><span class="nx">bhost</span><span class="p">.</span><span class="nx">Load</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span> <span class="o">&lt;=</span> <span class="nx">avgLoadPerNode</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="kc">true</span>
-	<span class="p">}</span>
-
-	<span class="k">return</span> <span class="kc">false</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">delSlice</span><span class="p">(</span><span class="nx">val</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">idx</span> <span class="o">:=</span> <span class="o">-</span><span class="mi">1</span>
-	<span class="nx">l</span> <span class="o">:=</span> <span class="mi">0</span>
-	<span class="nx">r</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
-	<span class="k">for</span> <span class="nx">l</span> <span class="o">&lt;=</span> <span class="nx">r</span> <span class="p">{</span>
-		<span class="nx">m</span> <span class="o">:=</span> <span class="p">(</span><span class="nx">l</span> <span class="o">+</span> <span class="nx">r</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
-		<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">m</span><span class="p">]</span> <span class="o">==</span> <span class="nx">val</span> <span class="p">{</span>
-			<span class="nx">idx</span> <span class="p">=</span> <span class="nx">m</span>
-			<span class="k">break</span>
-		<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">m</span><span class="p">]</span> <span class="p">&lt;</span> <span class="nx">val</span> <span class="p">{</span>
-			<span class="nx">l</span> <span class="p">=</span> <span class="nx">m</span> <span class="o">+</span> <span class="mi">1</span>
-		<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">m</span><span class="p">]</span> <span class="p">&gt;</span> <span class="nx">val</span> <span class="p">{</span>
-			<span class="nx">r</span> <span class="p">=</span> <span class="nx">m</span> <span class="o">-</span> <span class="mi">1</span>
-		<span class="p">}</span>
-	<span class="p">}</span>
-	<span class="k">if</span> <span class="nx">idx</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span> <span class="p">{</span>
-		<span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[:</span><span class="nx">idx</span><span class="p">],</span> <span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">idx</span><span class="o">+</span><span class="mi">1</span><span class="p">:]</span><span class="o">...</span><span class="p">)</span>
-	<span class="p">}</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">hash</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">uint64</span> <span class="p">{</span>
-	<span class="nx">out</span> <span class="o">:=</span> <span class="nx">blake2b</span><span class="p">.</span><span class="nf">Sum512</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">key</span><span class="p">))</span>
-	<span class="k">return</span> <span class="nx">binary</span><span class="p">.</span><span class="nx">LittleEndian</span><span class="p">.</span><span class="nf">Uint64</span><span class="p">(</span><span class="nx">out</span><span class="p">[:])</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">// An implementation of Consistent Hashing and
+</span></span></span><span class="line"><span class="cl"><span class="c1">// Consistent Hashing With Bounded Loads.
+</span></span></span><span class="line"><span class="cl"><span class="c1">//
+</span></span></span><span class="line"><span class="cl"><span class="c1">// https://en.wikipedia.org/wiki/Consistent_hashing
+</span></span></span><span class="line"><span class="cl"><span class="c1">//
+</span></span></span><span class="line"><span class="cl"><span class="c1">// https://research.googleblog.com/2017/04/consistent-hashing-with-bounded-loads.html
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kn">package</span> <span class="nx">consistent</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="p">(</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;encoding/binary&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;errors&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;fmt&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;math&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;sort&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;sync&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;sync/atomic&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="nx">blake2b</span> <span class="s">&#34;github.com/minio/blake2b-simd&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">const</span> <span class="nx">replicationFactor</span> <span class="p">=</span> <span class="mi">10</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">var</span> <span class="nx">ErrNoHosts</span> <span class="p">=</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="s">&#34;no hosts added&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">Host</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">Name</span> <span class="kt">string</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">Load</span> <span class="kt">int64</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="c1">// Consistent为一致性哈希算法的核心数据结构，如下：
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">type</span> <span class="nx">Consistent</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">hosts</span>     <span class="kd">map</span><span class="p">[</span><span class="kt">uint64</span><span class="p">]</span><span class="kt">string</span>   <span class="c1">// 存储表格散列值-表格名kv对或主机散列值-主机名kv对等，
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">sortedSet</span> <span class="p">[]</span><span class="kt">uint64</span>            <span class="c1">// 表的哈希值列表，已经有序，当给一定key的哈希值，能直接用二分查找法快速检索出这个key所属表、主机的哈希值
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">loadMap</span>   <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="o">*</span><span class="nx">Host</span>    <span class="c1">// 存储表名-表的kv对、主机ip地址-Host的kv对等等
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">totalLoad</span> <span class="kt">int64</span>               <span class="c1">// 记录所有机器的负载
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl">	<span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>                 <span class="c1">// 避免有多个goroutine同时修改Consistent导致冲突
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">New</span><span class="p">()</span> <span class="o">*</span><span class="nx">Consistent</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">Consistent</span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">hosts</span><span class="p">:</span>     <span class="kd">map</span><span class="p">[</span><span class="kt">uint64</span><span class="p">]</span><span class="kt">string</span><span class="p">{},</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">sortedSet</span><span class="p">:</span> <span class="p">[]</span><span class="kt">uint64</span><span class="p">{},</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">loadMap</span><span class="p">:</span>   <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="o">*</span><span class="nx">Host</span><span class="p">{},</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="c1">// 下面是往集群添加一台机器的代码：
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">Add</span><span class="p">(</span><span class="nx">host</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span> <span class="c1">// host可以表示任意对象，如主机ip地址127.0.0.1:8000或者表名1024
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">c</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>                 <span class="c1">// 加锁，避免并发修改导致的冲突
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">];</span> <span class="nx">ok</span> <span class="p">{</span>    <span class="c1">// 如果主机或表已经存在，直接返回
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">return</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">]</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">Host</span><span class="p">{</span><span class="nx">Name</span><span class="p">:</span> <span class="nx">host</span><span class="p">,</span> <span class="nx">Load</span><span class="p">:</span> <span class="mi">0</span><span class="p">}</span>   <span class="c1">// 初始化host主机或表的负载
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">replicationFactor</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>       <span class="c1">// 这里replicationFactor默认为10，也就是说1个表对应10个虚表、1台机器对应10台虚拟机器，提高机器负载的均衡性
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="nx">h</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">hash</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%s%d&#34;</span><span class="p">,</span> <span class="nx">host</span><span class="p">,</span> <span class="nx">i</span><span class="p">))</span>  <span class="c1">// 求出每台虚拟机的地址或虚拟表的hash值，为uint64类型
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="nx">c</span><span class="p">.</span><span class="nx">hosts</span><span class="p">[</span><span class="nx">h</span><span class="p">]</span> <span class="p">=</span> <span class="nx">host</span>                          <span class="c1">// uint64的哈希值-主机ip地址
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">,</span> <span class="nx">h</span><span class="p">)</span>       <span class="c1">// 把计算的哈希值添加到列表
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">// sort hashes ascendingly
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">sort</span><span class="p">.</span><span class="nf">Slice</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">j</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>   <span class="c1">// 对更新后的主机hash值列表进行排序
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">&lt;</span> <span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">j</span><span class="p">]</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">return</span> <span class="kc">true</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="kc">false</span>
+</span></span><span class="line"><span class="cl">	<span class="p">})</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Returns the host that owns `key`.
+</span></span></span><span class="line"><span class="cl"><span class="c1">//
+</span></span></span><span class="line"><span class="cl"><span class="c1">// As described in https://en.wikipedia.org/wiki/Consistent_hashing
+</span></span></span><span class="line"><span class="cl"><span class="c1">//
+</span></span></span><span class="line"><span class="cl"><span class="c1">// It returns ErrNoHosts if the ring has no hosts in it.
+</span></span></span><span class="line"><span class="cl"><span class="c1">// 下面是检索某个key对应的主机ip地址代码：
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="kt">string</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span> <span class="c1">// 计算某个key对应的表名或主机ip地址
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">c</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">hosts</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">ErrNoHosts</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="nx">h</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">hash</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>       <span class="c1">// 先算出key的哈希值
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">idx</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">search</span><span class="p">(</span><span class="nx">h</span><span class="p">)</span>     <span class="c1">// 通过二分查找出第一个等于或比key大的主机ip地址在列表的索引值，如果找不到，就用列表第1个主机，因为有序列表可以看作是一个环，列表尾部与头部是相接的
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">return</span> <span class="nx">c</span><span class="p">.</span><span class="nx">hosts</span><span class="p">[</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">idx</span><span class="p">]],</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// It uses Consistent Hashing With Bounded loads
+</span></span></span><span class="line"><span class="cl"><span class="c1">//
+</span></span></span><span class="line"><span class="cl"><span class="c1">// https://research.googleblog.com/2017/04/consistent-hashing-with-bounded-loads.html
+</span></span></span><span class="line"><span class="cl"><span class="c1">//
+</span></span></span><span class="line"><span class="cl"><span class="c1">// to pick the least loaded host that can serve the key
+</span></span></span><span class="line"><span class="cl"><span class="c1">//
+</span></span></span><span class="line"><span class="cl"><span class="c1">// It returns ErrNoHosts if the ring has no hosts in it.
+</span></span></span><span class="line"><span class="cl"><span class="c1">//
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">GetLeast</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="kt">string</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">c</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">hosts</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">ErrNoHosts</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="nx">h</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">hash</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">idx</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">search</span><span class="p">(</span><span class="nx">h</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="nx">i</span> <span class="o">:=</span> <span class="nx">idx</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">host</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">hosts</span><span class="p">[</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">i</span><span class="p">]]</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nf">loadOK</span><span class="p">(</span><span class="nx">host</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">return</span> <span class="nx">host</span><span class="p">,</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">i</span><span class="o">++</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">i</span> <span class="o">&gt;=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">hosts</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">i</span> <span class="p">=</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">search</span><span class="p">(</span><span class="nx">key</span> <span class="kt">uint64</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">idx</span> <span class="o">:=</span> <span class="nx">sort</span><span class="p">.</span><span class="nf">Search</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">),</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>   <span class="c1">// 使用sort包查找出第一个大于或等于key值的表或主机ip
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">return</span> <span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="nx">key</span>
+</span></span><span class="line"><span class="cl">	<span class="p">})</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">idx</span> <span class="o">&gt;=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">)</span> <span class="p">{</span>  <span class="c1">// 如果找不到，那么就用列表第1个元素
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="nx">idx</span> <span class="p">=</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">idx</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Sets the load of `host` to the given `load`
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">UpdateLoad</span><span class="p">(</span><span class="nx">host</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">load</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">c</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">];</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="o">-=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">].</span><span class="nx">Load</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">].</span><span class="nx">Load</span> <span class="p">=</span> <span class="nx">load</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="o">+=</span> <span class="nx">load</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Increments the load of host by 1
+</span></span></span><span class="line"><span class="cl"><span class="c1">//
+</span></span></span><span class="line"><span class="cl"><span class="c1">// should only be used with if you obtained a host with GetLeast
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">Inc</span><span class="p">(</span><span class="nx">host</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">c</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">].</span><span class="nx">Load</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Decrements the load of host by 1
+</span></span></span><span class="line"><span class="cl"><span class="c1">//
+</span></span></span><span class="line"><span class="cl"><span class="c1">// should only be used with if you obtained a host with GetLeast
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">Done</span><span class="p">(</span><span class="nx">host</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">c</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">];</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">].</span><span class="nx">Load</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Deletes host from the ring
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">Remove</span><span class="p">(</span><span class="nx">host</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">c</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">replicationFactor</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>           <span class="c1">// 把表对应的10张虚拟表或主机对应的10台虚拟机器从列表中删除
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="nx">h</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">hash</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%s%d&#34;</span><span class="p">,</span> <span class="nx">host</span><span class="p">,</span> <span class="nx">i</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">		<span class="nb">delete</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">hosts</span><span class="p">,</span> <span class="nx">h</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">c</span><span class="p">.</span><span class="nf">delSlice</span><span class="p">(</span><span class="nx">h</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nb">delete</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">,</span> <span class="nx">host</span><span class="p">)</span>                           <span class="c1">// 同时把主机的负载信息删除
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">return</span> <span class="kc">true</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Return the list of hosts in the ring
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">Hosts</span><span class="p">()</span> <span class="p">(</span><span class="nx">hosts</span> <span class="p">[]</span><span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">c</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">defer</span> <span class="nx">c</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">hosts</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">hosts</span><span class="p">,</span> <span class="nx">k</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">hosts</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Returns the loads of all the hosts
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">GetLoads</span><span class="p">()</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">int64</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">loads</span> <span class="o">:=</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">int64</span><span class="p">{}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">loads</span><span class="p">[</span><span class="nx">k</span><span class="p">]</span> <span class="p">=</span> <span class="nx">v</span><span class="p">.</span><span class="nx">Load</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">loads</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Returns the maximum load of the single host
+</span></span></span><span class="line"><span class="cl"><span class="c1">// which is:
+</span></span></span><span class="line"><span class="cl"><span class="c1">// (total_load/number_of_hosts)*1.25
+</span></span></span><span class="line"><span class="cl"><span class="c1">// total_load = is the total number of active requests served by hosts
+</span></span></span><span class="line"><span class="cl"><span class="c1">// for more info:
+</span></span></span><span class="line"><span class="cl"><span class="c1">// https://research.googleblog.com/2017/04/consistent-hashing-with-bounded-loads.html
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">MaxLoad</span><span class="p">()</span> <span class="kt">int64</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="p">=</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="kd">var</span> <span class="nx">avgLoadPerNode</span> <span class="kt">float64</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">avgLoadPerNode</span> <span class="p">=</span> <span class="nb">float64</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="o">/</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">avgLoadPerNode</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">avgLoadPerNode</span> <span class="p">=</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">avgLoadPerNode</span> <span class="p">=</span> <span class="nx">math</span><span class="p">.</span><span class="nf">Ceil</span><span class="p">(</span><span class="nx">avgLoadPerNode</span> <span class="o">*</span> <span class="mf">1.25</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">avgLoadPerNode</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">loadOK</span><span class="p">(</span><span class="nx">host</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">// a safety check if someone performed c.Done more than needed
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="p">=</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="kd">var</span> <span class="nx">avgLoadPerNode</span> <span class="kt">float64</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">avgLoadPerNode</span> <span class="p">=</span> <span class="nb">float64</span><span class="p">((</span><span class="nx">c</span><span class="p">.</span><span class="nx">totalLoad</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">avgLoadPerNode</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">avgLoadPerNode</span> <span class="p">=</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">avgLoadPerNode</span> <span class="p">=</span> <span class="nx">math</span><span class="p">.</span><span class="nf">Ceil</span><span class="p">(</span><span class="nx">avgLoadPerNode</span> <span class="o">*</span> <span class="mf">1.25</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="nx">bhost</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">loadMap</span><span class="p">[</span><span class="nx">host</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nb">panic</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;given host(%s) not in loadsMap&#34;</span><span class="p">,</span> <span class="nx">bhost</span><span class="p">.</span><span class="nx">Name</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nb">float64</span><span class="p">(</span><span class="nx">bhost</span><span class="p">.</span><span class="nx">Load</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span> <span class="o">&lt;=</span> <span class="nx">avgLoadPerNode</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="kc">true</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="kc">false</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">delSlice</span><span class="p">(</span><span class="nx">val</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">idx</span> <span class="o">:=</span> <span class="o">-</span><span class="mi">1</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">l</span> <span class="o">:=</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">r</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">l</span> <span class="o">&lt;=</span> <span class="nx">r</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">m</span> <span class="o">:=</span> <span class="p">(</span><span class="nx">l</span> <span class="o">+</span> <span class="nx">r</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">m</span><span class="p">]</span> <span class="o">==</span> <span class="nx">val</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">idx</span> <span class="p">=</span> <span class="nx">m</span>
+</span></span><span class="line"><span class="cl">			<span class="k">break</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">m</span><span class="p">]</span> <span class="p">&lt;</span> <span class="nx">val</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">l</span> <span class="p">=</span> <span class="nx">m</span> <span class="o">+</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">m</span><span class="p">]</span> <span class="p">&gt;</span> <span class="nx">val</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">r</span> <span class="p">=</span> <span class="nx">m</span> <span class="o">-</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">idx</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[:</span><span class="nx">idx</span><span class="p">],</span> <span class="nx">c</span><span class="p">.</span><span class="nx">sortedSet</span><span class="p">[</span><span class="nx">idx</span><span class="o">+</span><span class="mi">1</span><span class="p">:]</span><span class="o">...</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Consistent</span><span class="p">)</span> <span class="nf">hash</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">uint64</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">out</span> <span class="o">:=</span> <span class="nx">blake2b</span><span class="p">.</span><span class="nf">Sum512</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">key</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">binary</span><span class="p">.</span><span class="nx">LittleEndian</span><span class="p">.</span><span class="nf">Uint64</span><span class="p">(</span><span class="nx">out</span><span class="p">[:])</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><h2 id="跳跃一致性哈希法">跳跃一致性哈希法</h2>
 <p>对于分布式存储系统，当一个节点失效时，我们并不期望它被移除，而是使用备份节点替换它，或者将它恢复起来，因为我们不期望丢掉它上面的数据。对于这种情况(节点可以扩容，但是不会移除节点)，Google的 John Lamping, Eric Veach提供一个高效的几乎不占用持久内存的算法： 跳跃一致性哈希。</p>
@@ -935,19 +935,19 @@ z相近的槽位， 我们把环拉开成一个自然数轴， 所有的槽位�
 </span><span class="lnt">12
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">JumpHash</span><span class="p">(</span><span class="nx">key</span> <span class="kt">uint64</span><span class="p">,</span> <span class="nx">buckets</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
-	<span class="kd">var</span> <span class="nx">b</span><span class="p">,</span> <span class="nx">j</span> <span class="kt">int64</span>
-	<span class="k">if</span> <span class="nx">buckets</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="nx">buckets</span> <span class="p">=</span> <span class="mi">1</span>
-	<span class="p">}</span>
-	<span class="k">for</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">buckets</span><span class="p">)</span> <span class="p">{</span>
-		<span class="nx">b</span> <span class="p">=</span> <span class="nx">j</span>
-		<span class="nx">key</span> <span class="p">=</span> <span class="nx">key</span><span class="o">*</span><span class="mi">2862933555777941757</span> <span class="o">+</span> <span class="mi">1</span>
-		<span class="nx">j</span> <span class="p">=</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">b</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nb">int64</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">&lt;&lt;</span><span class="mi">31</span><span class="p">)</span> <span class="o">/</span> <span class="nb">float64</span><span class="p">((</span><span class="nx">key</span><span class="o">&gt;&gt;</span><span class="mi">33</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span><span class="p">)))</span>
-	<span class="p">}</span>
-	<span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">JumpHash</span><span class="p">(</span><span class="nx">key</span> <span class="kt">uint64</span><span class="p">,</span> <span class="nx">buckets</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="kd">var</span> <span class="nx">b</span><span class="p">,</span> <span class="nx">j</span> <span class="kt">int64</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">buckets</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">buckets</span> <span class="p">=</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">buckets</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">b</span> <span class="p">=</span> <span class="nx">j</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">key</span> <span class="p">=</span> <span class="nx">key</span><span class="o">*</span><span class="mi">2862933555777941757</span> <span class="o">+</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">j</span> <span class="p">=</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">b</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nb">int64</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">&lt;&lt;</span><span class="mi">31</span><span class="p">)</span> <span class="o">/</span> <span class="nb">float64</span><span class="p">((</span><span class="nx">key</span><span class="o">&gt;&gt;</span><span class="mi">33</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>以上就是算法的全部代码，输入参数分别是64位的key，桶的数量（一般对应服务器的数量），输出是一个桶的编号（从0开始）。</p>
 <h3 id="算法原理">算法原理</h3>
@@ -981,16 +981,16 @@ z相近的槽位， 我们把环拉开成一个自然数轴， 所有的槽位�
 </span><span class="lnt">9
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kt">int</span> <span class="nf">ch</span><span class="p">(</span><span class="kt">int</span> <span class="nx">k</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">num_buckets</span><span class="p">)</span> <span class="p">{</span>
-    <span class="nx">random</span><span class="p">.</span><span class="nf">seed</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span> <span class="p">;</span>
-    <span class="kt">int</span> <span class="nx">b</span> <span class="p">=</span> <span class="mi">0</span><span class="p">;</span> <span class="c1">// This will track ch(key, j +1) .
-</span><span class="c1"></span>    <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="nx">j</span> <span class="p">=</span> <span class="mi">1</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">num_buckets</span><span class="p">;</span> <span class="nx">j</span> <span class="o">++</span><span class="p">)</span> <span class="p">{</span>
-        <span class="k">if</span> <span class="p">(</span><span class="nx">random</span><span class="p">.</span><span class="nf">next</span><span class="p">()</span> <span class="p">&lt;</span> <span class="mf">1.0</span><span class="o">/</span><span class="p">(</span><span class="nx">j</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span> <span class="p">)</span> <span class="nx">b</span> <span class="p">=</span> <span class="nx">j</span> <span class="p">;</span>
-    <span class="p">}</span>
-    <span class="k">return</span> <span class="nx">b</span><span class="p">;</span>
-<span class="p">}</span>
-<span class="c1">//代码中的random.next()产生[0,1)的随机数，随机数序列只和key有关，key为随机种子。
-</span></code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">ch</span><span class="p">(</span><span class="kt">int</span> <span class="nx">k</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">num_buckets</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">random</span><span class="p">.</span><span class="nf">seed</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span> <span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">int</span> <span class="nx">b</span> <span class="p">=</span> <span class="mi">0</span><span class="p">;</span> <span class="c1">// This will track ch(key, j +1) .
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="nx">j</span> <span class="p">=</span> <span class="mi">1</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">num_buckets</span><span class="p">;</span> <span class="nx">j</span> <span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="nx">random</span><span class="p">.</span><span class="nf">next</span><span class="p">()</span> <span class="p">&lt;</span> <span class="mf">1.0</span><span class="o">/</span><span class="p">(</span><span class="nx">j</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span> <span class="p">)</span> <span class="nx">b</span> <span class="p">=</span> <span class="nx">j</span> <span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="nx">b</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="c1">//代码中的random.next()产生[0,1)的随机数，随机数序列只和key有关，key为随机种子。
+</span></span></span></code></pre></td></tr></table>
 </div>
 </div><p>下面的图8.2是对这个函数的一个演绎。 n 从 1 变化到 5 的过程中， k1 和 k2 每一次都要根据随机序列相应的值和目标分布 1/n 的比较， 来决定留在原来的槽位还是跳到新槽位。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20191010135133.jpg" alt=""></p>
@@ -1020,18 +1020,18 @@ z相近的槽位， 我们把环拉开成一个自然数轴， 所有的槽位�
 </span><span class="lnt">11
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kt">int</span> <span class="nf">ch</span><span class="p">(</span><span class="kt">int</span> <span class="nx">key</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">num_buckets</span><span class="p">)</span> <span class="p">{</span>
-    <span class="nx">random</span><span class="p">.</span><span class="nf">seed</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span><span class="err">;</span>
-    <span class="kt">int</span> <span class="nx">b</span> <span class="p">=</span> <span class="o">-</span><span class="mi">1</span><span class="err">;</span> <span class="c1">// bucket number before the previous jump
-</span><span class="c1"></span>    <span class="kt">int</span> <span class="nx">j</span> <span class="p">=</span> <span class="mi">0</span><span class="err">;</span> <span class="c1">// bucket number before the current jump
-</span><span class="c1"></span>    <span class="nf">while</span> <span class="p">(</span><span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">num_buckets</span><span class="p">)</span> <span class="p">{</span>
-        <span class="nx">b</span> <span class="p">=</span> <span class="nx">j</span><span class="err">;</span>
-        <span class="nx">r</span> <span class="p">=</span> <span class="nx">random</span><span class="p">.</span><span class="nf">next</span><span class="p">()</span><span class="err">;</span>
-        <span class="nx">j</span> <span class="p">=</span> <span class="nf">floor</span><span class="p">((</span><span class="nx">b</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="nx">r</span><span class="p">)</span><span class="err">;</span>
-    <span class="p">}</span>
-    <span class="k">return</span> <span class="p">=</span> <span class="nx">b</span><span class="err">;</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">ch</span><span class="p">(</span><span class="kt">int</span> <span class="nx">key</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">num_buckets</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">random</span><span class="p">.</span><span class="nf">seed</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span><span class="err">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">int</span> <span class="nx">b</span> <span class="p">=</span> <span class="o">-</span><span class="mi">1</span><span class="err">;</span> <span class="c1">// bucket number before the previous jump
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="kt">int</span> <span class="nx">j</span> <span class="p">=</span> <span class="mi">0</span><span class="err">;</span> <span class="c1">// bucket number before the current jump
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nf">while</span> <span class="p">(</span><span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">num_buckets</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">b</span> <span class="p">=</span> <span class="nx">j</span><span class="err">;</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">r</span> <span class="p">=</span> <span class="nx">random</span><span class="p">.</span><span class="nf">next</span><span class="p">()</span><span class="err">;</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">j</span> <span class="p">=</span> <span class="nf">floor</span><span class="p">((</span><span class="nx">b</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="nx">r</span><span class="p">)</span><span class="err">;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="p">=</span> <span class="nx">b</span><span class="err">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>现在来分析下它的时间复杂度。 因为 r 的分布是均匀的， 在槽位数将变化为 i 的时候跳跃发生的概率是 1/i， 那么预期的跳跃次数就是 1/2+..+1/i+..+1/n , 调和级数和自然对数的差是收敛到一个小数的， 所以复杂度是 O(ln(n))。</p>
 <p>跳跃一致性哈希算法的复杂度是比二分查找的复杂度 O(log(n)) 要快一些的，因为有一个常数。应该是这样的:</p>
@@ -1046,9 +1046,9 @@ z相近的槽位， 我们把环拉开成一个自然数轴， 所有的槽位�
 </span><span class="lnt">2
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">key</span> <span class="p">=</span> <span class="nx">key</span><span class="o">*</span><span class="mi">2862933555777941757</span> <span class="o">+</span> <span class="mi">1</span>
-<span class="nx">j</span> <span class="p">=</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">b</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nb">int64</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">&lt;&lt;</span><span class="mi">31</span><span class="p">)</span> <span class="o">/</span> <span class="nb">float64</span><span class="p">((</span><span class="nx">key</span><span class="o">&gt;&gt;</span><span class="mi">33</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span><span class="p">)))</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="nx">key</span> <span class="p">=</span> <span class="nx">key</span><span class="o">*</span><span class="mi">2862933555777941757</span> <span class="o">+</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl"><span class="nx">j</span> <span class="p">=</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">b</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nb">int64</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">&lt;&lt;</span><span class="mi">31</span><span class="p">)</span> <span class="o">/</span> <span class="nb">float64</span><span class="p">((</span><span class="nx">key</span><span class="o">&gt;&gt;</span><span class="mi">33</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span><span class="p">)))</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>和</p>
 <div class="highlight"><div class="chroma">
@@ -1057,9 +1057,9 @@ z相近的槽位， 我们把环拉开成一个自然数轴， 所有的槽位�
 </span><span class="lnt">2
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">r</span> <span class="p">=</span> <span class="nx">random</span><span class="p">.</span><span class="nf">next</span><span class="p">()</span><span class="err">;</span>
-<span class="nx">j</span> <span class="p">=</span> <span class="nf">floor</span><span class="p">((</span><span class="nx">b</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="nx">r</span><span class="p">)</span><span class="err">;</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="nx">r</span> <span class="p">=</span> <span class="nx">random</span><span class="p">.</span><span class="nf">next</span><span class="p">()</span><span class="err">;</span>
+</span></span><span class="line"><span class="cl"><span class="nx">j</span> <span class="p">=</span> <span class="nf">floor</span><span class="p">((</span><span class="nx">b</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="nx">r</span><span class="p">)</span><span class="err">;</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>有什么关系。</p>
 <p>第一个<code>key=key*x+1</code>算是一个伪随机生成器。而<code>j=(b+1)*x/y</code>则是上面的求上界的公式，其中<code>y/x</code>通过浮点数运算来产生(0,1)内的一个随机数。</p>
@@ -1158,30 +1158,30 @@ z相近的槽位， 我们把环拉开成一个自然数轴， 所有的槽位�
 </span><span class="lnt">23
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
-<span class="kn">import</span> <span class="s">&#34;fmt&#34;</span>
-<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
-	<span class="nx">buckets</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">int</span><span class="p">]</span><span class="kt">int</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
-	<span class="nx">count</span> <span class="o">:=</span> <span class="mi">10</span>
-	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="nb">uint64</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">120000</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
-		<span class="nx">b</span> <span class="o">:=</span> <span class="nf">JumpHash</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">count</span><span class="p">)</span>
-		<span class="nx">buckets</span><span class="p">[</span><span class="nx">b</span><span class="p">]</span> <span class="p">=</span> <span class="nx">buckets</span><span class="p">[</span><span class="nx">b</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span>
-	<span class="p">}</span>
-	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;buckets: %v\n&#34;</span><span class="p">,</span> <span class="nx">buckets</span><span class="p">)</span>
-	<span class="c1">//add two buckets
-</span><span class="c1"></span>	<span class="nx">count</span> <span class="p">=</span> <span class="mi">12</span>
-	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="nb">uint64</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">120000</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
-		<span class="nx">oldBucket</span> <span class="o">:=</span> <span class="nf">JumpHash</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">count</span><span class="o">-</span><span class="mi">2</span><span class="p">)</span>
-		<span class="nx">newBucket</span> <span class="o">:=</span> <span class="nf">JumpHash</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">count</span><span class="p">)</span>
-		<span class="c1">//如果对象需要移动到新的bucket中,则首先从原来的bucket删除，再移动
-</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">oldBucket</span> <span class="o">!=</span> <span class="nx">newBucket</span> <span class="p">{</span>
-			<span class="nx">buckets</span><span class="p">[</span><span class="nx">oldBucket</span><span class="p">]</span> <span class="p">=</span> <span class="nx">buckets</span><span class="p">[</span><span class="nx">oldBucket</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span>
-			<span class="nx">buckets</span><span class="p">[</span><span class="nx">newBucket</span><span class="p">]</span> <span class="p">=</span> <span class="nx">buckets</span><span class="p">[</span><span class="nx">newBucket</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span>
-		<span class="p">}</span>
-	<span class="p">}</span>
-	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;buckets after add two servers: %v\n&#34;</span><span class="p">,</span> <span class="nx">buckets</span><span class="p">)</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kn">package</span> <span class="nx">main</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="s">&#34;fmt&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">buckets</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">int</span><span class="p">]</span><span class="kt">int</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">count</span> <span class="o">:=</span> <span class="mi">10</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="nb">uint64</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">120000</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">b</span> <span class="o">:=</span> <span class="nf">JumpHash</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">count</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">buckets</span><span class="p">[</span><span class="nx">b</span><span class="p">]</span> <span class="p">=</span> <span class="nx">buckets</span><span class="p">[</span><span class="nx">b</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;buckets: %v\n&#34;</span><span class="p">,</span> <span class="nx">buckets</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">//add two buckets
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">count</span> <span class="p">=</span> <span class="mi">12</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="nb">uint64</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">120000</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">oldBucket</span> <span class="o">:=</span> <span class="nf">JumpHash</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">count</span><span class="o">-</span><span class="mi">2</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">newBucket</span> <span class="o">:=</span> <span class="nf">JumpHash</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">count</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="c1">//如果对象需要移动到新的bucket中,则首先从原来的bucket删除，再移动
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">if</span> <span class="nx">oldBucket</span> <span class="o">!=</span> <span class="nx">newBucket</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">buckets</span><span class="p">[</span><span class="nx">oldBucket</span><span class="p">]</span> <span class="p">=</span> <span class="nx">buckets</span><span class="p">[</span><span class="nx">oldBucket</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">buckets</span><span class="p">[</span><span class="nx">newBucket</span><span class="p">]</span> <span class="p">=</span> <span class="nx">buckets</span><span class="p">[</span><span class="nx">newBucket</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;buckets after add two servers: %v\n&#34;</span><span class="p">,</span> <span class="nx">buckets</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>因为跳跃一致性哈希算法不使用节点挂掉，如果你真的有这种需求，比如你要做一个缓存系统，你可以考虑使用ketama算法，或者对跳跃一致性哈希算法改造一下：节点挂掉时我们不移除节点，只是标记这个节点不可用。当选择节点时，如果选择的节点不可用，则再一次Hash，尝试选择另外一个节点，比如下面的算法将key加1再进行选择。</p>
 <div class="highlight"><div class="chroma">
@@ -1203,22 +1203,22 @@ z相近的槽位， 我们把环拉开成一个自然数轴， 所有的槽位�
 </span><span class="lnt">15
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">JumpHash</span><span class="p">(</span><span class="nx">key</span> <span class="kt">uint64</span><span class="p">,</span> <span class="nx">buckets</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">checkAlive</span> <span class="kd">func</span><span class="p">(</span><span class="kt">int</span><span class="p">)</span> <span class="kt">bool</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
-	<span class="kd">var</span> <span class="nx">b</span><span class="p">,</span> <span class="nx">j</span> <span class="kt">int64</span> <span class="p">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span>
-	<span class="k">if</span> <span class="nx">buckets</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="nx">buckets</span> <span class="p">=</span> <span class="mi">1</span>
-	<span class="p">}</span>
-	<span class="k">for</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">buckets</span><span class="p">)</span> <span class="p">{</span>
-		<span class="nx">b</span> <span class="p">=</span> <span class="nx">j</span>
-		<span class="nx">key</span> <span class="p">=</span> <span class="nx">key</span><span class="o">*</span><span class="mi">2862933555777941757</span> <span class="o">+</span> <span class="mi">1</span>
-		<span class="nx">j</span> <span class="p">=</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">b</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nb">int64</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">&lt;&lt;</span><span class="mi">31</span><span class="p">)</span> <span class="o">/</span> <span class="nb">float64</span><span class="p">((</span><span class="nx">key</span><span class="o">&gt;&gt;</span><span class="mi">33</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span><span class="p">)))</span>
-	<span class="p">}</span>
-	<span class="k">if</span> <span class="nx">checkAlive</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nf">checkAlive</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="nx">b</span><span class="p">))</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="nf">JumpHash</span><span class="p">(</span><span class="nx">key</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span> <span class="nx">buckets</span><span class="p">,</span> <span class="nx">checkAlive</span><span class="p">)</span> <span class="c1">//最好设置深度，避免key+1一直返回当掉的服务器
-</span><span class="c1"></span>	<span class="p">}</span>
-	<span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">JumpHash</span><span class="p">(</span><span class="nx">key</span> <span class="kt">uint64</span><span class="p">,</span> <span class="nx">buckets</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">checkAlive</span> <span class="kd">func</span><span class="p">(</span><span class="kt">int</span><span class="p">)</span> <span class="kt">bool</span><span class="p">)</span> <span class="kt">int</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="kd">var</span> <span class="nx">b</span><span class="p">,</span> <span class="nx">j</span> <span class="kt">int64</span> <span class="p">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">buckets</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">buckets</span> <span class="p">=</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">buckets</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">b</span> <span class="p">=</span> <span class="nx">j</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">key</span> <span class="p">=</span> <span class="nx">key</span><span class="o">*</span><span class="mi">2862933555777941757</span> <span class="o">+</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">j</span> <span class="p">=</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">b</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nb">int64</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">&lt;&lt;</span><span class="mi">31</span><span class="p">)</span> <span class="o">/</span> <span class="nb">float64</span><span class="p">((</span><span class="nx">key</span><span class="o">&gt;&gt;</span><span class="mi">33</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">checkAlive</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nf">checkAlive</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="nx">b</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="nf">JumpHash</span><span class="p">(</span><span class="nx">key</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span> <span class="nx">buckets</span><span class="p">,</span> <span class="nx">checkAlive</span><span class="p">)</span> <span class="c1">//最好设置深度，避免key+1一直返回当掉的服务器
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>上面的算法有一点问题，就是没有设定重试的测试，如果所有的节点都挂掉，则会进入死循环，所以最好设置一下重试次数(递归次数)，超过n次还没有选择到则返回失败。</p>
 <h3 id="小结">小结</h3>
@@ -1443,7 +1443,7 @@ $$</p>
 
 
 
-<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
   <script type="text/javascript">
     window.MathJax = {
       tex: {

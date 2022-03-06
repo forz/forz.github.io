@@ -23,7 +23,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.92.2 with theme even" />
+<meta name="generator" content="Hugo 0.93.2 with theme even" />
 
 
 <link rel="canonical" href="/post/%E7%94%A8etcd%E5%AE%9E%E7%8E%B0%E9%80%89%E4%B8%BE/" />
@@ -49,7 +49,7 @@
 <meta itemprop="name" content="用eTcd实现选举">
 <meta itemprop="description" content="选举 etcd的选举则需要在我们熟悉它的一系列基本概念后，调动我们充分的想象力： 1、MVCC，key存在版本属性，没被创建时版本号为0； 2、C"><meta itemprop="datePublished" content="2019-09-07T16:32:17+00:00" />
 <meta itemprop="dateModified" content="2019-09-07T16:32:17+00:00" />
-<meta itemprop="wordCount" content="2164">
+<meta itemprop="wordCount" content="2162">
 <meta itemprop="keywords" content="" /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="用eTcd实现选举"/>
 <meta name="twitter:description" content="选举 etcd的选举则需要在我们熟悉它的一系列基本概念后，调动我们充分的想象力： 1、MVCC，key存在版本属性，没被创建时版本号为0； 2、C"/>
@@ -132,7 +132,7 @@
         <div class="post-category">
             <a href="/categories/etcd/"> etcd </a>
             </div>
-          <span class="more-meta"> 约 2164 字 </span>
+          <span class="more-meta"> 约 2162 字 </span>
           <span class="more-meta"> 预计阅读 5 分钟 </span>
         
       </div>
@@ -408,267 +408,263 @@
 </span><span class="lnt">252
 </span><span class="lnt">253
 </span><span class="lnt">254
-</span><span class="lnt">255
-</span><span class="lnt">256
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Copyright 2016 The etcd Authors
-</span><span class="c1">//
-</span><span class="c1">// Licensed under the Apache License, Version 2.0 (the &#34;License&#34;);
-</span><span class="c1">// you may not use this file except in compliance with the License.
-</span><span class="c1">// You may obtain a copy of the License at
-</span><span class="c1">//
-</span><span class="c1">//     http://www.apache.org/licenses/LICENSE-2.0
-</span><span class="c1">//
-</span><span class="c1">// Unless required by applicable law or agreed to in writing, software
-</span><span class="c1">// distributed under the License is distributed on an &#34;AS IS&#34; BASIS,
-</span><span class="c1">// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-</span><span class="c1">// See the License for the specific language governing permissions and
-</span><span class="c1">// limitations under the License.
-</span><span class="c1"></span>
-<span class="kn">package</span> <span class="nx">concurrency</span>
-
-<span class="kn">import</span> <span class="p">(</span>
-	<span class="s">&#34;context&#34;</span>
-	<span class="s">&#34;errors&#34;</span>
-	<span class="s">&#34;fmt&#34;</span>
-
-	<span class="nx">v3</span> <span class="s">&#34;github.com/coreos/etcd/clientv3&#34;</span>
-	<span class="nx">pb</span> <span class="s">&#34;github.com/coreos/etcd/etcdserver/etcdserverpb&#34;</span>
-	<span class="s">&#34;github.com/coreos/etcd/mvcc/mvccpb&#34;</span>
-<span class="p">)</span>
-
-<span class="kd">var</span> <span class="p">(</span>
-	<span class="nx">ErrElectionNotLeader</span> <span class="p">=</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="s">&#34;election: not leader&#34;</span><span class="p">)</span>
-	<span class="nx">ErrElectionNoLeader</span>  <span class="p">=</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="s">&#34;election: no leader&#34;</span><span class="p">)</span>
-<span class="p">)</span>
-
-<span class="kd">type</span> <span class="nx">Election</span> <span class="kd">struct</span> <span class="p">{</span>
-	<span class="nx">session</span> <span class="o">*</span><span class="nx">Session</span>
-
-	<span class="nx">keyPrefix</span> <span class="kt">string</span>
-
-	<span class="nx">leaderKey</span>     <span class="kt">string</span>
-	<span class="nx">leaderRev</span>     <span class="kt">int64</span>
-	<span class="nx">leaderSession</span> <span class="o">*</span><span class="nx">Session</span>
-	<span class="nx">hdr</span>           <span class="o">*</span><span class="nx">pb</span><span class="p">.</span><span class="nx">ResponseHeader</span>
-<span class="p">}</span>
-
-<span class="c1">// NewElection returns a new election on a given key prefix.
-</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewElection</span><span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Session</span><span class="p">,</span> <span class="nx">pfx</span> <span class="kt">string</span><span class="p">)</span> <span class="o">*</span><span class="nx">Election</span> <span class="p">{</span>
-	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">Election</span><span class="p">{</span><span class="nx">session</span><span class="p">:</span> <span class="nx">s</span><span class="p">,</span> <span class="nx">keyPrefix</span><span class="p">:</span> <span class="nx">pfx</span> <span class="o">+</span> <span class="s">&#34;/&#34;</span><span class="p">}</span>
-<span class="p">}</span>
-
-<span class="c1">// ResumeElection initializes an election with a known leader.
-</span><span class="c1"></span><span class="kd">func</span> <span class="nf">ResumeElection</span><span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Session</span><span class="p">,</span> <span class="nx">pfx</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">leaderKey</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">leaderRev</span> <span class="kt">int64</span><span class="p">)</span> <span class="o">*</span><span class="nx">Election</span> <span class="p">{</span>
-	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">Election</span><span class="p">{</span>
-		<span class="nx">session</span><span class="p">:</span>       <span class="nx">s</span><span class="p">,</span>
-		<span class="nx">leaderKey</span><span class="p">:</span>     <span class="nx">leaderKey</span><span class="p">,</span>
-		<span class="nx">leaderRev</span><span class="p">:</span>     <span class="nx">leaderRev</span><span class="p">,</span>
-		<span class="nx">leaderSession</span><span class="p">:</span> <span class="nx">s</span><span class="p">,</span>
-	<span class="p">}</span>
-<span class="p">}</span>
-<span class="cm">/*
-</span><span class="cm"> * etcd的选举是在相应的prefix path下面创建key，该key绑定了lease并根据lease id进行命名，
-</span><span class="cm"> * key创建后就有revision号，这样使得在prefix path下的key也都是按revision有序
-</span><span class="cm"> */</span>
-<span class="c1">// Campaign puts a value as eligible for the election. It blocks until
-</span><span class="c1">// it is elected, an error occurs, or the context is cancelled.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Campaign</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">val</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
-	<span class="nx">s</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nx">session</span>
-	<span class="nx">client</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nx">session</span><span class="p">.</span><span class="nf">Client</span><span class="p">()</span>
-	<span class="c1">//真正创建的key名为：prefix + lease id
-</span><span class="c1"></span>	<span class="nx">k</span> <span class="o">:=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%s%x&#34;</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">keyPrefix</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nf">Lease</span><span class="p">())</span>
-	<span class="c1">//Txn：transaction，依靠Txn进行创建key的CAS操作，当key不存在时才会成功创建
-</span><span class="c1"></span>	<span class="nx">txn</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Txn</span><span class="p">(</span><span class="nx">ctx</span><span class="p">).</span><span class="nf">If</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">Compare</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">CreateRevision</span><span class="p">(</span><span class="nx">k</span><span class="p">),</span> <span class="s">&#34;=&#34;</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
-	<span class="nx">txn</span> <span class="p">=</span> <span class="nx">txn</span><span class="p">.</span><span class="nf">Then</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">OpPut</span><span class="p">(</span><span class="nx">k</span><span class="p">,</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithLease</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">Lease</span><span class="p">())))</span>
-	<span class="nx">txn</span> <span class="p">=</span> <span class="nx">txn</span><span class="p">.</span><span class="nf">Else</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">OpGet</span><span class="p">(</span><span class="nx">k</span><span class="p">))</span>
-	<span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">txn</span><span class="p">.</span><span class="nf">Commit</span><span class="p">()</span>
-	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="nx">err</span>
-	<span class="p">}</span>
-	<span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderRev</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderSession</span> <span class="p">=</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span><span class="p">.</span><span class="nx">Revision</span><span class="p">,</span> <span class="nx">s</span>
-	<span class="c1">//如果key已存在
-</span><span class="c1"></span>	<span class="k">if</span> <span class="p">!</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Succeeded</span> <span class="p">{</span>
-		<span class="c1">//获取当前的kv
-</span><span class="c1"></span>		<span class="nx">kv</span> <span class="o">:=</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Responses</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nf">GetResponseRange</span><span class="p">().</span><span class="nx">Kvs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
-		<span class="nx">e</span><span class="p">.</span><span class="nx">leaderRev</span> <span class="p">=</span> <span class="nx">kv</span><span class="p">.</span><span class="nx">CreateRevision</span>
-		<span class="c1">//当key的value与当前value不等时，如果自己为leader，则不用重新执行选举直接设置value；
-</span><span class="c1"></span>		<span class="c1">//否则报错。
-</span><span class="c1"></span>		<span class="k">if</span> <span class="nb">string</span><span class="p">(</span><span class="nx">kv</span><span class="p">.</span><span class="nx">Value</span><span class="p">)</span> <span class="o">!=</span> <span class="nx">val</span> <span class="p">{</span>
-			<span class="c1">//用新值更新领导者的旧值
-</span><span class="c1"></span>			<span class="k">if</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">Proclaim</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">val</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-				<span class="nx">e</span><span class="p">.</span><span class="nf">Resign</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
-				<span class="k">return</span> <span class="nx">err</span>
-			<span class="p">}</span>
-		<span class="p">}</span>
-	<span class="p">}</span>
-	<span class="c1">//一直阻塞，直到确认自己的create revision为当前path中最小，从而确认自己当选为leader
-</span><span class="c1"></span>	<span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nf">waitDeletes</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">client</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">keyPrefix</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderRev</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
-	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="c1">// clean up in case of context cancel
-</span><span class="c1"></span>		<span class="k">select</span> <span class="p">{</span>
-		<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ctx</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
-			<span class="nx">e</span><span class="p">.</span><span class="nf">Resign</span><span class="p">(</span><span class="nx">client</span><span class="p">.</span><span class="nf">Ctx</span><span class="p">())</span>
-		<span class="k">default</span><span class="p">:</span>
-			<span class="nx">e</span><span class="p">.</span><span class="nx">leaderSession</span> <span class="p">=</span> <span class="kc">nil</span>
-		<span class="p">}</span>
-		<span class="k">return</span> <span class="nx">err</span>
-	<span class="p">}</span>
-	<span class="nx">e</span><span class="p">.</span><span class="nx">hdr</span> <span class="p">=</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span>
-
-	<span class="k">return</span> <span class="kc">nil</span>
-<span class="p">}</span>
-
-<span class="c1">// Proclaim lets the leader announce a new value without another election.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Proclaim</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">val</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
-	<span class="k">if</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderSession</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="nx">ErrElectionNotLeader</span>
-	<span class="p">}</span>
-	<span class="nx">client</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nx">session</span><span class="p">.</span><span class="nf">Client</span><span class="p">()</span>
-	<span class="nx">cmp</span> <span class="o">:=</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">Compare</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">CreateRevision</span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span><span class="p">),</span> <span class="s">&#34;=&#34;</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderRev</span><span class="p">)</span>
-	<span class="nx">txn</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Txn</span><span class="p">(</span><span class="nx">ctx</span><span class="p">).</span><span class="nf">If</span><span class="p">(</span><span class="nx">cmp</span><span class="p">)</span>
-	<span class="nx">txn</span> <span class="p">=</span> <span class="nx">txn</span><span class="p">.</span><span class="nf">Then</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">OpPut</span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span><span class="p">,</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithLease</span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">leaderSession</span><span class="p">.</span><span class="nf">Lease</span><span class="p">())))</span>
-	<span class="nx">tresp</span><span class="p">,</span> <span class="nx">terr</span> <span class="o">:=</span> <span class="nx">txn</span><span class="p">.</span><span class="nf">Commit</span><span class="p">()</span>
-	<span class="k">if</span> <span class="nx">terr</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="nx">terr</span>
-	<span class="p">}</span>
-	<span class="k">if</span> <span class="p">!</span><span class="nx">tresp</span><span class="p">.</span><span class="nx">Succeeded</span> <span class="p">{</span>
-		<span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span> <span class="p">=</span> <span class="s">&#34;&#34;</span>
-		<span class="k">return</span> <span class="nx">ErrElectionNotLeader</span>
-	<span class="p">}</span>
-
-	<span class="nx">e</span><span class="p">.</span><span class="nx">hdr</span> <span class="p">=</span> <span class="nx">tresp</span><span class="p">.</span><span class="nx">Header</span>
-	<span class="k">return</span> <span class="kc">nil</span>
-<span class="p">}</span>
-
-<span class="c1">// Resign lets a leader start a new election.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Resign</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
-	<span class="k">if</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderSession</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="kc">nil</span>
-	<span class="p">}</span>
-	<span class="nx">client</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nx">session</span><span class="p">.</span><span class="nf">Client</span><span class="p">()</span>
-	<span class="nx">cmp</span> <span class="o">:=</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">Compare</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">CreateRevision</span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span><span class="p">),</span> <span class="s">&#34;=&#34;</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderRev</span><span class="p">)</span>
-	<span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Txn</span><span class="p">(</span><span class="nx">ctx</span><span class="p">).</span><span class="nf">If</span><span class="p">(</span><span class="nx">cmp</span><span class="p">).</span><span class="nf">Then</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">OpDelete</span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span><span class="p">)).</span><span class="nf">Commit</span><span class="p">()</span>
-	<span class="k">if</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="nx">e</span><span class="p">.</span><span class="nx">hdr</span> <span class="p">=</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span>
-	<span class="p">}</span>
-	<span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span> <span class="p">=</span> <span class="s">&#34;&#34;</span>
-	<span class="nx">e</span><span class="p">.</span><span class="nx">leaderSession</span> <span class="p">=</span> <span class="kc">nil</span>
-	<span class="k">return</span> <span class="nx">err</span>
-<span class="p">}</span>
-
-<span class="c1">// Leader returns the leader value for the current election.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Leader</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">v3</span><span class="p">.</span><span class="nx">GetResponse</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">client</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nx">session</span><span class="p">.</span><span class="nf">Client</span><span class="p">()</span>
-	<span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">keyPrefix</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithFirstCreate</span><span class="p">()</span><span class="o">...</span><span class="p">)</span>
-	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
-	<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="c1">// no leader currently elected
-</span><span class="c1"></span>		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">ErrElectionNoLeader</span>
-	<span class="p">}</span>
-	<span class="k">return</span> <span class="nx">resp</span><span class="p">,</span> <span class="kc">nil</span>
-<span class="p">}</span>
-
-<span class="c1">// Observe returns a channel that reliably observes ordered leader proposals
-</span><span class="c1">// as GetResponse values on every current elected leader key. It will not
-</span><span class="c1">// necessarily fetch all historical leader updates, but will always post the
-</span><span class="c1">// most recent leader value.
-</span><span class="c1">//
-</span><span class="c1">// The channel closes when the context is canceled or the underlying watcher
-</span><span class="c1">// is otherwise disrupted.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Observe</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">v3</span><span class="p">.</span><span class="nx">GetResponse</span> <span class="p">{</span>
-	<span class="nx">retc</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">v3</span><span class="p">.</span><span class="nx">GetResponse</span><span class="p">)</span>
-	<span class="k">go</span> <span class="nx">e</span><span class="p">.</span><span class="nf">observe</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">retc</span><span class="p">)</span>
-	<span class="k">return</span> <span class="nx">retc</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">observe</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">ch</span> <span class="kd">chan</span><span class="o">&lt;-</span> <span class="nx">v3</span><span class="p">.</span><span class="nx">GetResponse</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">client</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nx">session</span><span class="p">.</span><span class="nf">Client</span><span class="p">()</span>
-
-	<span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">ch</span><span class="p">)</span>
-	<span class="k">for</span> <span class="p">{</span>
-		<span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">keyPrefix</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithFirstCreate</span><span class="p">()</span><span class="o">...</span><span class="p">)</span>
-		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-			<span class="k">return</span>
-		<span class="p">}</span>
-
-		<span class="kd">var</span> <span class="nx">kv</span> <span class="o">*</span><span class="nx">mvccpb</span><span class="p">.</span><span class="nx">KeyValue</span>
-		<span class="kd">var</span> <span class="nx">hdr</span> <span class="o">*</span><span class="nx">pb</span><span class="p">.</span><span class="nx">ResponseHeader</span>
-
-		<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
-			<span class="nx">cctx</span><span class="p">,</span> <span class="nx">cancel</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">WithCancel</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
-			<span class="c1">// wait for first key put on prefix
-</span><span class="c1"></span>			<span class="nx">opts</span> <span class="o">:=</span> <span class="p">[]</span><span class="nx">v3</span><span class="p">.</span><span class="nx">OpOption</span><span class="p">{</span><span class="nx">v3</span><span class="p">.</span><span class="nf">WithRev</span><span class="p">(</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span><span class="p">.</span><span class="nx">Revision</span><span class="p">),</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithPrefix</span><span class="p">()}</span>
-			<span class="nx">wch</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Watch</span><span class="p">(</span><span class="nx">cctx</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">keyPrefix</span><span class="p">,</span> <span class="nx">opts</span><span class="o">...</span><span class="p">)</span>
-			<span class="k">for</span> <span class="nx">kv</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
-				<span class="nx">wr</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">wch</span>
-				<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="o">||</span> <span class="nx">wr</span><span class="p">.</span><span class="nf">Err</span><span class="p">()</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-					<span class="nf">cancel</span><span class="p">()</span>
-					<span class="k">return</span>
-				<span class="p">}</span>
-				<span class="c1">// only accept puts; a delete will make observe() spin
-</span><span class="c1"></span>				<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ev</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">wr</span><span class="p">.</span><span class="nx">Events</span> <span class="p">{</span>
-					<span class="k">if</span> <span class="nx">ev</span><span class="p">.</span><span class="nx">Type</span> <span class="o">==</span> <span class="nx">mvccpb</span><span class="p">.</span><span class="nx">PUT</span> <span class="p">{</span>
-						<span class="nx">hdr</span><span class="p">,</span> <span class="nx">kv</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">wr</span><span class="p">.</span><span class="nx">Header</span><span class="p">,</span> <span class="nx">ev</span><span class="p">.</span><span class="nx">Kv</span>
-						<span class="c1">// may have multiple revs; hdr.rev = the last rev
-</span><span class="c1"></span>						<span class="c1">// set to kv&#39;s rev in case batch has multiple Puts
-</span><span class="c1"></span>						<span class="nx">hdr</span><span class="p">.</span><span class="nx">Revision</span> <span class="p">=</span> <span class="nx">kv</span><span class="p">.</span><span class="nx">ModRevision</span>
-						<span class="k">break</span>
-					<span class="p">}</span>
-				<span class="p">}</span>
-			<span class="p">}</span>
-			<span class="nf">cancel</span><span class="p">()</span>
-		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
-			<span class="nx">hdr</span><span class="p">,</span> <span class="nx">kv</span> <span class="p">=</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span><span class="p">,</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
-		<span class="p">}</span>
-
-		<span class="k">select</span> <span class="p">{</span>
-		<span class="k">case</span> <span class="nx">ch</span> <span class="o">&lt;-</span> <span class="nx">v3</span><span class="p">.</span><span class="nx">GetResponse</span><span class="p">{</span><span class="nx">Header</span><span class="p">:</span> <span class="nx">hdr</span><span class="p">,</span> <span class="nx">Kvs</span><span class="p">:</span> <span class="p">[]</span><span class="o">*</span><span class="nx">mvccpb</span><span class="p">.</span><span class="nx">KeyValue</span><span class="p">{</span><span class="nx">kv</span><span class="p">}}:</span>
-		<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ctx</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
-			<span class="k">return</span>
-		<span class="p">}</span>
-
-		<span class="nx">cctx</span><span class="p">,</span> <span class="nx">cancel</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">WithCancel</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
-		<span class="nx">wch</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Watch</span><span class="p">(</span><span class="nx">cctx</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nx">kv</span><span class="p">.</span><span class="nx">Key</span><span class="p">),</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithRev</span><span class="p">(</span><span class="nx">hdr</span><span class="p">.</span><span class="nx">Revision</span><span class="o">+</span><span class="mi">1</span><span class="p">))</span>
-		<span class="nx">keyDeleted</span> <span class="o">:=</span> <span class="kc">false</span>
-		<span class="k">for</span> <span class="p">!</span><span class="nx">keyDeleted</span> <span class="p">{</span>
-			<span class="nx">wr</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">wch</span>
-			<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
-				<span class="nf">cancel</span><span class="p">()</span>
-				<span class="k">return</span>
-			<span class="p">}</span>
-			<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ev</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">wr</span><span class="p">.</span><span class="nx">Events</span> <span class="p">{</span>
-				<span class="k">if</span> <span class="nx">ev</span><span class="p">.</span><span class="nx">Type</span> <span class="o">==</span> <span class="nx">mvccpb</span><span class="p">.</span><span class="nx">DELETE</span> <span class="p">{</span>
-					<span class="nx">keyDeleted</span> <span class="p">=</span> <span class="kc">true</span>
-					<span class="k">break</span>
-				<span class="p">}</span>
-				<span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">wr</span><span class="p">.</span><span class="nx">Header</span>
-				<span class="nx">resp</span><span class="p">.</span><span class="nx">Kvs</span> <span class="p">=</span> <span class="p">[]</span><span class="o">*</span><span class="nx">mvccpb</span><span class="p">.</span><span class="nx">KeyValue</span><span class="p">{</span><span class="nx">ev</span><span class="p">.</span><span class="nx">Kv</span><span class="p">}</span>
-				<span class="k">select</span> <span class="p">{</span>
-				<span class="k">case</span> <span class="nx">ch</span> <span class="o">&lt;-</span> <span class="o">*</span><span class="nx">resp</span><span class="p">:</span>
-				<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">cctx</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
-					<span class="nf">cancel</span><span class="p">()</span>
-					<span class="k">return</span>
-				<span class="p">}</span>
-			<span class="p">}</span>
-		<span class="p">}</span>
-		<span class="nf">cancel</span><span class="p">()</span>
-	<span class="p">}</span>
-<span class="p">}</span>
-
-<span class="c1">// Key returns the leader key if elected, empty string otherwise.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Key</span><span class="p">()</span> <span class="kt">string</span> <span class="p">{</span> <span class="k">return</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span> <span class="p">}</span>
-
-<span class="c1">// Rev returns the leader key&#39;s creation revision, if elected.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Rev</span><span class="p">()</span> <span class="kt">int64</span> <span class="p">{</span> <span class="k">return</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderRev</span> <span class="p">}</span>
-
-<span class="c1">// Header is the response header from the last successful election proposal.
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Header</span><span class="p">()</span> <span class="o">*</span><span class="nx">pb</span><span class="p">.</span><span class="nx">ResponseHeader</span> <span class="p">{</span> <span class="k">return</span> <span class="nx">e</span><span class="p">.</span><span class="nx">hdr</span> <span class="p">}</span>
-
-
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">// Copyright 2016 The etcd Authors
+</span></span></span><span class="line"><span class="cl"><span class="c1">//
+</span></span></span><span class="line"><span class="cl"><span class="c1">// Licensed under the Apache License, Version 2.0 (the &#34;License&#34;);
+</span></span></span><span class="line"><span class="cl"><span class="c1">// you may not use this file except in compliance with the License.
+</span></span></span><span class="line"><span class="cl"><span class="c1">// You may obtain a copy of the License at
+</span></span></span><span class="line"><span class="cl"><span class="c1">//
+</span></span></span><span class="line"><span class="cl"><span class="c1">//     http://www.apache.org/licenses/LICENSE-2.0
+</span></span></span><span class="line"><span class="cl"><span class="c1">//
+</span></span></span><span class="line"><span class="cl"><span class="c1">// Unless required by applicable law or agreed to in writing, software
+</span></span></span><span class="line"><span class="cl"><span class="c1">// distributed under the License is distributed on an &#34;AS IS&#34; BASIS,
+</span></span></span><span class="line"><span class="cl"><span class="c1">// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+</span></span></span><span class="line"><span class="cl"><span class="c1">// See the License for the specific language governing permissions and
+</span></span></span><span class="line"><span class="cl"><span class="c1">// limitations under the License.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl"><span class="kn">package</span> <span class="nx">concurrency</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="p">(</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;context&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;errors&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;fmt&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="nx">v3</span> <span class="s">&#34;github.com/coreos/etcd/clientv3&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">pb</span> <span class="s">&#34;github.com/coreos/etcd/etcdserver/etcdserverpb&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;github.com/coreos/etcd/mvcc/mvccpb&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">var</span> <span class="p">(</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">ErrElectionNotLeader</span> <span class="p">=</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="s">&#34;election: not leader&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">ErrElectionNoLeader</span>  <span class="p">=</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="s">&#34;election: no leader&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">Election</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">session</span> <span class="o">*</span><span class="nx">Session</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="nx">keyPrefix</span> <span class="kt">string</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="nx">leaderKey</span>     <span class="kt">string</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">leaderRev</span>     <span class="kt">int64</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">leaderSession</span> <span class="o">*</span><span class="nx">Session</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">hdr</span>           <span class="o">*</span><span class="nx">pb</span><span class="p">.</span><span class="nx">ResponseHeader</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// NewElection returns a new election on a given key prefix.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="nf">NewElection</span><span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Session</span><span class="p">,</span> <span class="nx">pfx</span> <span class="kt">string</span><span class="p">)</span> <span class="o">*</span><span class="nx">Election</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">Election</span><span class="p">{</span><span class="nx">session</span><span class="p">:</span> <span class="nx">s</span><span class="p">,</span> <span class="nx">keyPrefix</span><span class="p">:</span> <span class="nx">pfx</span> <span class="o">+</span> <span class="s">&#34;/&#34;</span><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// ResumeElection initializes an election with a known leader.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="nf">ResumeElection</span><span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Session</span><span class="p">,</span> <span class="nx">pfx</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">leaderKey</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">leaderRev</span> <span class="kt">int64</span><span class="p">)</span> <span class="o">*</span><span class="nx">Election</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">Election</span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">session</span><span class="p">:</span>       <span class="nx">s</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">leaderKey</span><span class="p">:</span>     <span class="nx">leaderKey</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">leaderRev</span><span class="p">:</span>     <span class="nx">leaderRev</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">leaderSession</span><span class="p">:</span> <span class="nx">s</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="cm">/*
+</span></span></span><span class="line"><span class="cl"><span class="cm"> * etcd的选举是在相应的prefix path下面创建key，该key绑定了lease并根据lease id进行命名，
+</span></span></span><span class="line"><span class="cl"><span class="cm"> * key创建后就有revision号，这样使得在prefix path下的key也都是按revision有序
+</span></span></span><span class="line"><span class="cl"><span class="cm"> */</span>
+</span></span><span class="line"><span class="cl"><span class="c1">// Campaign puts a value as eligible for the election. It blocks until
+</span></span></span><span class="line"><span class="cl"><span class="c1">// it is elected, an error occurs, or the context is cancelled.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Campaign</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">val</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">s</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nx">session</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">client</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nx">session</span><span class="p">.</span><span class="nf">Client</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">//真正创建的key名为：prefix + lease id
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">k</span> <span class="o">:=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%s%x&#34;</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">keyPrefix</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nf">Lease</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">//Txn：transaction，依靠Txn进行创建key的CAS操作，当key不存在时才会成功创建
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">txn</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Txn</span><span class="p">(</span><span class="nx">ctx</span><span class="p">).</span><span class="nf">If</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">Compare</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">CreateRevision</span><span class="p">(</span><span class="nx">k</span><span class="p">),</span> <span class="s">&#34;=&#34;</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">txn</span> <span class="p">=</span> <span class="nx">txn</span><span class="p">.</span><span class="nf">Then</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">OpPut</span><span class="p">(</span><span class="nx">k</span><span class="p">,</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithLease</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">Lease</span><span class="p">())))</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">txn</span> <span class="p">=</span> <span class="nx">txn</span><span class="p">.</span><span class="nf">Else</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">OpGet</span><span class="p">(</span><span class="nx">k</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">txn</span><span class="p">.</span><span class="nf">Commit</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderRev</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderSession</span> <span class="p">=</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span><span class="p">.</span><span class="nx">Revision</span><span class="p">,</span> <span class="nx">s</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">//如果key已存在
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">if</span> <span class="p">!</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Succeeded</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="c1">//获取当前的kv
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="nx">kv</span> <span class="o">:=</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Responses</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nf">GetResponseRange</span><span class="p">().</span><span class="nx">Kvs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">e</span><span class="p">.</span><span class="nx">leaderRev</span> <span class="p">=</span> <span class="nx">kv</span><span class="p">.</span><span class="nx">CreateRevision</span>
+</span></span><span class="line"><span class="cl">		<span class="c1">//当key的value与当前value不等时，如果自己为leader，则不用重新执行选举直接设置value；
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="c1">//否则报错。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">if</span> <span class="nb">string</span><span class="p">(</span><span class="nx">kv</span><span class="p">.</span><span class="nx">Value</span><span class="p">)</span> <span class="o">!=</span> <span class="nx">val</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="c1">//用新值更新领导者的旧值
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>			<span class="k">if</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">Proclaim</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">val</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="nx">e</span><span class="p">.</span><span class="nf">Resign</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">				<span class="k">return</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">//一直阻塞，直到确认自己的create revision为当前path中最小，从而确认自己当选为leader
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nf">waitDeletes</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">client</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">keyPrefix</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderRev</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="c1">// clean up in case of context cancel
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">select</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ctx</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">e</span><span class="p">.</span><span class="nf">Resign</span><span class="p">(</span><span class="nx">client</span><span class="p">.</span><span class="nf">Ctx</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl">		<span class="k">default</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">e</span><span class="p">.</span><span class="nx">leaderSession</span> <span class="p">=</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">e</span><span class="p">.</span><span class="nx">hdr</span> <span class="p">=</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Proclaim lets the leader announce a new value without another election.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Proclaim</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">val</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderSession</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="nx">ErrElectionNotLeader</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">client</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nx">session</span><span class="p">.</span><span class="nf">Client</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">cmp</span> <span class="o">:=</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">Compare</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">CreateRevision</span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span><span class="p">),</span> <span class="s">&#34;=&#34;</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderRev</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">txn</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Txn</span><span class="p">(</span><span class="nx">ctx</span><span class="p">).</span><span class="nf">If</span><span class="p">(</span><span class="nx">cmp</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">txn</span> <span class="p">=</span> <span class="nx">txn</span><span class="p">.</span><span class="nf">Then</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">OpPut</span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span><span class="p">,</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithLease</span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">leaderSession</span><span class="p">.</span><span class="nf">Lease</span><span class="p">())))</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">tresp</span><span class="p">,</span> <span class="nx">terr</span> <span class="o">:=</span> <span class="nx">txn</span><span class="p">.</span><span class="nf">Commit</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">terr</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="nx">terr</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="p">!</span><span class="nx">tresp</span><span class="p">.</span><span class="nx">Succeeded</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span> <span class="p">=</span> <span class="s">&#34;&#34;</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="nx">ErrElectionNotLeader</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="nx">e</span><span class="p">.</span><span class="nx">hdr</span> <span class="p">=</span> <span class="nx">tresp</span><span class="p">.</span><span class="nx">Header</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Resign lets a leader start a new election.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Resign</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderSession</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">client</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nx">session</span><span class="p">.</span><span class="nf">Client</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">cmp</span> <span class="o">:=</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">Compare</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">CreateRevision</span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span><span class="p">),</span> <span class="s">&#34;=&#34;</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderRev</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Txn</span><span class="p">(</span><span class="nx">ctx</span><span class="p">).</span><span class="nf">If</span><span class="p">(</span><span class="nx">cmp</span><span class="p">).</span><span class="nf">Then</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">OpDelete</span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span><span class="p">)).</span><span class="nf">Commit</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">e</span><span class="p">.</span><span class="nx">hdr</span> <span class="p">=</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span> <span class="p">=</span> <span class="s">&#34;&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">e</span><span class="p">.</span><span class="nx">leaderSession</span> <span class="p">=</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Leader returns the leader value for the current election.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Leader</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">v3</span><span class="p">.</span><span class="nx">GetResponse</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">client</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nx">session</span><span class="p">.</span><span class="nf">Client</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">keyPrefix</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithFirstCreate</span><span class="p">()</span><span class="o">...</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="c1">// no leader currently elected
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">ErrElectionNoLeader</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">resp</span><span class="p">,</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Observe returns a channel that reliably observes ordered leader proposals
+</span></span></span><span class="line"><span class="cl"><span class="c1">// as GetResponse values on every current elected leader key. It will not
+</span></span></span><span class="line"><span class="cl"><span class="c1">// necessarily fetch all historical leader updates, but will always post the
+</span></span></span><span class="line"><span class="cl"><span class="c1">// most recent leader value.
+</span></span></span><span class="line"><span class="cl"><span class="c1">//
+</span></span></span><span class="line"><span class="cl"><span class="c1">// The channel closes when the context is canceled or the underlying watcher
+</span></span></span><span class="line"><span class="cl"><span class="c1">// is otherwise disrupted.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Observe</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">v3</span><span class="p">.</span><span class="nx">GetResponse</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">retc</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">v3</span><span class="p">.</span><span class="nx">GetResponse</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">go</span> <span class="nx">e</span><span class="p">.</span><span class="nf">observe</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">retc</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">retc</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">observe</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">ch</span> <span class="kd">chan</span><span class="o">&lt;-</span> <span class="nx">v3</span><span class="p">.</span><span class="nx">GetResponse</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">client</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nx">session</span><span class="p">.</span><span class="nf">Client</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">ch</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">keyPrefix</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithFirstCreate</span><span class="p">()</span><span class="o">...</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">return</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="kd">var</span> <span class="nx">kv</span> <span class="o">*</span><span class="nx">mvccpb</span><span class="p">.</span><span class="nx">KeyValue</span>
+</span></span><span class="line"><span class="cl">		<span class="kd">var</span> <span class="nx">hdr</span> <span class="o">*</span><span class="nx">pb</span><span class="p">.</span><span class="nx">ResponseHeader</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">cctx</span><span class="p">,</span> <span class="nx">cancel</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">WithCancel</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">			<span class="c1">// wait for first key put on prefix
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>			<span class="nx">opts</span> <span class="o">:=</span> <span class="p">[]</span><span class="nx">v3</span><span class="p">.</span><span class="nx">OpOption</span><span class="p">{</span><span class="nx">v3</span><span class="p">.</span><span class="nf">WithRev</span><span class="p">(</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span><span class="p">.</span><span class="nx">Revision</span><span class="p">),</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithPrefix</span><span class="p">()}</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">wch</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Watch</span><span class="p">(</span><span class="nx">cctx</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nx">keyPrefix</span><span class="p">,</span> <span class="nx">opts</span><span class="o">...</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">			<span class="k">for</span> <span class="nx">kv</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="nx">wr</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">wch</span>
+</span></span><span class="line"><span class="cl">				<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="o">||</span> <span class="nx">wr</span><span class="p">.</span><span class="nf">Err</span><span class="p">()</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">					<span class="nf">cancel</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">					<span class="k">return</span>
+</span></span><span class="line"><span class="cl">				<span class="p">}</span>
+</span></span><span class="line"><span class="cl">				<span class="c1">// only accept puts; a delete will make observe() spin
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>				<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ev</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">wr</span><span class="p">.</span><span class="nx">Events</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">					<span class="k">if</span> <span class="nx">ev</span><span class="p">.</span><span class="nx">Type</span> <span class="o">==</span> <span class="nx">mvccpb</span><span class="p">.</span><span class="nx">PUT</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">						<span class="nx">hdr</span><span class="p">,</span> <span class="nx">kv</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">wr</span><span class="p">.</span><span class="nx">Header</span><span class="p">,</span> <span class="nx">ev</span><span class="p">.</span><span class="nx">Kv</span>
+</span></span><span class="line"><span class="cl">						<span class="c1">// may have multiple revs; hdr.rev = the last rev
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>						<span class="c1">// set to kv&#39;s rev in case batch has multiple Puts
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>						<span class="nx">hdr</span><span class="p">.</span><span class="nx">Revision</span> <span class="p">=</span> <span class="nx">kv</span><span class="p">.</span><span class="nx">ModRevision</span>
+</span></span><span class="line"><span class="cl">						<span class="k">break</span>
+</span></span><span class="line"><span class="cl">					<span class="p">}</span>
+</span></span><span class="line"><span class="cl">				<span class="p">}</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">			<span class="nf">cancel</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">hdr</span><span class="p">,</span> <span class="nx">kv</span> <span class="p">=</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span><span class="p">,</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="k">select</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">case</span> <span class="nx">ch</span> <span class="o">&lt;-</span> <span class="nx">v3</span><span class="p">.</span><span class="nx">GetResponse</span><span class="p">{</span><span class="nx">Header</span><span class="p">:</span> <span class="nx">hdr</span><span class="p">,</span> <span class="nx">Kvs</span><span class="p">:</span> <span class="p">[]</span><span class="o">*</span><span class="nx">mvccpb</span><span class="p">.</span><span class="nx">KeyValue</span><span class="p">{</span><span class="nx">kv</span><span class="p">}}:</span>
+</span></span><span class="line"><span class="cl">		<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ctx</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
+</span></span><span class="line"><span class="cl">			<span class="k">return</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="nx">cctx</span><span class="p">,</span> <span class="nx">cancel</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">WithCancel</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">wch</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Watch</span><span class="p">(</span><span class="nx">cctx</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nx">kv</span><span class="p">.</span><span class="nx">Key</span><span class="p">),</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithRev</span><span class="p">(</span><span class="nx">hdr</span><span class="p">.</span><span class="nx">Revision</span><span class="o">+</span><span class="mi">1</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">keyDeleted</span> <span class="o">:=</span> <span class="kc">false</span>
+</span></span><span class="line"><span class="cl">		<span class="k">for</span> <span class="p">!</span><span class="nx">keyDeleted</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">wr</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">wch</span>
+</span></span><span class="line"><span class="cl">			<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="nf">cancel</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">				<span class="k">return</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">			<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ev</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">wr</span><span class="p">.</span><span class="nx">Events</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="k">if</span> <span class="nx">ev</span><span class="p">.</span><span class="nx">Type</span> <span class="o">==</span> <span class="nx">mvccpb</span><span class="p">.</span><span class="nx">DELETE</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">					<span class="nx">keyDeleted</span> <span class="p">=</span> <span class="kc">true</span>
+</span></span><span class="line"><span class="cl">					<span class="k">break</span>
+</span></span><span class="line"><span class="cl">				<span class="p">}</span>
+</span></span><span class="line"><span class="cl">				<span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">wr</span><span class="p">.</span><span class="nx">Header</span>
+</span></span><span class="line"><span class="cl">				<span class="nx">resp</span><span class="p">.</span><span class="nx">Kvs</span> <span class="p">=</span> <span class="p">[]</span><span class="o">*</span><span class="nx">mvccpb</span><span class="p">.</span><span class="nx">KeyValue</span><span class="p">{</span><span class="nx">ev</span><span class="p">.</span><span class="nx">Kv</span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">				<span class="k">select</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="k">case</span> <span class="nx">ch</span> <span class="o">&lt;-</span> <span class="o">*</span><span class="nx">resp</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">				<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">cctx</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
+</span></span><span class="line"><span class="cl">					<span class="nf">cancel</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">					<span class="k">return</span>
+</span></span><span class="line"><span class="cl">				<span class="p">}</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="nf">cancel</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Key returns the leader key if elected, empty string otherwise.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Key</span><span class="p">()</span> <span class="kt">string</span> <span class="p">{</span> <span class="k">return</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderKey</span> <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Rev returns the leader key&#39;s creation revision, if elected.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Rev</span><span class="p">()</span> <span class="kt">int64</span> <span class="p">{</span> <span class="k">return</span> <span class="nx">e</span><span class="p">.</span><span class="nx">leaderRev</span> <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Header is the response header from the last successful election proposal.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">Election</span><span class="p">)</span> <span class="nf">Header</span><span class="p">()</span> <span class="o">*</span><span class="nx">pb</span><span class="p">.</span><span class="nx">ResponseHeader</span> <span class="p">{</span> <span class="k">return</span> <span class="nx">e</span><span class="p">.</span><span class="nx">hdr</span> <span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>最后给出一个Master选举的demo，模拟的场景：每5s执行一次crontab，且只有leader节点能执行crontab；lease租约有效期设为15s，leader节点异常，最长等待15s，集群会产生新的leader执行crontab。</p>
 <div class="highlight"><div class="chroma">
@@ -747,79 +743,79 @@
 </span><span class="lnt">72
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
-
-<span class="kn">import</span> <span class="p">(</span>
-	<span class="s">&#34;context&#34;</span>
-	<span class="s">&#34;fmt&#34;</span>
-	<span class="s">&#34;go.etcd.io/etcd/v3/clientv3&#34;</span>
-	<span class="s">&#34;go.etcd.io/etcd/v3/clientv3/concurrency&#34;</span>
-	<span class="s">&#34;log&#34;</span>
-	<span class="s">&#34;time&#34;</span>
-<span class="p">)</span>
-
-<span class="kd">const</span> <span class="nx">prefix</span> <span class="p">=</span> <span class="s">&#34;/election-demo&#34;</span>
-<span class="kd">const</span> <span class="nx">prop</span> <span class="p">=</span> <span class="s">&#34;local&#34;</span>
-
-<span class="kd">var</span> <span class="nx">leaderFlag</span> <span class="kt">bool</span>
-
-<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
-	<span class="nx">endpoints</span> <span class="o">:=</span> <span class="p">[]</span><span class="kt">string</span><span class="p">{</span><span class="s">&#34;127.0.0.1:2379&#34;</span><span class="p">}</span>
-	<span class="nx">donec</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
-
-	<span class="nx">cli</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">clientv3</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nx">clientv3</span><span class="p">.</span><span class="nx">Config</span><span class="p">{</span><span class="nx">Endpoints</span><span class="p">:</span> <span class="nx">endpoints</span><span class="p">})</span>
-	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="nx">log</span><span class="p">.</span><span class="nf">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
-	<span class="p">}</span>
-	<span class="k">defer</span> <span class="nx">cli</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
-
-	<span class="k">go</span> <span class="nf">campaign</span><span class="p">(</span><span class="nx">cli</span><span class="p">,</span> <span class="nx">prefix</span><span class="p">,</span> <span class="nx">prop</span><span class="p">)</span>
-
-	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
-		<span class="nx">ticker</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTicker</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
-		<span class="k">for</span> <span class="p">{</span>
-			<span class="k">select</span> <span class="p">{</span>
-			<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ticker</span><span class="p">.</span><span class="nx">C</span><span class="p">:</span>
-				<span class="nf">doCrontab</span><span class="p">()</span>
-			<span class="p">}</span>
-		<span class="p">}</span>
-	<span class="p">}()</span>
-
-	<span class="o">&lt;-</span><span class="nx">donec</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="nf">campaign</span><span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">clientv3</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">election</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">prop</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
-	<span class="k">for</span> <span class="p">{</span>
-		<span class="nx">s</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">concurrency</span><span class="p">.</span><span class="nf">NewSession</span><span class="p">(</span><span class="nx">c</span><span class="p">,</span> <span class="nx">concurrency</span><span class="p">.</span><span class="nf">WithTTL</span><span class="p">(</span><span class="mi">15</span><span class="p">))</span>
-		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-			<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
-			<span class="k">continue</span>
-		<span class="p">}</span>
-		<span class="nx">e</span> <span class="o">:=</span> <span class="nx">concurrency</span><span class="p">.</span><span class="nf">NewElection</span><span class="p">(</span><span class="nx">s</span><span class="p">,</span> <span class="nx">election</span><span class="p">)</span>
-		<span class="nx">ctx</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">()</span>
-
-		<span class="k">if</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">Campaign</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">prop</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-			<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
-			<span class="k">continue</span>
-		<span class="p">}</span>
-
-		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;elect: success&#34;</span><span class="p">)</span>
-		<span class="nx">leaderFlag</span> <span class="p">=</span> <span class="kc">true</span>
-
-		<span class="k">select</span> <span class="p">{</span>
-		<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">s</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
-			<span class="nx">leaderFlag</span> <span class="p">=</span> <span class="kc">false</span>
-			<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;elect: expired&#34;</span><span class="p">)</span>
-		<span class="p">}</span>
-	<span class="p">}</span>
-<span class="p">}</span>
-
-<span class="kd">func</span> <span class="nf">doCrontab</span><span class="p">()</span> <span class="p">{</span>
-	<span class="k">if</span> <span class="nx">leaderFlag</span> <span class="o">==</span> <span class="kc">true</span> <span class="p">{</span>
-		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;doCrontab&#34;</span><span class="p">)</span>
-	<span class="p">}</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kn">package</span> <span class="nx">main</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="p">(</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;context&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;fmt&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;go.etcd.io/etcd/v3/clientv3&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;go.etcd.io/etcd/v3/clientv3/concurrency&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;log&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="s">&#34;time&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">const</span> <span class="nx">prefix</span> <span class="p">=</span> <span class="s">&#34;/election-demo&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="kd">const</span> <span class="nx">prop</span> <span class="p">=</span> <span class="s">&#34;local&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">var</span> <span class="nx">leaderFlag</span> <span class="kt">bool</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">endpoints</span> <span class="o">:=</span> <span class="p">[]</span><span class="kt">string</span><span class="p">{</span><span class="s">&#34;127.0.0.1:2379&#34;</span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">donec</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="nx">cli</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">clientv3</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nx">clientv3</span><span class="p">.</span><span class="nx">Config</span><span class="p">{</span><span class="nx">Endpoints</span><span class="p">:</span> <span class="nx">endpoints</span><span class="p">})</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">log</span><span class="p">.</span><span class="nf">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">defer</span> <span class="nx">cli</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">go</span> <span class="nf">campaign</span><span class="p">(</span><span class="nx">cli</span><span class="p">,</span> <span class="nx">prefix</span><span class="p">,</span> <span class="nx">prop</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">ticker</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTicker</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="k">for</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">select</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ticker</span><span class="p">.</span><span class="nx">C</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">				<span class="nf">doCrontab</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="o">&lt;-</span><span class="nx">donec</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">campaign</span><span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">clientv3</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">election</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">prop</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">s</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">concurrency</span><span class="p">.</span><span class="nf">NewSession</span><span class="p">(</span><span class="nx">c</span><span class="p">,</span> <span class="nx">concurrency</span><span class="p">.</span><span class="nf">WithTTL</span><span class="p">(</span><span class="mi">15</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">			<span class="k">continue</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">e</span> <span class="o">:=</span> <span class="nx">concurrency</span><span class="p">.</span><span class="nf">NewElection</span><span class="p">(</span><span class="nx">s</span><span class="p">,</span> <span class="nx">election</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">ctx</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">e</span><span class="p">.</span><span class="nf">Campaign</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">prop</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">			<span class="k">continue</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;elect: success&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">leaderFlag</span> <span class="p">=</span> <span class="kc">true</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="k">select</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">s</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">leaderFlag</span> <span class="p">=</span> <span class="kc">false</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;elect: expired&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">doCrontab</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">leaderFlag</span> <span class="o">==</span> <span class="kc">true</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;doCrontab&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>参考:<a href="https://cloud.tencent.com/developer/article/1458456">https://cloud.tencent.com/developer/article/1458456</a></p>
 
@@ -911,7 +907,7 @@
 
 
 
-<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
   <script type="text/javascript">
     window.MathJax = {
       tex: {
