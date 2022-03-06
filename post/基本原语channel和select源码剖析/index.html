@@ -155,6 +155,8 @@
     <li><a href="#select">select</a>
       <ul>
         <li><a href="#现象">现象</a></li>
+        <li><a href="#数据结构">数据结构</a></li>
+        <li><a href="#实现原理">实现原理</a></li>
         <li><a href="#参考">参考</a></li>
       </ul>
     </li>
@@ -2149,7 +2151,7 @@
 </div>
 </div><p>从上述代码输出的结果中我们可以看到，select 在遇到多个 &lt;-ch 同时满足可读或者可写条件时会随机选择一个 case 执行其中的代码。</p>
 <p>这个设计是在十多年前被 select 提交5引入并一直保留到现在的，虽然中间经历过一些修改6，但是语义一直都没有改变。在上面的代码中，两个 case 都是同时满足执行条件的，如果我们按照顺序依次判断，那么后面的条件永远都会得不到执行，而随机的引入就是为了避免饥饿问题的发生。</p>
-<h4 id="数据结构">数据结构</h4>
+<h3 id="数据结构">数据结构</h3>
 <p>select 在 Go 语言的源代码中不存在对应的结构体，但是我们使用 runtime.scase 结构体表示 select 控制结构中的 case：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2166,7 +2168,7 @@
 </span></span></code></pre></td></tr></table>
 </div>
 </div><p>因为非默认的 case 中都与 Channel 的发送和接收有关，所以 runtime.scase 结构体中也包含一个 runtime.hchan 类型的字段存储 case 中使用的 Channel。</p>
-<h4 id="实现原理">实现原理</h4>
+<h3 id="实现原理">实现原理</h3>
 <p>select 语句在编译期间会被转换成 OSELECT 节点。每个 OSELECT 节点都会持有一组 OCASE 节点，如果 OCASE 的执行条件是空，那就意味着这是一个 default 节点。</p>
 <p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20210611175201.png" alt=""></p>
 <p>上图展示的就是 select 语句在编译期间的结构，每一个 OCASE 既包含执行条件也包含满足条件后执行的代码。</p>
@@ -2189,7 +2191,7 @@
 <li>如果 select 语句中只包含两个 case 并且其中一个是 default，那么会使用 runtime.selectnbrecv 和 runtime.selectnbsend 非阻塞地执行收发操作；</li>
 <li>在默认情况下会通过 runtime.selectgo 获取执行 case 的索引，并通过多个 if 语句执行对应 case 中的代码；</li>
 </ol>
-<h5 id="select-不存在任何的-case">select 不存在任何的 case</h5>
+<h4 id="select-不存在任何的-case">select 不存在任何的 case</h4>
 <p>首先介绍的是最简单的情况，也就是当 select 结构中不包含任何 case。我们截取 <code>cmd/compile/internal/gc.walkselectcases</code> 函数的前几行代码：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2228,7 +2230,7 @@
 </div>
 </div><p>runtime.block 的实现非常简单，它会调用 runtime.gopark 让出当前 Goroutine 对处理器的使用权并传入等待原因 waitReasonSelectNoCases。</p>
 <p>简单总结一下，空的 select 语句会直接阻塞当前 Goroutine，导致 Goroutine 进入无法被唤醒的永久休眠状态。</p>
-<h5 id="select-只存在一个-case">select 只存在一个 case</h5>
+<h4 id="select-只存在一个-case">select 只存在一个 case</h4>
 <p>如果当前的 select 条件只包含一个 case，那么编译器会将 select 改写成 if 条件语句。下面对比了改写前后的代码：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2303,9 +2305,9 @@
 </span></span></code></pre></td></tr></table>
 </div>
 </div><p>只有一个分支的情况下，select 与 if 是没有区别的，这种优化消除了只有一个分支情况下调用 selectgo 的性能开销</p>
-<h5 id="select-存在两个-case其中一个-case-是-default">select 存在两个 case，其中一个 case 是 default</h5>
+<h4 id="select-存在两个-case其中一个-case-是-default">select 存在两个 case，其中一个 case 是 default</h4>
 <p>当 select 中仅包含两个 case，并且其中一个是 default 时，Go 语言的编译器就会认为这是一次非阻塞的收发操作。<code>cmd/compile/internal/gc.walkselectcases</code> 会对这种情况单独处理。不过在正式优化之前，该函数会将 case 中的所有 Channel 都转换成指向 Channel 的地址，我们会分别介绍非阻塞发送和非阻塞接收时，编译器进行的不同优化。</p>
-<h6 id="发送">发送</h6>
+<h5 id="发送">发送</h5>
 <p>首先是 Channel 的发送过程，当 case 中表达式的类型是 OSEND 时，编译器会使用条件语句和 <code>runtime.selectnbsend</code> 函数改写代码：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2386,7 +2388,7 @@
 </div>
 </div><p>注意，这时 chansend 的第三个参数为 false，这与前面的普通 Channel 发送操作不同， 说明这时 Select 的操作是非阻塞的。</p>
 <p>由于我们向 runtime.chansend 函数传入了非阻塞，所以在不存在接收方或者缓冲区空间不足时，当前 Goroutine 都不会阻塞而是会直接返回。</p>
-<h6 id="接收">接收</h6>
+<h5 id="接收">接收</h5>
 <p>由于从 Channel 中接收数据可能会返回一个或者两个值，所以接收数据的情况会比发送稍显复杂，不过改写的套路是差不多的：</p>
 <div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -2518,7 +2520,7 @@
 </span></span></code></pre></td></tr></table>
 </div>
 </div><p>因为接收方不需要，所以 <code>runtime.selectnbrecv</code> 会直接忽略返回的布尔值，而 <code>runtime.selectnbrecv2</code> 会将布尔值回传给调用方。与 <code>runtime.chansend</code> 一样，<code>runtime.chanrecv</code> 也提供了一个 block 参数用于控制这次接收是否阻塞。</p>
-<h5 id="select-存在多个-case">select 存在多个 case</h5>
+<h4 id="select-存在多个-case">select 存在多个 case</h4>
 <p>在默认的情况下，编译器会使用如下的流程处理 select 语句：</p>
 <ol>
 <li>将所有的 case 转换成包含 Channel 以及类型等信息的 runtime.scase 结构体；</li>
