@@ -23,7 +23,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.93.3 with theme even" />
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
 
 
 <link rel="canonical" href="/post/%E5%B9%B6%E5%8F%91%E5%8E%9F%E8%AF%ADsync-map%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90/" />
@@ -49,7 +49,7 @@
 <meta itemprop="name" content="并发原语Sync-Map源码剖析">
 <meta itemprop="description" content="Map Go 内建的 map 类型不是线程安全的,所以 Go 1.9 中增加了一个线程安全的 map,也就是 sync.Map。但是,我们一定要记住,这个 sync.Map 并不是用来替换内建"><meta itemprop="datePublished" content="2021-05-21T14:37:20+00:00" />
 <meta itemprop="dateModified" content="2021-05-21T14:37:20+00:00" />
-<meta itemprop="wordCount" content="18008">
+<meta itemprop="wordCount" content="17546">
 <meta itemprop="keywords" content="Go源码," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="并发原语Sync-Map源码剖析"/>
 <meta name="twitter:description" content="Map Go 内建的 map 类型不是线程安全的,所以 Go 1.9 中增加了一个线程安全的 map,也就是 sync.Map。但是,我们一定要记住,这个 sync.Map 并不是用来替换内建"/>
@@ -128,7 +128,7 @@
         <div class="post-category">
             <a href="/categories/go%E6%BA%90%E7%A0%81/"> Go源码 </a>
             </div>
-          <span class="more-meta"> 约 18008 字 </span>
+          <span class="more-meta"> 约 17546 字 </span>
           <span class="more-meta"> 预计阅读 36 分钟 </span>
         
       </div>
@@ -144,14 +144,14 @@
         <li><a href="#map-1">Map</a></li>
         <li><a href="#read和dirty">read和dirty</a></li>
         <li><a href="#entry">entry</a></li>
-        <li><a href="#流程图">流程图</a></li>
         <li><a href="#load">Load</a></li>
         <li><a href="#store">Store</a></li>
         <li><a href="#delete">Delete</a></li>
         <li><a href="#loadorstore">LoadOrStore</a></li>
+        <li><a href="#流程图">流程图</a></li>
         <li><a href="#range">Range</a></li>
         <li><a href="#补全len">补全Len</a></li>
-        <li><a href="#小结-1">小结</a></li>
+        <li><a href="#小结">小结</a></li>
         <li><a href="#syncmap的适用场景">sync.Map的适用场景</a></li>
         <li><a href="#警告不要拷贝syncmap">警告:不要拷贝sync.Map</a></li>
       </ul>
@@ -528,8 +528,6 @@
 <li>expunged: 也是表示被删除，但是该键只在read而没有在dirty中，这种情况出现在将read复制到dirty中，即复制的过程会先将nil标记为expunged，然后不将其复制到dirty</li>
 <li>其他: 表示存着真正的数据</li>
 </ul>
-<h3 id="流程图">流程图</h3>
-<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190125125938.png" alt=""></p>
 <h3 id="load">Load</h3>
 <p>读取时，先去read读取；如果没有，就加锁，然后去dirty读取，同时调用missLocked()，再解锁。在missLocked中，会递增misses变量，如果misses&gt;len(dirty)，那么把dirty提升为read，清空原来的dirty。</p>
 <ol>
@@ -1084,18 +1082,7 @@
 </span></span><span class="line"><span class="cl"><span class="p">}</span>
 </span></span></code></pre></td></tr></table>
 </div>
-</div><h4 id="小结">小结</h4>
-<p>小结一下：</p>
-<ul>
-<li>存储过程遵循互不影响的原则，如果在 read map 中读到，则只更新 read map，如果在 dirty map 中读到，则只更新 dirty map。</li>
-<li>优先从 read map 中读，更新失败才读 dirty map。</li>
-<li>存储新值的时候，如果 dirty map 中没有 read map 中的值，那么直接将整个 read map 同步到 dirty map。这时原来的 dirty map 被彻底覆盖（一些值依赖 GC 进行清理）。</li>
-</ul>
-<p>可以看出,Store 既可以是新增元素,也可以是更新元素。如果运气好的话,更新的是已存在的未被删除的元素,直接更新即可,不会用到锁。如果运气不好,需要更新(重用) 删除的对象、更新还未提升的 dirty 中的对象,或者新增加元素的时候就会使用到了锁,这个时候,性能就会下降。</p>
-<p>所以从这一点来看,sync.Map 适合那些只会增长的缓存系统,可以进行更新,但是不要删除,并且不要频繁地增加新元素。</p>
-<p>你可以看到，以上操作都是先从操作m.read开始的，不满足条件再加锁，然后操作m.dirty。</p>
-<p>Store可能会在某种情况下(初始化或者m.dirty刚被提升后)从m.read中复制数据(函数dirtyLocked)，如果这个时候m.read中数据量非常大，可能会影响性能。</p>
-<h3 id="delete">Delete</h3>
+</div><h3 id="delete">Delete</h3>
 <p>sync.map 的第 3 个核心方法是 Delete 方法。在 Go 1.15 中欧长坤提供了一个 LoadAndDelete 的实现,所以 Delete 方法的核心改在了对 LoadAndDelete 中实现了。</p>
 <p>删除元素,采用延迟删除，当read map存在元素时，将元素置为nil，只有在提升dirty的时候才清理删除的数,延迟删除可以避免后续获取删除的元素时候需要加锁。当read map不存在元素时，直接删除dirty map中的元素</p>
 <p>同样，删除操作还是从m.read中开始，如果这个entry不存在于m.read中，并且m.dirty中有新数据，则加锁尝试从m.dirty中删除。注意，还是要双检查的。 从m.dirty中直接删除即可，就当它没存在过.</p>
@@ -1400,7 +1387,9 @@
 </span></span><span class="line"><span class="cl"><span class="p">}</span>
 </span></span></code></pre></td></tr></table>
 </div>
-</div><h3 id="range">Range</h3>
+</div><h3 id="流程图">流程图</h3>
+<p><img src="https://blog-1257321977.cos.ap-beijing.myqcloud.com/20190125125938.png" alt=""></p>
+<h3 id="range">Range</h3>
 <p>因为for &hellip; range map是内建的语言特性，所以没有办法使用for range遍历sync.Map, 但是可以使用它的Range方法，通过回调的方式遍历。</p>
 <p>遍历获取sync.Map中所有的元素，使用的为快照方式，所以不一定是准确的。</p>
 <div class="highlight"><div class="chroma">
@@ -1539,7 +1528,7 @@
 </span></span><span class="line"><span class="cl"><span class="p">}</span>
 </span></span></code></pre></td></tr></table>
 </div>
-</div><h3 id="小结-1">小结</h3>
+</div><h3 id="小结">小结</h3>
 <p>我们来回顾一下 sync.Map 中 read map 和 dirty map 的同步过程：</p>
 <ol>
 <li>当 Store 一个新值会发生：read map –&gt; dirty map</li>
